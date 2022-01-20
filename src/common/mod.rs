@@ -1,5 +1,6 @@
 mod error;
 mod file_system;
+pub use file_system::{WritableFileWriter, RandomAccessFileReader};
 pub use error::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -106,4 +107,62 @@ pub fn get_var_uint32(data: &[u8]) -> Option<(usize, u32)> {
         }
     }
     return None;
+}
+
+pub fn decode_fixed_uint32(data: &[u8]) -> u32 {
+}
+
+pub fn difference_offset(origin: &[u8], target: &[u8]) -> usize {
+    let mut off = 0;
+    let len = std::cmp::min(origin.len(), target.len());
+    while off < len && origin[off] == target[off] {}
+    off
+}
+
+pub fn extract_user_key(key: &[u8]) -> &[u8] {
+    let l = key.len();
+    &key[..(l - 8)]
+}
+
+pub fn hash(data: &[u8], seed: u32) -> u32 {
+    const m: u32 = 0xc6a4a793;
+    const r: u32 = 24;
+    let mut h = (seed ^ (data.len() as u32 * m));
+
+    // Pick up four bytes at a time
+    let mut offset = 0;
+    while offset + 4 <= data.len() {
+        let w = decode_fixed_uint32(&data[offset..]);
+        offset += 4;
+        h += w;
+        h *= m;
+        h ^= (h >> 16);
+    }
+
+    let rest =  data.len() - offset;
+
+    // Pick up remaining bytes
+    if rest <= 3 {
+        // Note: The original hash implementation used data[i] << shift, which
+        // promotes the char to int and then performs the shift. If the char is
+        // negative, the shift is undefined behavior in C++. The hash algorithm is
+        // part of the format definition, so we cannot change it; to obtain the same
+        // behavior in a legal way we just cast to uint32_t, which will do
+        // sign-extension. To guarantee compatibility with architectures where chars
+        // are unsigned we first cast the char to int8_t.
+        h += (data[offset + 2] as u32) << 16;
+    }
+    if rest <= 2 {
+        h += (data[offset + 1] as u32) << 8;
+    }
+    if rest <= 1 {
+        h += data[offset];
+        h *= m;
+        h ^= (h >> r);
+    }
+    return h;
+}
+
+pub fn key_hash(key: &[u8]) -> u32 {
+    hash(key, 397)
 }

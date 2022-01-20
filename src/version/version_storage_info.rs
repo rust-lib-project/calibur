@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use crate::table::SortedStringTable;
+use crate::table::TableReader;
 
 pub struct VersionStorageInfo {
-    level0: Vec<Arc<dyn SortedStringTable>>,
-    base_level: Vec<Vec<Arc<dyn SortedStringTable>>>,
+    level0: Vec<Arc<dyn TableReader>>,
+    base_level: Vec<Vec<Arc<dyn TableReader>>>,
 }

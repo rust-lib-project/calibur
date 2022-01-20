@@ -8,6 +8,7 @@ mod table;
 mod version;
 mod wal;
 mod write_batch;
+mod column_family;
 
 pub use db::*;
 

@@ -1,5 +1,8 @@
-mod manifest;
-mod snapshot;
+pub mod manifest;
+pub mod snapshot;
 mod version;
-mod version_set;
-mod version_storage_info;
+pub mod version_set;
+pub mod version_storage_info;
+pub use version::*;
+
+

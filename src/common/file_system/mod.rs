@@ -1,1 +1,3 @@
-pub trait WritableFile {}
+pub trait WritableFileWriter {}
+pub trait RandomAccessFileReader {
+}

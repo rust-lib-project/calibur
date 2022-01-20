@@ -10,6 +10,7 @@ const kTypeColumnFamilyMerge: u8 = 0x6; // WAL only.
 const kTypeColumnFamilyBlobIndex: u8 = 0x10; // Blob DB only
 const kTypeBlobIndex: u8 = 0x11; // Blob DB only
 const kMaxValue: u8 = 0x7F; // Not used for storing records.
+const WRITE_BATCH_HEADER: usize = 12;
 
 const DEFERRED: u8 = 1 << 0;
 const HAS_PUT: u8 = 1 << 1;
@@ -37,6 +38,20 @@ pub enum WriteBatchItem<'a> {
 }
 
 impl WriteBatch {
+    pub fn new() -> WriteBatch {
+        WriteBatch {
+            data: vec![0; WRITE_BATCH_HEADER],
+            count: 0,
+            flag: 0,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.data.resize(WRITE_BATCH_HEADER, 0);
+        self.count = 0;
+        self.flag = 0;
+    }
+
     pub fn put_cf(&mut self, cf: u32, key: &[u8], value: &[u8]) {
         let mut tmp: [u8; 5];
         self.count += 1;
