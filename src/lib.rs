@@ -1,14 +1,16 @@
 #![allow(dead_code)]
 
+mod column_family;
 mod common;
 mod compaction;
+mod compactor;
 mod db;
 mod memtable;
 mod table;
 mod version;
 mod wal;
 mod write_batch;
-mod column_family;
+mod write_thread;
 
 pub use db::*;
 

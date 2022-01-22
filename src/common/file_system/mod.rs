@@ -1,3 +1,5 @@
-pub trait WritableFileWriter {}
-pub trait RandomAccessFileReader {
-}
+mod file;
+
+pub use file::WritableFile;
+
+pub trait RandomAccessFileReader {}

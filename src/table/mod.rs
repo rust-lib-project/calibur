@@ -1,7 +1,9 @@
 mod block_based;
-use std::sync::Arc;
-use crate::common::{RandomAccessFileReader, WritableFileWriter};
+mod table_properties;
+
 use crate::common::Result;
+use crate::common::{RandomAccessFileReader, WritableFileWriter};
+use std::sync::Arc;
 
 pub trait TableReaderIterator {
     fn valid(&self) -> bool;

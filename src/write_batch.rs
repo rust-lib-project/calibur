@@ -1,15 +1,7 @@
+use crate::common::format::*;
 use crate::common::{encode_var_uint32, get_var_int32, get_var_uint32};
 use bytes::{BufMut, BytesMut};
 
-const kTypeDeletion: u8 = 0x0;
-const kTypeValue: u8 = 0x1;
-const kTypeMerge: u8 = 0x2;
-const kTypeColumnFamilyDeletion: u8 = 0x4; // WAL only.
-const kTypeColumnFamilyValue: u8 = 0x5; // WAL only.
-const kTypeColumnFamilyMerge: u8 = 0x6; // WAL only.
-const kTypeColumnFamilyBlobIndex: u8 = 0x10; // Blob DB only
-const kTypeBlobIndex: u8 = 0x11; // Blob DB only
-const kMaxValue: u8 = 0x7F; // Not used for storing records.
 const WRITE_BATCH_HEADER: usize = 12;
 
 const DEFERRED: u8 = 1 << 0;
@@ -23,6 +15,13 @@ pub struct WriteBatch {
     data: Vec<u8>,
     count: u32,
     flag: u32,
+}
+
+pub struct WriteBatchForDB {
+    data: Vec<u8>,
+    flag: u32,
+    sequence: u64,
+    count: u32,
 }
 
 pub enum WriteBatchItem<'a> {
@@ -55,7 +54,6 @@ impl WriteBatch {
     pub fn put_cf(&mut self, cf: u32, key: &[u8], value: &[u8]) {
         let mut tmp: [u8; 5];
         self.count += 1;
-        self.set_count(self.count);
         if cf == 0 {
             self.data.put(kTypeValue);
         } else {
@@ -78,7 +76,6 @@ impl WriteBatch {
     pub fn delete_cf(&mut self, cf: u32, key: &[u8]) {
         let mut tmp: [u8; 5];
         self.count += 1;
-        self.set_count(self.count);
         if cf == 0 {
             self.data.put(kTypeDeletion);
         } else {
@@ -96,21 +93,49 @@ impl WriteBatch {
     }
 
     fn set_count(&mut self, count: u32) {
-        let c = count.to_be_bytes();
+        let c = count.to_le_bytes();
         self.data[8..].copy_from_slice(&c);
     }
 
-    fn iter<'a>(&self) -> WriteBatchIter<'a> {
-        WriteBatchIter {
-            batch: self,
-            offset: 0,
+    pub fn to_raw(&mut self) -> WriteBatchForDB {
+        self.set_count(self.count);
+        let data = std::mem::take(&mut self.data);
+        WriteBatchForDB {
+            data,
+            flag: self.flag,
+            sequence: 0,
+            count: self.count,
         }
+    }
+
+    pub fn recycle(&mut self, batch: WriteBatchForDB) {
+        self.data = batch.data;
     }
 }
 
 pub struct WriteBatchIter<'a> {
-    batch: &'a WriteBatch,
+    batch: &'a WriteBatchForDB,
+    sequence: u64,
     offset: usize,
+}
+
+impl WriteBatchForDB {
+    pub fn iter<'a>(&self) -> WriteBatchIter<'a> {
+        WriteBatchIter {
+            batch: self,
+            offset: 0,
+            sequence: 0,
+        }
+    }
+
+    pub fn set_sequence(&mut self, sequence: u64) {
+        self.data[..8].copy_from_slice(&sequence.to_le_bytes());
+        self.sequence = sequence;
+    }
+
+    pub fn count(&self) -> u32 {
+        self.count
+    }
 }
 
 impl<'a> WriteBatchIter<'a> {

@@ -1,3 +1,4 @@
+use crate::common::Result;
 use std::fs::{File, OpenOptions};
 use std::io::Cursor;
 use std::path::PathBuf;
@@ -25,3 +26,7 @@ impl Wal {
         unimplemented!()
     }
 }
+
+pub struct WalManager {}
+
+pub struct LogWriter {}
