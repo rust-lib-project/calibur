@@ -16,15 +16,16 @@ impl VersionSet {
     }
 
     pub fn set_column_family(&mut self, cf: Arc<ColumnFamily>) {
-        if cf.get_id() >= self.column_family_set.len() {
-            self.column_family_set.resize(cf.get_id() + 1, None);
+        let cf_id = cf.get_id();
+        if cf_id >= self.column_family_set.len() {
+            self.column_family_set.resize(cf_id + 1, None);
         }
-        self.column_family_set[cf.get_id()] = Some(cf);
+        self.column_family_set[cf_id] = Some(cf);
     }
 
     pub fn should_flush(&self) -> bool {
         for cf in self.column_family_set.iter() {
-            if cf.map_or(false, |cf| cf.should_flush()) {
+            if cf.as_ref().map_or(false, |cf| cf.should_flush()) {
                 return true;
             }
         }

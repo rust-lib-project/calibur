@@ -1,14 +1,16 @@
 mod error;
 mod file_system;
 pub mod format;
+pub mod options;
 
 pub use error::Error;
-pub use file_system::{RandomAccessFileReader, WritableFileWriter};
+pub use file_system::{
+    FileSystem, PosixWritableFile, RandomAccessFileReader, WritableFile, WritableFileWriter,
+};
 pub type Result<T> = std::result::Result<T, Error>;
 use bytes::Bytes;
 
 use crate::common::format::kValueTypeForSeek;
-use crate::compactor::Compactor;
 use std::cmp::Ordering;
 const MaxSequenceNumber: u64 = (1u64 << 56) - 1;
 
@@ -80,10 +82,10 @@ pub struct FixedLengthSuffixComparator {
 }
 
 impl FixedLengthSuffixComparator {
-    pub const fn new(len: usize) -> FixedLengthSuffixComparator {
+    pub fn new(len: usize) -> FixedLengthSuffixComparator {
         FixedLengthSuffixComparator {
-            len,
             user_comparator: DefaultUserComparator::default(),
+            len,
         }
     }
 
@@ -156,22 +158,21 @@ impl KeyComparator for FixedLengthSuffixComparator {
 }
 
 pub fn encode_var_uint32(data: &mut [u8], n: u32) -> usize {
-    let mut offset = 0;
-    const B: u8 = 128;
+    const B: u32 = 128;
     const MASK: u32 = 255;
     if n < (1 << 7) {
         data[0] = n as u8;
         return 1;
-    } else if v < (1 << 14) {
+    } else if n < (1 << 14) {
         data[0] = ((n | B) & MASK) as u8;
         data[1] = (n >> 7) as u8;
         return 2;
-    } else if (v < (1 << 21)) {
+    } else if n < (1 << 21) {
         data[0] = ((n | B) & MASK) as u8;
         data[1] = ((n >> 7 | B) & MASK) as u8;
         data[2] = (n >> 14) as u8;
         return 3;
-    } else if (v < (1 << 28)) {
+    } else if n < (1 << 28) {
         data[0] = ((n | B) & MASK) as u8;
         data[1] = ((n >> 7 | B) & MASK) as u8;
         data[2] = ((n >> 14 | B) & MASK) as u8;
@@ -189,7 +190,7 @@ pub fn encode_var_uint32(data: &mut [u8], n: u32) -> usize {
 
 pub fn get_var_uint32(data: &[u8]) -> Option<(usize, u32)> {
     const B: u8 = 128;
-    const MASK: u8 = 127;
+    const MASK: u32 = 127;
     if (data[0] & B) == 0 {
         return Some((1, data[0] as u32));
     }
@@ -199,21 +200,28 @@ pub fn get_var_uint32(data: &[u8]) -> Option<(usize, u32)> {
             return None;
         }
         if (data[i] & B) > 0 {
-            ret |= (data[i] & MASK) << (i * 7);
+            ret |= (data[i] as u32 & MASK) << (i as u32 * 7);
         } else {
-            ret |= data[i] << (i * 7);
+            ret |= (data[i] as u32) << (i as u32 * 7);
             return Some((i + 1, ret));
         }
     }
     return None;
 }
 
-pub fn decode_fixed_uint32(data: &[u8]) -> u32 {}
+pub fn decode_fixed_uint32(array: &[u8]) -> u32 {
+    ((array[0] as u32) << 0)
+        + ((array[1] as u32) << 8)
+        + ((array[2] as u32) << 16)
+        + ((array[3] as u32) << 24)
+}
 
 pub fn difference_offset(origin: &[u8], target: &[u8]) -> usize {
     let mut off = 0;
     let len = std::cmp::min(origin.len(), target.len());
-    while off < len && origin[off] == target[off] {}
+    while off < len && origin[off] == target[off] {
+        off += 1;
+    }
     off
 }
 
@@ -223,9 +231,9 @@ pub fn extract_user_key(key: &[u8]) -> &[u8] {
 }
 
 pub fn hash(data: &[u8], seed: u32) -> u32 {
-    const m: u32 = 0xc6a4a793;
-    const r: u32 = 24;
-    let mut h = (seed ^ (data.len() as u32 * m));
+    const M: u32 = 0xc6a4a793;
+    const R: u32 = 24;
+    let mut h = seed ^ (data.len() as u32 * M);
 
     // Pick up four bytes at a time
     let mut offset = 0;
@@ -233,8 +241,8 @@ pub fn hash(data: &[u8], seed: u32) -> u32 {
         let w = decode_fixed_uint32(&data[offset..]);
         offset += 4;
         h += w;
-        h *= m;
-        h ^= (h >> 16);
+        h *= M;
+        h ^= h >> 16;
     }
 
     let rest = data.len() - offset;
@@ -254,9 +262,9 @@ pub fn hash(data: &[u8], seed: u32) -> u32 {
         h += (data[offset + 1] as u32) << 8;
     }
     if rest <= 1 {
-        h += data[offset];
-        h *= m;
-        h ^= (h >> r);
+        h += data[offset] as u32;
+        h *= M;
+        h ^= h >> R;
     }
     return h;
 }

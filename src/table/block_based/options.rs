@@ -1,8 +1,10 @@
+#[derive(Eq, PartialEq, Clone)]
 pub enum DataBlockIndexType {
     DataBlockBinarySearch,
     DataBlockBinaryAndHash,
 }
 
+#[derive(Eq, PartialEq, Clone)]
 pub enum IndexType {
     BinarySearch,
     HashSearch,
@@ -10,6 +12,7 @@ pub enum IndexType {
     BinarySearchWithFirstKey,
 }
 
+#[derive(Eq, PartialEq, Clone)]
 pub enum IndexShorteningMode {
     // Use full keys.
     NoShortening,
@@ -24,4 +27,5 @@ pub struct BlockBasedTableOptions {
     pub block_size: usize,
     pub index_type: IndexType,
     pub data_block_index_type: DataBlockIndexType,
+    pub block_align: bool,
 }

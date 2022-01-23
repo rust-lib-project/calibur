@@ -24,8 +24,6 @@ pub enum Error {
     InvalidChecksum(String),
     #[error("Invalid filename")]
     InvalidFilename(String),
-    #[error("Invalid prost data: {0}")]
-    Decode(#[source] Box<prost::DecodeError>),
     #[error("Invalid data: {0}")]
     VarDecode(&'static str),
     #[error("Error when reading table: {0}")]
@@ -55,13 +53,6 @@ impl From<InvalidValuePointerError> for Error {
     #[inline]
     fn from(e: InvalidValuePointerError) -> Error {
         Error::InvalidValuePointer(Box::new(e))
-    }
-}
-
-impl From<prost::DecodeError> for Error {
-    #[inline]
-    fn from(e: prost::DecodeError) -> Error {
-        Error::Decode(Box::new(e))
     }
 }
 

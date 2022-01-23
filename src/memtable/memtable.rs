@@ -8,6 +8,13 @@ pub struct Memtable {
 }
 
 impl Memtable {
+    pub fn new() -> Self {
+        Self {
+            list: Skiplist::with_capacity(FixedLengthSuffixComparator::new(8), 4 * 1024 * 1024),
+            mem_next_logfile_number: AtomicU64::new(0),
+        }
+    }
+
     pub fn set_next_log_number(&self, num: u64) {
         self.mem_next_logfile_number.store(num, Ordering::Release);
     }

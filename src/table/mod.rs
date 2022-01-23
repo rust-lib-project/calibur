@@ -21,7 +21,7 @@ pub trait TableReader {
 }
 
 pub trait TableBuilder {
-    fn add(&mut self, key: &[u8], value: &[u8]);
+    fn add(&mut self, key: &[u8], value: &[u8]) -> Result<()>;
     fn finish(&mut self) -> Result<()>;
     fn file_size(&self) -> u64;
     fn num_entries(&self) -> u64;
@@ -30,5 +30,5 @@ pub trait TableBuilder {
 pub trait TableFactory {
     fn name(&self) -> &'static str;
     fn new_reader(&self, file: Arc<dyn RandomAccessFileReader>) -> Result<Arc<dyn TableReader>>;
-    fn new_builder(&self, w: Box<dyn WritableFileWriter>) -> Result<Box<dyn TableBuilder>>;
+    fn new_builder(&self, w: WritableFileWriter) -> Result<Box<dyn TableBuilder>>;
 }

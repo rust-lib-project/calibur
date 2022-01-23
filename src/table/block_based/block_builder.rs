@@ -50,14 +50,14 @@ impl BlockBuilder {
                 self.last_key = key.to_vec();
             }
         } else if self.use_delta_encoding {
-            shared = difference_offset(&self.last_key, key) as u32;
+            shared = difference_offset(&self.last_key, key) as usize;
             self.last_key = key.to_vec();
         }
-        let mut tmp: [u8; 15];
-        let non_shared = key.len() as u32 - shared;
+        let mut tmp: [u8; 15] = [0u8; 15];
+        let non_shared = key.len() - shared;
         let curr_size = self.buff.len();
-        let mut offset = encode_var_uint32(&mut tmp, shared);
-        let mut offset2 = encode_var_uint32(&mut tmp[offset..], non_shared);
+        let mut offset = encode_var_uint32(&mut tmp, shared as u32);
+        let mut offset2 = encode_var_uint32(&mut tmp[offset..], non_shared as u32);
         offset += offset2;
         offset2 = encode_var_uint32(&mut tmp[offset..], value.len() as u32);
         self.buff.extend_from_slice(&tmp[0..(offset + offset2)]);
@@ -71,14 +71,14 @@ impl BlockBuilder {
         self.count += 1;
     }
 
-    pub fn finish(&mut self) -> Vec<u8> {
-        std::mem::take(&mut self.buff)
+    pub fn finish(&mut self) -> &[u8] {
+        &self.buff
     }
 
     pub fn clear(&mut self) {
         self.buff.clear();
         self.restarts.clear();
-        self.restarts.push_back(0); // First restart point is at offset 0
+        self.restarts.push(0); // First restart point is at offset 0
         self.estimate = std::mem::size_of::<u32>() * 2;
         if self.hash_index_builder.valid() {
             self.hash_index_builder.clear();

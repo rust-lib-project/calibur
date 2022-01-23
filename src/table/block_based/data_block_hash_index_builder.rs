@@ -1,8 +1,8 @@
 use crate::common::key_hash;
 
-const kMaxRestartSupportedByHashIndex: usize = 253;
-const kNoEntry: u8 = 255;
-const kCollision: u8 = 254;
+const MAX_RESTART_SUPPORTED_BY_HASH_INDEX: usize = 253;
+const NO_ENTRY: u8 = 255;
+const COLLIISION: u8 = 254;
 
 pub struct DataBlockHashIndexBuilder {
     valid: bool,
@@ -27,7 +27,7 @@ impl DataBlockHashIndexBuilder {
         if ratio <= 0.0 {
             ratio = 0.75;
         }
-        self.bucket_per_key = 1 / ratio;
+        self.bucket_per_key = 1.0 / ratio;
         self.valid = true;
     }
 
@@ -42,7 +42,7 @@ impl DataBlockHashIndexBuilder {
     }
 
     pub fn add(&mut self, user_key: &[u8], restart_index: usize) {
-        if restart_index > kMaxRestartSupportedByHashIndex {
+        if restart_index > MAX_RESTART_SUPPORTED_BY_HASH_INDEX {
             self.valid = false;
             return;
         }
@@ -57,13 +57,13 @@ impl DataBlockHashIndexBuilder {
             num_buckets = 1;
         }
         num_buckets |= 1;
-        let mut buckets = vec![kNoEntry; num_buckets as usize];
+        let mut buckets = vec![NO_ENTRY; num_buckets as usize];
         for (hash_value, restart_index) in &self.hash_and_restart_pairs {
-            let buck_idx = (*hash_value) as u16 % num_buckets;
-            if buckets[buck_idx] == kNoEntry {
+            let buck_idx = (*hash_value) as usize % num_buckets as usize;
+            if buckets[buck_idx] == NO_ENTRY {
                 buckets[buck_idx] = *restart_index;
             } else if buckets[buck_idx] != *restart_index {
-                buckets[buck_idx] = kCollision;
+                buckets[buck_idx] = COLLIISION;
             }
         }
         data.extend_from_slice(&buckets);
@@ -76,6 +76,6 @@ impl DataBlockHashIndexBuilder {
         // Maching the num_buckets number in DataBlockHashIndexBuilder::Finish.
         estimated_num_buckets |= 1;
 
-        std::mem::size_of::<u16>() + estimated_num_buckets as usize * std::mem::size_of()
+        std::mem::size_of::<u16>() + estimated_num_buckets as usize * std::mem::size_of::<u8>()
     }
 }

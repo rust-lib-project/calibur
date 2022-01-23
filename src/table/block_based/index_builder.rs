@@ -2,8 +2,6 @@ use super::options::IndexShorteningMode;
 use crate::common::format::{BlockHandle, IndexValueRef};
 use crate::common::{extract_user_key, FixedLengthSuffixComparator, KeyComparator, Result};
 use crate::table::block_based::block_builder::BlockBuilder;
-use crate::table::block_based::options::BlockBasedTableOptions;
-use crate::table::BlockHandle;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
@@ -93,7 +91,7 @@ impl IndexBuilder for ShortenedIndexBuilder {
         };
         self.index_size = buf.len();
         Ok(IndexBlocks {
-            index_block_contents: buf,
+            index_block_contents: buf.to_vec(),
             meta_blocks: HashMap::default(),
         })
     }

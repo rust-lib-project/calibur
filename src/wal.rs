@@ -1,5 +1,4 @@
-use crate::common::Result;
-use std::fs::{File, OpenOptions};
+use crate::common::{Result, WritableFile};
 use std::io::Cursor;
 use std::path::PathBuf;
 
@@ -12,13 +11,13 @@ pub const MAX_HEADER_SIZE: usize = 21;
 /// TODO: delete WAL file when reference to WAL (or memtable) comes to 0
 pub struct Wal {
     path: PathBuf,
-    file: File,
+    file: Box<dyn WritableFile>,
     size: u32,
 }
 
 impl Wal {
     /// open or create a WAL from options
-    pub fn open(path: PathBuf, opts: AgateOptions) -> Result<Wal> {
+    pub fn open(path: PathBuf) -> Result<Wal> {
         unimplemented!()
     }
 

@@ -1,15 +1,8 @@
 use crate::common::format::*;
-use crate::common::{encode_var_uint32, get_var_int32, get_var_uint32};
+use crate::common::{encode_var_uint32, get_var_uint32};
 use bytes::{BufMut, BytesMut};
 
 const WRITE_BATCH_HEADER: usize = 12;
-
-const DEFERRED: u8 = 1 << 0;
-const HAS_PUT: u8 = 1 << 1;
-const HAS_DELETE: u8 = 1 << 2;
-const HAS_SINGLE_DELETE: u8 = 1 << 3;
-const HAS_MERGE: u8 = 1 << 4;
-const HAS_BLOB_INDEX: u8 = 1 << 10;
 
 pub struct WriteBatch {
     data: Vec<u8>,
@@ -52,12 +45,12 @@ impl WriteBatch {
     }
 
     pub fn put_cf(&mut self, cf: u32, key: &[u8], value: &[u8]) {
-        let mut tmp: [u8; 5];
+        let mut tmp: [u8; 5] = [0u8; 5];
         self.count += 1;
         if cf == 0 {
-            self.data.put(kTypeValue);
+            self.data.push(ValueType::kTypeValue as u8);
         } else {
-            self.data.put(kTypeColumnFamilyValue);
+            self.data.push(ValueType::kTypeColumnFamilyValue as u8);
             let offset = encode_var_uint32(&mut tmp, cf);
             self.data.extend_from_slice(&tmp[..offset]);
         }
@@ -74,12 +67,12 @@ impl WriteBatch {
     }
 
     pub fn delete_cf(&mut self, cf: u32, key: &[u8]) {
-        let mut tmp: [u8; 5];
+        let mut tmp: [u8; 5] = [0u8; 5];
         self.count += 1;
         if cf == 0 {
-            self.data.put(kTypeDeletion);
+            self.data.push(ValueType::kTypeDeletion as u8);
         } else {
-            self.data.put(kTypeColumnFamilyDeletion);
+            self.data.push(ValueType::kTypeColumnFamilyDeletion as u8);
             let offset = encode_var_uint32(&mut tmp, cf);
             self.data.extend_from_slice(&tmp[..offset]);
         }
@@ -120,7 +113,7 @@ pub struct WriteBatchIter<'a> {
 }
 
 impl WriteBatchForDB {
-    pub fn iter<'a>(&self) -> WriteBatchIter<'a> {
+    pub fn iter(&self) -> WriteBatchIter<'_> {
         WriteBatchIter {
             batch: self,
             offset: 0,
@@ -139,32 +132,33 @@ impl WriteBatchForDB {
 }
 
 impl<'a> WriteBatchIter<'a> {
-    pub fn read_record<'a>(&mut self) -> Option<WriteBatchItem<'a>> {
+    pub fn read_record(&mut self) -> Option<WriteBatchItem<'a>> {
         let tag = self.batch.data[self.offset];
         let mut cf = 0;
         self.offset += 1;
-        if tag == kTypeColumnFamilyValue || tag == kTypeColumnFamilyDeletion {
+        if tag == ValueType::kTypeColumnFamilyValue as u8
+            || tag == ValueType::kTypeColumnFamilyDeletion as u8
+        {
             if let Some((l, cf_id)) = get_var_uint32(&self.batch.data[self.offset..]) {
                 self.offset += l;
                 cf = cf_id;
             } else {
                 return None;
             }
-            None
         }
-        if tag == kTypeValue || tag == kTypeColumnFamilyValue {
+        if tag == ValueType::kTypeValue as u8 || tag == ValueType::kTypeColumnFamilyValue as u8 {
             if let Some((l, key_len)) = get_var_uint32(&self.batch.data[self.offset..]) {
                 self.offset += l;
-                if self.offset + key_len > self.batch.data.len() {
+                let key_pos = self.offset;
+                self.offset += key_len as usize;
+                if self.offset > self.batch.data.len() {
                     return None;
                 }
-                let key_pos = self.offset;
-                self.offset += key_len;
                 let key = &self.batch.data[key_pos..self.offset];
                 if let Some((l, value_len)) = get_var_uint32(&self.batch.data[self.offset..]) {
                     self.offset += l;
                     let v_pos = self.offset;
-                    self.offset += value_len;
+                    self.offset += value_len as usize;
                     if self.offset > self.batch.data.len() {
                         return None;
                     }
@@ -176,14 +170,16 @@ impl<'a> WriteBatchIter<'a> {
                 }
             }
             return None;
-        } else if tag == kTypeDeletion || tag == kTypeColumnFamilyDeletion {
+        } else if tag == ValueType::kTypeDeletion as u8
+            || tag == ValueType::kTypeColumnFamilyDeletion as u8
+        {
             if let Some((l, key_len)) = get_var_uint32(&self.batch.data[self.offset..]) {
                 self.offset += l;
-                if self.offset + key_len > self.batch.data.len() {
+                let key_pos = self.offset;
+                self.offset += key_len as usize;
+                if self.offset > self.batch.data.len() {
                     return None;
                 }
-                let key_pos = self.offset;
-                self.offset += key_len;
                 let key = &self.batch.data[key_pos..self.offset];
                 return Some(WriteBatchItem::Delete { cf, key });
             }

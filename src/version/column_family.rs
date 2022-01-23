@@ -59,5 +59,7 @@ impl ColumnFamily {
         }
     }
 
-    pub fn create_memtable(&self) -> Memtable {}
+    pub fn create_memtable(&self) -> Memtable {
+        Memtable::new()
+    }
 }

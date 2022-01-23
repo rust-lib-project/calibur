@@ -20,10 +20,10 @@ impl Core {
                 break;
             }
             let old_mem = cf.get_memtable();
-            old_mem.set_next_log_number(logfile_number);
+            // old_mem.set_next_log_number(logfile_number);
             let mem = cf.create_memtable();
-            let cf = cf.switch_memtable(Arc::new(mem));
-            self.versions.set_column_family(Arc::new(cf));
+            let new_cf = cf.switch_memtable(Arc::new(mem));
+            self.versions.set_column_family(Arc::new(new_cf));
             cf.invalid_column_family();
         }
     }
@@ -45,7 +45,7 @@ impl Engine {
         let (tx, recv) = mpsc::channel();
         let mut sequence = 0;
         {
-            let mut wal = self.wal.lock().unwrap();
+            // let mut wal = self.wal.lock().unwrap();
             sequence = self.last_sequence.fetch_add(count as u64, Ordering::SeqCst);
             wb.set_sequence(sequence);
             let writer = Writer::new(sequence, sequence + count as u64 - 1, finished.clone(), tx);

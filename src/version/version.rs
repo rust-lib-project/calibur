@@ -2,7 +2,7 @@ use crate::memtable::Memtable;
 use crate::version::version_storage_info::VersionStorageInfo;
 use std::sync::Arc;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Clone)]
 pub struct MemtableList {
     pub mems: Vec<Arc<Memtable>>,
 }
