@@ -1,4 +1,4 @@
-use crate::common::key_hash;
+use crate::util::hash::key_hash;
 
 const MAX_RESTART_SUPPORTED_BY_HASH_INDEX: usize = 253;
 const NO_ENTRY: u8 = 255;

@@ -7,6 +7,7 @@ mod compactor;
 mod db;
 mod memtable;
 mod table;
+mod util;
 mod version;
 mod wal;
 mod write_batch;

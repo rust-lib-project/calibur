@@ -1,0 +1,74 @@
+pub mod hash;
+
+pub fn decode_fixed_uint32(array: &[u8]) -> u32 {
+    ((array[0] as u32) << 0)
+        + ((array[1] as u32) << 8)
+        + ((array[2] as u32) << 16)
+        + ((array[3] as u32) << 24)
+}
+
+pub fn difference_offset(origin: &[u8], target: &[u8]) -> usize {
+    let mut off = 0;
+    let len = std::cmp::min(origin.len(), target.len());
+    while off < len && origin[off] == target[off] {
+        off += 1;
+    }
+    off
+}
+
+pub fn extract_user_key(key: &[u8]) -> &[u8] {
+    let l = key.len();
+    &key[..(l - 8)]
+}
+
+pub fn encode_var_uint32(data: &mut [u8], n: u32) -> usize {
+    const B: u32 = 128;
+    const MASK: u32 = 255;
+    if n < (1 << 7) {
+        data[0] = n as u8;
+        return 1;
+    } else if n < (1 << 14) {
+        data[0] = ((n | B) & MASK) as u8;
+        data[1] = (n >> 7) as u8;
+        return 2;
+    } else if n < (1 << 21) {
+        data[0] = ((n | B) & MASK) as u8;
+        data[1] = ((n >> 7 | B) & MASK) as u8;
+        data[2] = (n >> 14) as u8;
+        return 3;
+    } else if n < (1 << 28) {
+        data[0] = ((n | B) & MASK) as u8;
+        data[1] = ((n >> 7 | B) & MASK) as u8;
+        data[2] = ((n >> 14 | B) & MASK) as u8;
+        data[3] = (n >> 21) as u8;
+        return 4;
+    } else {
+        data[0] = ((n | B) & MASK) as u8;
+        data[1] = ((n >> 7 | B) & MASK) as u8;
+        data[2] = ((n >> 14 | B) & MASK) as u8;
+        data[3] = ((n >> 21 | B) & MASK) as u8;
+        data[4] = (n >> 28) as u8;
+        return 5;
+    }
+}
+
+pub fn get_var_uint32(data: &[u8]) -> Option<(usize, u32)> {
+    const B: u8 = 128;
+    const MASK: u32 = 127;
+    if (data[0] & B) == 0 {
+        return Some((1, data[0] as u32));
+    }
+    let mut ret: u32 = 0;
+    for i in 0..5 {
+        if i > data.len() {
+            return None;
+        }
+        if (data[i] & B) > 0 {
+            ret |= (data[i] as u32 & MASK) << (i as u32 * 7);
+        } else {
+            ret |= (data[i] as u32) << (i as u32 * 7);
+            return Some((i + 1, ret));
+        }
+    }
+    return None;
+}
