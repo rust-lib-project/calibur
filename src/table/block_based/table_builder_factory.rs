@@ -1,4 +1,4 @@
-use crate::common::{FixedLengthSuffixComparator, RandomAccessFileReader, WritableFileWriter};
+use crate::common::{InternalKeyComparator, RandomAccessFileReader, WritableFileWriter};
 use crate::table::block_based::options::BlockBasedTableOptions;
 use crate::table::block_based::table_builder::BlockBasedTableBuilder;
 use crate::table::{TableBuilder, TableFactory, TableReader};
@@ -22,15 +22,12 @@ impl TableFactory for BlockBasedTableFactory {
 
     fn new_builder(
         &self,
+        comparator: InternalKeyComparator,
         skip_filters: bool,
         file: WritableFileWriter,
     ) -> crate::common::Result<Box<dyn TableBuilder>> {
-        let builder = BlockBasedTableBuilder::new(
-            self.opts.clone(),
-            FixedLengthSuffixComparator::new(8),
-            skip_filters,
-            file,
-        );
+        let builder =
+            BlockBasedTableBuilder::new(self.opts.clone(), comparator, skip_filters, file);
         Ok(Box::new(builder))
     }
 }

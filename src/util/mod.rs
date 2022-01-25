@@ -1,10 +1,11 @@
 pub mod hash;
 
-pub fn decode_fixed_uint32(array: &[u8]) -> u32 {
-    ((array[0] as u32) << 0)
-        + ((array[1] as u32) << 8)
-        + ((array[2] as u32) << 16)
-        + ((array[3] as u32) << 24)
+pub fn decode_fixed_uint32(key: &[u8]) -> u32 {
+    unsafe { u32::from_le_bytes(*(key as *const _ as *const [u8; 4])) }
+}
+
+pub fn decode_fixed_uint64(key: &[u8]) -> u64 {
+    unsafe { u64::from_le_bytes(*(key as *const _ as *const [u8; 8])) }
 }
 
 pub fn difference_offset(origin: &[u8], target: &[u8]) -> usize {
@@ -58,6 +59,7 @@ pub fn encode_var_uint64(data: &mut [u8], mut v: u64) -> usize {
     while v >= B {
         data[offset] = ((v & (B - 1)) | B) as u8;
         v >>= 7u64;
+        offset += 1;
     }
     data[offset] = v as u8;
     offset + 1

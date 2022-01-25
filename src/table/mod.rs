@@ -1,7 +1,7 @@
 mod block_based;
 mod table_properties;
 
-use crate::common::Result;
+use crate::common::{InternalKeyComparator, Result};
 use crate::common::{RandomAccessFileReader, WritableFileWriter};
 use std::sync::Arc;
 
@@ -32,6 +32,7 @@ pub trait TableFactory {
     fn new_reader(&self, file: Arc<dyn RandomAccessFileReader>) -> Result<Arc<dyn TableReader>>;
     fn new_builder(
         &self,
+        comparator: InternalKeyComparator,
         skip_filter: bool,
         w: WritableFileWriter,
     ) -> Result<Box<dyn TableBuilder>>;

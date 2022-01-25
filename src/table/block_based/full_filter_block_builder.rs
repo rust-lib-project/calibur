@@ -29,7 +29,7 @@ impl FullFilterBitsBuilder {
                 num_lines += 1;
             }
             let total_bits = num_lines * (CACHE_LINE_SIZE * 8);
-            let mut data = vec![0u8; total_bits as usize / 8 + 5];
+            let data = vec![0u8; total_bits as usize / 8 + 5];
             (data, total_bits, num_lines)
         } else {
             (vec![0u8; 5], 0, 0)
@@ -39,7 +39,7 @@ impl FullFilterBitsBuilder {
     fn add_hash(&self, mut h: u32, data: &mut Vec<u8>, num_lines: u32) {
         let delta = (h >> 17) | (h << 15);
         let b = (h % num_lines) * (CACHE_LINE_SIZE * 8);
-        for i in 0..self.num_probes {
+        for _ in 0..self.num_probes {
             let bitpos = b + (h % (CACHE_LINE_SIZE * 8));
             data[bitpos as usize / 8] |= (1 << (bitpos % 8)) as u8;
             h += delta;
@@ -162,7 +162,7 @@ pub struct FullFilterBlockFactory {
 }
 
 impl FullFilterBlockFactory {
-    pub fn new(bits_per_key: usize, use_block_based_builder: bool) -> Self {
+    pub fn new(bits_per_key: usize) -> Self {
         let mut num_probes = (bits_per_key as f64 * 0.69).round() as usize; // 0.69 =~ ln(2)
         if num_probes < 1 {
             num_probes = 1;

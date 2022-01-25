@@ -48,9 +48,9 @@ impl WriteBatch {
         let mut tmp: [u8; 5] = [0u8; 5];
         self.count += 1;
         if cf == 0 {
-            self.data.push(ValueType::kTypeValue as u8);
+            self.data.push(ValueType::TypeValue as u8);
         } else {
-            self.data.push(ValueType::kTypeColumnFamilyValue as u8);
+            self.data.push(ValueType::TypeColumnFamilyValue as u8);
             let offset = encode_var_uint32(&mut tmp, cf);
             self.data.extend_from_slice(&tmp[..offset]);
         }
@@ -70,9 +70,9 @@ impl WriteBatch {
         let mut tmp: [u8; 5] = [0u8; 5];
         self.count += 1;
         if cf == 0 {
-            self.data.push(ValueType::kTypeDeletion as u8);
+            self.data.push(ValueType::TypeDeletion as u8);
         } else {
-            self.data.push(ValueType::kTypeColumnFamilyDeletion as u8);
+            self.data.push(ValueType::TypeColumnFamilyDeletion as u8);
             let offset = encode_var_uint32(&mut tmp, cf);
             self.data.extend_from_slice(&tmp[..offset]);
         }
@@ -136,8 +136,8 @@ impl<'a> WriteBatchIter<'a> {
         let tag = self.batch.data[self.offset];
         let mut cf = 0;
         self.offset += 1;
-        if tag == ValueType::kTypeColumnFamilyValue as u8
-            || tag == ValueType::kTypeColumnFamilyDeletion as u8
+        if tag == ValueType::TypeColumnFamilyValue as u8
+            || tag == ValueType::TypeColumnFamilyDeletion as u8
         {
             if let Some((l, cf_id)) = get_var_uint32(&self.batch.data[self.offset..]) {
                 self.offset += l;
@@ -146,7 +146,7 @@ impl<'a> WriteBatchIter<'a> {
                 return None;
             }
         }
-        if tag == ValueType::kTypeValue as u8 || tag == ValueType::kTypeColumnFamilyValue as u8 {
+        if tag == ValueType::TypeValue as u8 || tag == ValueType::TypeColumnFamilyValue as u8 {
             if let Some((l, key_len)) = get_var_uint32(&self.batch.data[self.offset..]) {
                 self.offset += l;
                 let key_pos = self.offset;
@@ -170,8 +170,8 @@ impl<'a> WriteBatchIter<'a> {
                 }
             }
             return None;
-        } else if tag == ValueType::kTypeDeletion as u8
-            || tag == ValueType::kTypeColumnFamilyDeletion as u8
+        } else if tag == ValueType::TypeDeletion as u8
+            || tag == ValueType::TypeColumnFamilyDeletion as u8
         {
             if let Some((l, key_len)) = get_var_uint32(&self.batch.data[self.offset..]) {
                 self.offset += l;

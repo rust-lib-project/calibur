@@ -1,6 +1,6 @@
 use super::arena::Arena;
 use super::MAX_HEIGHT;
-use crate::common::KeyComparator;
+use crate::common::{InternalKeyComparator, KeyComparator};
 use bytes::Bytes;
 use rand::Rng;
 use std::ptr::NonNull;
@@ -50,13 +50,13 @@ struct SkiplistCore {
 }
 
 #[derive(Clone)]
-pub struct Skiplist<C> {
+pub struct Skiplist {
     core: Arc<SkiplistCore>,
-    c: C,
+    c: InternalKeyComparator,
 }
 
-impl<C> Skiplist<C> {
-    pub fn with_capacity(c: C, arena_size: u32) -> Skiplist<C> {
+impl Skiplist {
+    pub fn with_capacity(c: InternalKeyComparator, arena_size: u32) -> Skiplist {
         let arena = Arena::with_capacity(arena_size);
         let head_offset = Node::alloc(&arena, Bytes::new(), Bytes::new(), MAX_HEIGHT - 1);
         let head = unsafe { NonNull::new_unchecked(arena.get_mut(head_offset)) };
@@ -85,7 +85,7 @@ impl<C> Skiplist<C> {
     }
 }
 
-impl<C: KeyComparator> Skiplist<C> {
+impl Skiplist {
     unsafe fn find_near(&self, key: &[u8], less: bool, allow_equal: bool) -> *const Node {
         let mut cursor: *const Node = self.core.head.as_ptr();
         let mut level = self.height();
@@ -299,19 +299,17 @@ impl<C: KeyComparator> Skiplist<C> {
         None
     }
 
-    pub fn iter_ref(&self) -> IterRef<&Skiplist<C>, C> {
+    pub fn iter_ref(&self) -> IterRef<&Skiplist> {
         IterRef {
             list: self,
             cursor: ptr::null(),
-            _key_cmp: std::marker::PhantomData,
         }
     }
 
-    pub fn iter(&self) -> IterRef<Skiplist<C>, C> {
+    pub fn iter(&self) -> IterRef<Skiplist> {
         IterRef {
             list: self.clone(),
             cursor: ptr::null(),
-            _key_cmp: std::marker::PhantomData,
         }
     }
 
@@ -320,8 +318,8 @@ impl<C: KeyComparator> Skiplist<C> {
     }
 }
 
-impl<C> AsRef<Skiplist<C>> for Skiplist<C> {
-    fn as_ref(&self) -> &Skiplist<C> {
+impl AsRef<Skiplist> for Skiplist {
+    fn as_ref(&self) -> &Skiplist {
         self
     }
 }
@@ -345,19 +343,18 @@ impl Drop for SkiplistCore {
     }
 }
 
-unsafe impl<C: Send> Send for Skiplist<C> {}
-unsafe impl<C: Sync> Sync for Skiplist<C> {}
+unsafe impl Send for Skiplist {}
+unsafe impl Sync for Skiplist {}
 
-pub struct IterRef<T, C>
+pub struct IterRef<T>
 where
-    T: AsRef<Skiplist<C>>,
+    T: AsRef<Skiplist>,
 {
     list: T,
     cursor: *const Node,
-    _key_cmp: std::marker::PhantomData<C>,
 }
 
-impl<T: AsRef<Skiplist<C>>, C: KeyComparator> IterRef<T, C> {
+impl<T: AsRef<Skiplist>> IterRef<T> {
     pub fn valid(&self) -> bool {
         !self.cursor.is_null()
     }

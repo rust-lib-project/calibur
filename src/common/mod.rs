@@ -3,7 +3,7 @@ mod file_system;
 pub mod format;
 pub mod options;
 mod slice_transform;
-use crate::util::extract_user_key;
+use crate::util::{decode_fixed_uint64, extract_user_key};
 pub use slice_transform::SliceTransform;
 
 pub use error::Error;
@@ -13,11 +13,13 @@ pub use file_system::{
 pub type Result<T> = std::result::Result<T, Error>;
 use bytes::Bytes;
 
-use crate::common::format::kValueTypeForSeek;
+use crate::common::format::VALUE_TYPE_FOR_SEEK;
 use std::cmp::Ordering;
-const MaxSequenceNumber: u64 = (1u64 << 56) - 1;
+use std::sync::Arc;
 
-pub trait KeyComparator: Clone {
+const MAX_SEQUENCE_NUMBER: u64 = (1u64 << 56) - 1;
+
+pub trait KeyComparator: Send + Sync {
     fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> Ordering;
     fn same_key(&self, lhs: &[u8], rhs: &[u8]) -> bool;
     fn find_shortest_separator(&self, start: &mut Vec<u8>, limit: &[u8]);
@@ -36,7 +38,7 @@ pub trait KeyComparator: Clone {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Clone)]
 pub struct DefaultUserComparator {}
 
 impl KeyComparator for DefaultUserComparator {
@@ -78,56 +80,53 @@ impl KeyComparator for DefaultUserComparator {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy)]
-pub struct FixedLengthSuffixComparator {
-    user_comparator: DefaultUserComparator,
-    len: usize,
+#[derive(Clone)]
+pub struct InternalKeyComparator {
+    user_comparator: Arc<dyn KeyComparator>,
 }
 
-impl FixedLengthSuffixComparator {
-    pub fn new(len: usize) -> FixedLengthSuffixComparator {
-        FixedLengthSuffixComparator {
-            user_comparator: DefaultUserComparator::default(),
-            len,
-        }
+impl InternalKeyComparator {
+    pub fn new(user_comparator: Arc<dyn KeyComparator>) -> InternalKeyComparator {
+        InternalKeyComparator { user_comparator }
     }
 
-    pub fn get_user_comparator(&self) -> &DefaultUserComparator {
+    pub fn get_user_comparator(&self) -> &Arc<dyn KeyComparator> {
         &self.user_comparator
     }
 }
 
-impl KeyComparator for FixedLengthSuffixComparator {
+impl Default for InternalKeyComparator {
+    fn default() -> Self {
+        InternalKeyComparator::new(Arc::new(DefaultUserComparator {}))
+    }
+}
+
+impl KeyComparator for InternalKeyComparator {
     #[inline]
     fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> Ordering {
-        if lhs.len() < self.len {
-            panic!(
-                "cannot compare with suffix {}: {:?}",
-                self.len,
-                Bytes::copy_from_slice(lhs)
-            );
+        let mut ret = self
+            .user_comparator
+            .compare_key(extract_user_key(lhs), extract_user_key(rhs));
+        if ret == Ordering::Equal {
+            let l = lhs.len() - 8;
+            let r = rhs.len() - 8;
+            let anum = decode_fixed_uint64(&lhs[l..]);
+            let bnum = decode_fixed_uint64(&rhs[r..]);
+            if anum > bnum {
+                ret = Ordering::Less;
+            } else {
+                ret = Ordering::Greater;
+            }
         }
-        if rhs.len() < self.len {
-            panic!(
-                "cannot compare with suffix {}: {:?}",
-                self.len,
-                Bytes::copy_from_slice(rhs)
-            );
-        }
-        let (l_p, l_s) = lhs.split_at(lhs.len() - self.len);
-        let (r_p, r_s) = rhs.split_at(rhs.len() - self.len);
-        let res = l_p.cmp(r_p);
-        match res {
-            Ordering::Greater | Ordering::Less => res,
-            Ordering::Equal => l_s.cmp(r_s),
-        }
+        ret
     }
 
     #[inline]
     fn same_key(&self, lhs: &[u8], rhs: &[u8]) -> bool {
-        let (l_p, _) = lhs.split_at(lhs.len() - self.len);
-        let (r_p, _) = rhs.split_at(rhs.len() - self.len);
-        l_p == r_p
+        let ret = self
+            .user_comparator
+            .compare_key(extract_user_key(lhs), extract_user_key(rhs));
+        ret == Ordering::Equal
     }
 
     fn find_shortest_separator(&self, start: &mut Vec<u8>, limit: &[u8]) {
@@ -140,7 +139,8 @@ impl KeyComparator for FixedLengthSuffixComparator {
             && self.user_comparator.compare_key(user_start, &tmp) == Ordering::Less
         {
             tmp.extend_from_slice(
-                &format::pack_sequence_and_type(MaxSequenceNumber, kValueTypeForSeek).to_le_bytes(),
+                &format::pack_sequence_and_type(MAX_SEQUENCE_NUMBER, VALUE_TYPE_FOR_SEEK)
+                    .to_le_bytes(),
             );
             std::mem::swap(start, &mut tmp);
         }
@@ -153,7 +153,8 @@ impl KeyComparator for FixedLengthSuffixComparator {
             && self.user_comparator.compare_key(user_key, &tmp) == Ordering::Less
         {
             tmp.extend_from_slice(
-                &format::pack_sequence_and_type(MaxSequenceNumber, kValueTypeForSeek).to_le_bytes(),
+                &format::pack_sequence_and_type(MAX_SEQUENCE_NUMBER, VALUE_TYPE_FOR_SEEK)
+                    .to_le_bytes(),
             );
             std::mem::swap(key, &mut tmp);
         }

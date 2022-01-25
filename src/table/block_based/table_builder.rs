@@ -1,6 +1,6 @@
 use crate::common::format::{extract_value_type, BlockHandle, ValueType};
 use crate::common::options::CompressionType;
-use crate::common::FixedLengthSuffixComparator;
+use crate::common::InternalKeyComparator;
 use crate::common::{Result, WritableFileWriter};
 use crate::table::block_based::block_builder::BlockBuilder;
 use crate::table::block_based::filter_block_builder::FilterBlockBuilder;
@@ -46,7 +46,7 @@ impl BuilderRep {
 }
 
 pub struct BlockBasedTableBuilder {
-    comparator: FixedLengthSuffixComparator,
+    comparator: InternalKeyComparator,
     data_block_builder: BlockBuilder,
     index_builder: Box<dyn IndexBuilder>,
     filter_builder: Option<Box<dyn FilterBlockBuilder>>,
@@ -56,7 +56,7 @@ pub struct BlockBasedTableBuilder {
 impl BlockBasedTableBuilder {
     pub fn new(
         options: BlockBasedTableOptions,
-        comparator: FixedLengthSuffixComparator,
+        comparator: InternalKeyComparator,
         skip_filters: bool,
         file: WritableFileWriter,
     ) -> Self {
@@ -67,7 +67,7 @@ impl BlockBasedTableBuilder {
             options.data_block_hash_table_util_ratio,
         );
 
-        let index_builder = create_index_builder(options.index_type, comparator, &options);
+        let index_builder = create_index_builder(options.index_type, comparator.clone(), &options);
         let rep = BuilderRep {
             offset: 0,
             last_key: vec![],
@@ -83,7 +83,7 @@ impl BlockBasedTableBuilder {
             Some(rep.options.filter_factory.create_builder(&rep.options))
         };
         BlockBasedTableBuilder {
-            comparator: FixedLengthSuffixComparator::new(8),
+            comparator,
             data_block_builder,
             index_builder,
             filter_builder,
@@ -165,9 +165,9 @@ impl TableBuilder for BlockBasedTableBuilder {
         self.rep.props.num_entries += 1;
         self.rep.props.raw_key_size += key.len() as u64;
         self.rep.props.raw_value_size += value.len() as u64;
-        if value_type == ValueType::kTypeDeletion as u8 {
+        if value_type == ValueType::TypeDeletion as u8 {
             self.rep.props.num_deletions += 1;
-        } else if value_type == ValueType::kTypeMerge as u8 {
+        } else if value_type == ValueType::TypeMerge as u8 {
             self.rep.props.num_merge_operands += 1;
         }
         Ok(())

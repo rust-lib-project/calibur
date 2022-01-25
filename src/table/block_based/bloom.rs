@@ -26,7 +26,7 @@ impl FilterPolicy for BloomFilterPolicy {
             bits = 64;
         }
 
-        let mut bytes = (bits + 7) / 8;
+        let bytes = (bits + 7) / 8;
         bits = bytes * 8;
 
         let init_size = dst.len();

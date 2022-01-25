@@ -1,6 +1,6 @@
 use super::options::IndexShorteningMode;
 use crate::common::format::{BlockHandle, IndexValueRef};
-use crate::common::{FixedLengthSuffixComparator, KeyComparator, Result};
+use crate::common::{InternalKeyComparator, KeyComparator, Result};
 use crate::table::block_based::block_builder::{BlockBuilder, DEFAULT_HASH_TABLE_UTIL_RATIO};
 use crate::table::block_based::options::{BlockBasedTableOptions, DataBlockIndexType, IndexType};
 pub use crate::util::extract_user_key;
@@ -34,14 +34,14 @@ pub struct ShortenedIndexBuilder {
     shortening_mode: IndexShorteningMode,
     last_encoded_handle: BlockHandle,
     current_block_first_internal_key: Vec<u8>,
-    comparator: FixedLengthSuffixComparator,
+    comparator: InternalKeyComparator,
     seperator_is_key_plus_seq: bool,
     index_size: usize,
 }
 
 impl ShortenedIndexBuilder {
     fn new(
-        comparator: FixedLengthSuffixComparator,
+        comparator: InternalKeyComparator,
         index_block_restart_interval: usize,
         format_version: u32,
         include_first_key: bool,
@@ -139,7 +139,7 @@ impl IndexBuilder for ShortenedIndexBuilder {
 
 pub fn create_index_builder(
     _: IndexType,
-    comparator: FixedLengthSuffixComparator,
+    comparator: InternalKeyComparator,
     opts: &BlockBasedTableOptions,
 ) -> Box<dyn IndexBuilder> {
     let builder = ShortenedIndexBuilder::new(

@@ -67,11 +67,7 @@ impl PropertyBlockBuilder {
         self.props.push((key.to_vec(), val.to_vec()));
     }
 
-    pub fn add_properties(
-        &mut self,
-        key: &[u8],
-        user_collected_properties: &HashMap<String, Vec<u8>>,
-    ) {
+    pub fn add_properties(&mut self, user_collected_properties: &HashMap<String, Vec<u8>>) {
         for (k, v) in user_collected_properties {
             self.props.push((k.clone().into_bytes(), v.clone()));
         }

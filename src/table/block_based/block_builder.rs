@@ -1,5 +1,5 @@
+use super::data_block_hash_index_builder::DataBlockHashIndexBuilder;
 use super::options::DataBlockIndexType;
-use super::DataBlockHashIndexBuilder;
 use crate::util::{difference_offset, encode_var_uint32, extract_user_key};
 
 pub const DEFAULT_HASH_TABLE_UTIL_RATIO: f64 = 0.75;

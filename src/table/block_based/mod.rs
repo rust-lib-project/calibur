@@ -11,4 +11,7 @@ mod table_builder;
 mod table_builder_factory;
 mod table_reader;
 
-use data_block_hash_index_builder::DataBlockHashIndexBuilder;
+pub use filter_block_builder::FilterBuilderFactory;
+pub use full_filter_block_builder::FullFilterBlockFactory;
+pub use options::BlockBasedTableOptions;
+pub use table_builder_factory::BlockBasedTableFactory;

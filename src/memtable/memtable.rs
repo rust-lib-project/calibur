@@ -1,16 +1,16 @@
 use super::list::Skiplist;
-use crate::common::{FixedLengthSuffixComparator, KeyComparator};
+use crate::common::{InternalKeyComparator, KeyComparator};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct Memtable {
-    list: Skiplist<FixedLengthSuffixComparator>,
+    list: Skiplist,
     mem_next_logfile_number: AtomicU64,
 }
 
 impl Memtable {
     pub fn new() -> Self {
         Self {
-            list: Skiplist::with_capacity(FixedLengthSuffixComparator::new(8), 4 * 1024 * 1024),
+            list: Skiplist::with_capacity(InternalKeyComparator::default(), 4 * 1024 * 1024),
             mem_next_logfile_number: AtomicU64::new(0),
         }
     }
