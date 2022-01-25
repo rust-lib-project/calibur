@@ -1,6 +1,8 @@
 use super::options::DataBlockIndexType;
 use super::DataBlockHashIndexBuilder;
-use crate::common::{difference_offset, encode_var_uint32, extract_user_key};
+use crate::util::{difference_offset, encode_var_uint32, extract_user_key};
+
+pub const DEFAULT_HASH_TABLE_UTIL_RATIO: f64 = 0.75;
 
 pub struct BlockBuilder {
     buff: Vec<u8>,

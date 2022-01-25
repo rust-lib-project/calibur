@@ -1,7 +1,9 @@
 use crate::common::format::BlockHandle;
 use crate::common::SliceTransform;
 use crate::table::block_based::filter_block_builder::*;
+use crate::table::block_based::options::BlockBasedTableOptions;
 use crate::util::hash::bloom_hash;
+use std::sync::Arc;
 
 const CACHE_LINE_SIZE: u32 = 128;
 
@@ -39,15 +41,16 @@ impl FullFilterBitsBuilder {
         let b = (h % num_lines) * (CACHE_LINE_SIZE * 8);
         for i in 0..self.num_probes {
             let bitpos = b + (h % (CACHE_LINE_SIZE * 8));
-            data[bitpos / 8] |= (1 << (bitpos % 8));
+            data[bitpos as usize / 8] |= (1 << (bitpos % 8)) as u8;
             h += delta;
         }
     }
 
     fn finish(&mut self) -> Vec<u8> {
         let (mut data, total_bits, num_lines) = self.calculate_space(self.hash_entries.len());
+        let hash_entries = std::mem::take(&mut self.hash_entries);
         if total_bits != 0 && num_lines != 0 {
-            for h in self.hash_entries.drain(..) {
+            for h in hash_entries {
                 self.add_hash(h, &mut data, num_lines);
             }
         }
@@ -59,7 +62,7 @@ impl FullFilterBitsBuilder {
 }
 
 pub struct FullFilterBlockBuilder {
-    prefix_extractor: Option<Box<dyn SliceTransform>>,
+    prefix_extractor: Option<Arc<dyn SliceTransform>>,
     filter_bits_builder: FullFilterBitsBuilder,
     whole_key_filtering: bool,
     last_whole_key_recorded: bool,
@@ -71,6 +74,20 @@ pub struct FullFilterBlockBuilder {
 }
 
 impl FullFilterBlockBuilder {
+    pub fn new(opts: &BlockBasedTableOptions, filter_bits_builder: FullFilterBitsBuilder) -> Self {
+        FullFilterBlockBuilder {
+            prefix_extractor: opts.prefix_extractor.clone(),
+            filter_bits_builder,
+            whole_key_filtering: opts.whole_key_filtering,
+            last_whole_key_recorded: false,
+            last_prefix_recorded: false,
+            last_whole_key_str: vec![],
+            last_prefix_str: vec![],
+            filter_data: vec![],
+            num_added: 0,
+        }
+    }
+
     fn add_prefix(&mut self, key: &[u8]) {
         let prefix_extractor = self.prefix_extractor.take().unwrap();
         let prefix = prefix_extractor.transform(key);
@@ -136,5 +153,42 @@ impl FilterBlockBuilder for FullFilterBlockBuilder {
 
     fn num_added(&self) -> usize {
         self.num_added as usize
+    }
+}
+
+pub struct FullFilterBlockFactory {
+    bits_per_key: usize,
+    num_probes: usize,
+}
+
+impl FullFilterBlockFactory {
+    pub fn new(bits_per_key: usize, use_block_based_builder: bool) -> Self {
+        let mut num_probes = (bits_per_key as f64 * 0.69).round() as usize; // 0.69 =~ ln(2)
+        if num_probes < 1 {
+            num_probes = 1;
+        }
+        if num_probes > 30 {
+            num_probes = 30;
+        }
+        Self {
+            bits_per_key,
+            num_probes,
+        }
+    }
+}
+
+impl FilterBuilderFactory for FullFilterBlockFactory {
+    fn create_builder(&self, opts: &BlockBasedTableOptions) -> Box<dyn FilterBlockBuilder> {
+        let bits = FullFilterBitsBuilder {
+            hash_entries: vec![],
+            bits_per_key: self.bits_per_key,
+            num_probes: self.num_probes,
+        };
+        let builder = FullFilterBlockBuilder::new(opts, bits);
+        Box::new(builder)
+    }
+
+    fn create_policy(&self) -> Box<dyn FilterPolicy> {
+        todo!()
     }
 }

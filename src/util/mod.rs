@@ -52,6 +52,17 @@ pub fn encode_var_uint32(data: &mut [u8], n: u32) -> usize {
     }
 }
 
+pub fn encode_var_uint64(data: &mut [u8], mut v: u64) -> usize {
+    const B: u64 = 128;
+    let mut offset = 0;
+    while v >= B {
+        data[offset] = ((v & (B - 1)) | B) as u8;
+        v >>= 7u64;
+    }
+    data[offset] = v as u8;
+    offset + 1
+}
+
 pub fn get_var_uint32(data: &[u8]) -> Option<(usize, u32)> {
     const B: u8 = 128;
     const MASK: u32 = 127;

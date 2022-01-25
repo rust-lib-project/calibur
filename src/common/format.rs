@@ -1,3 +1,5 @@
+use crate::util::encode_var_uint64;
+
 pub enum ValueType {
     kTypeDeletion = 0x0,
     kTypeValue = 0x1,
@@ -39,6 +41,15 @@ pub fn pack_sequence_and_type(seq: u64, t: u8) -> u64 {
 pub struct BlockHandle {
     pub offset: u64,
     pub size: u64,
+}
+
+impl BlockHandle {
+    pub fn encode_to(&self, data: &mut Vec<u8>) {
+        let mut tmp: [u8; 20] = [0u8; 20];
+        let offset = encode_var_uint64(&mut tmp, self.offset);
+        let offset = encode_var_uint64(&mut tmp[offset..], self.size);
+        data.extend_from_slice(&tmp[..offset]);
+    }
 }
 
 pub const NullBlockHandle: BlockHandle = BlockHandle { offset: 0, size: 0 };

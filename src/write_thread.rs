@@ -36,24 +36,24 @@ impl WriterQueue {
     }
 
     pub fn try_catch_all_finished_writers(&mut self, sequence: u64) {
-        assert!(!self.writers.is_empty());
-        if self.writers.front().unwrap().sequence != sequence {
-            return;
-        }
-        let mut writers = vec![];
-        let mut commit_sequence = sequence;
-        while let Some(writer) = self.writers.pop_front() {
-            if !writer.finished.load(Ordering::Acquire) {
-                self.writers.push_front(writer);
-                break;
-            }
-            commit_sequence = writer.commit_sequence;
-            writers.push(writer);
-        }
-        self.commit_sequence
-            .store(commit_sequence, Ordering::Release);
-        for w in writers {
-            w.sender.send(w.commit_sequence);
-        }
+        // assert!(!self.writers.is_empty());
+        // if self.writers.front().unwrap().sequence != sequence {
+        //     return;
+        // }
+        // let mut writers = vec![];
+        // let mut commit_sequence = sequence;
+        // while let Some(writer) = self.writers.pop_front() {
+        //     if !writer.finished.load(Ordering::Acquire) {
+        //         self.writers.push_front(writer);
+        //         break;
+        //     }
+        //     commit_sequence = writer.commit_sequence;
+        //     writers.push(writer);
+        // }
+        // self.commit_sequence
+        //     .store(commit_sequence, Ordering::Release);
+        // for w in writers {
+        //     w.sender.send(w.commit_sequence);
+        // }
     }
 }

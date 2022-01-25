@@ -1,13 +1,15 @@
 use super::options::IndexShorteningMode;
 use crate::common::format::{BlockHandle, IndexValueRef};
-use crate::common::{extract_user_key, FixedLengthSuffixComparator, KeyComparator, Result};
-use crate::table::block_based::block_builder::BlockBuilder;
+use crate::common::{FixedLengthSuffixComparator, KeyComparator, Result};
+use crate::table::block_based::block_builder::{BlockBuilder, DEFAULT_HASH_TABLE_UTIL_RATIO};
+use crate::table::block_based::options::{BlockBasedTableOptions, DataBlockIndexType, IndexType};
+pub use crate::util::extract_user_key;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
 pub struct IndexBlocks {
-    index_block_contents: Vec<u8>,
-    meta_blocks: std::collections::HashMap<Vec<u8>, Vec<u8>>,
+    pub index_block_contents: Vec<u8>,
+    // pub meta_blocks: std::collections::HashMap<Vec<u8>, Vec<u8>>,
 }
 
 pub trait IndexBuilder {
@@ -35,6 +37,40 @@ pub struct ShortenedIndexBuilder {
     comparator: FixedLengthSuffixComparator,
     seperator_is_key_plus_seq: bool,
     index_size: usize,
+}
+
+impl ShortenedIndexBuilder {
+    fn new(
+        comparator: FixedLengthSuffixComparator,
+        index_block_restart_interval: usize,
+        format_version: u32,
+        include_first_key: bool,
+        shortening_mode: IndexShorteningMode,
+    ) -> Self {
+        let index_block_builder = BlockBuilder::new(
+            index_block_restart_interval,
+            true,
+            DataBlockIndexType::DataBlockBinarySearch,
+            DEFAULT_HASH_TABLE_UTIL_RATIO,
+        );
+        let index_block_builder_without_seq = BlockBuilder::new(
+            index_block_restart_interval,
+            true,
+            DataBlockIndexType::DataBlockBinarySearch,
+            DEFAULT_HASH_TABLE_UTIL_RATIO,
+        );
+        ShortenedIndexBuilder {
+            index_block_builder,
+            index_block_builder_without_seq,
+            include_first_key,
+            shortening_mode,
+            last_encoded_handle: Default::default(),
+            current_block_first_internal_key: vec![],
+            comparator,
+            seperator_is_key_plus_seq: format_version <= 2,
+            index_size: 0,
+        }
+    }
 }
 
 impl IndexBuilder for ShortenedIndexBuilder {
@@ -92,11 +128,26 @@ impl IndexBuilder for ShortenedIndexBuilder {
         self.index_size = buf.len();
         Ok(IndexBlocks {
             index_block_contents: buf.to_vec(),
-            meta_blocks: HashMap::default(),
+            // meta_blocks: HashMap::default(),
         })
     }
 
     fn index_size(&self) -> usize {
         self.index_size
     }
+}
+
+pub fn create_index_builder(
+    _: IndexType,
+    comparator: FixedLengthSuffixComparator,
+    opts: &BlockBasedTableOptions,
+) -> Box<dyn IndexBuilder> {
+    let builder = ShortenedIndexBuilder::new(
+        comparator,
+        opts.index_block_restart_interval,
+        opts.format_version,
+        false,
+        opts.index_shortening,
+    );
+    Box::new(builder)
 }

@@ -1,5 +1,6 @@
 use crate::common::format::BlockHandle;
 use crate::common::Result;
+use crate::table::block_based::options::BlockBasedTableOptions;
 
 pub trait FilterBlockBuilder {
     fn is_block_based(&self) -> bool {
@@ -14,10 +15,10 @@ pub trait FilterBlockBuilder {
 pub trait FilterPolicy {
     fn name(&self) -> &'static str;
     fn key_may_match(&self, key: &[u8], filter: &[u8]) -> bool;
-    fn create_filter(&self, key: &[u8], n: u32, dst: &mut Vec<u8>);
+    fn create_filter(&self, keys: &[&[u8]], dst: &mut Vec<u8>);
 }
 
-pub trait FilterBuilderFactory {
-    fn create_builder(&self) -> Box<dyn FilterBlockBuilder>;
+pub trait FilterBuilderFactory: Send + Sync {
+    fn create_builder(&self, opts: &BlockBasedTableOptions) -> Box<dyn FilterBlockBuilder>;
     fn create_policy(&self) -> Box<dyn FilterPolicy>;
 }

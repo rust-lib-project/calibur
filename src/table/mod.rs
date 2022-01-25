@@ -30,5 +30,9 @@ pub trait TableBuilder {
 pub trait TableFactory {
     fn name(&self) -> &'static str;
     fn new_reader(&self, file: Arc<dyn RandomAccessFileReader>) -> Result<Arc<dyn TableReader>>;
-    fn new_builder(&self, w: WritableFileWriter) -> Result<Box<dyn TableBuilder>>;
+    fn new_builder(
+        &self,
+        skip_filter: bool,
+        w: WritableFileWriter,
+    ) -> Result<Box<dyn TableBuilder>>;
 }

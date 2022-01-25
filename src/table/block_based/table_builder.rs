@@ -4,8 +4,10 @@ use crate::common::FixedLengthSuffixComparator;
 use crate::common::{Result, WritableFileWriter};
 use crate::table::block_based::block_builder::BlockBuilder;
 use crate::table::block_based::filter_block_builder::FilterBlockBuilder;
-use crate::table::block_based::index_builder::IndexBuilder;
-use crate::table::block_based::options::BlockBasedTableOptions;
+use crate::table::block_based::index_builder::{create_index_builder, IndexBuilder};
+use crate::table::block_based::meta_block::MetaIndexBuilder;
+use crate::table::block_based::options::DataBlockIndexType;
+use crate::table::block_based::options::{BlockBasedTableOptions, IndexType};
 use crate::table::table_properties::TableProperties;
 use crate::table::TableBuilder;
 use crate::util::extract_user_key;
@@ -52,6 +54,43 @@ pub struct BlockBasedTableBuilder {
 }
 
 impl BlockBasedTableBuilder {
+    pub fn new(
+        options: BlockBasedTableOptions,
+        comparator: FixedLengthSuffixComparator,
+        skip_filters: bool,
+        file: WritableFileWriter,
+    ) -> Self {
+        let data_block_builder = BlockBuilder::new(
+            options.block_restart_interval,
+            options.use_delta_encoding,
+            DataBlockIndexType::DataBlockBinarySearch,
+            options.data_block_hash_table_util_ratio,
+        );
+
+        let index_builder = create_index_builder(options.index_type, comparator, &options);
+        let rep = BuilderRep {
+            offset: 0,
+            last_key: vec![],
+            pending_handle: Default::default(),
+            props: Default::default(),
+            file,
+            alignment: 0,
+            options,
+        };
+        let filter_builder = if skip_filters {
+            None
+        } else {
+            Some(rep.options.filter_factory.create_builder(&rep.options))
+        };
+        BlockBasedTableBuilder {
+            comparator: FixedLengthSuffixComparator::new(8),
+            data_block_builder,
+            index_builder,
+            filter_builder,
+            rep,
+        }
+    }
+
     fn should_flush(&self) -> bool {
         self.data_block_builder.current_size_estimate() >= self.rep.options.block_size
     }
@@ -85,6 +124,21 @@ impl BlockBasedTableBuilder {
         self.rep.props.num_data_blocks += 1;
         self.data_block_builder.clear();
         Ok(handle)
+    }
+
+    fn write_index_block(&mut self) -> Result<BlockHandle> {
+        let index_blocks = self.index_builder.finish()?;
+        // TODO: build index block for hash index table.
+        self.rep
+            .write_raw_block(&index_blocks.index_block_contents, false)
+    }
+
+    fn write_filter_block(&mut self, meta_index_builder: &mut MetaIndexBuilder) -> Result<()> {
+        Ok(())
+    }
+
+    fn write_properties_block(&mut self, meta_index_builder: &mut MetaIndexBuilder) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -120,6 +174,25 @@ impl TableBuilder for BlockBasedTableBuilder {
     }
 
     fn finish(&mut self) -> crate::common::Result<()> {
+        let empty_data_block = self.data_block_builder.is_empty();
+        self.flush()?;
+        if !empty_data_block {
+            self.index_builder.add_index_entry(
+                &mut self.rep.last_key,
+                &[],
+                self.rep.pending_handle,
+            );
+        }
+        // MetaIndexBuilder meta_index_builder;
+        let mut meta_index_builder = MetaIndexBuilder::new();
+        self.write_filter_block(&mut meta_index_builder)?;
+        let index_block_handle = self.write_index_block()?;
+        // self.write_compression_dict_block(&mut meta_index_builder)?;
+        self.write_properties_block(&mut meta_index_builder)?;
+        let metaindex_block_handle = self
+            .rep
+            .write_raw_block(meta_index_builder.finish(), false)?;
+        // self.write_footer(metaindex_block_handle, index_block_handle)?;
         Ok(())
     }
 
