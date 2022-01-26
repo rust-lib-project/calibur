@@ -1,6 +1,8 @@
 mod block_based;
+mod format;
 mod table_properties;
 
+use crate::common::options::CompressionType;
 use crate::common::{InternalKeyComparator, Result};
 use crate::common::{RandomAccessFileReader, WritableFileWriter};
 use std::sync::Arc;
@@ -32,8 +34,16 @@ pub trait TableFactory {
     fn new_reader(&self, file: Arc<dyn RandomAccessFileReader>) -> Result<Arc<dyn TableReader>>;
     fn new_builder(
         &self,
-        comparator: InternalKeyComparator,
-        skip_filter: bool,
+        options: &TableBuilderOptions,
         w: WritableFileWriter,
     ) -> Result<Box<dyn TableBuilder>>;
+}
+
+pub struct TableBuilderOptions {
+    skip_filter: bool,
+    internal_comparator: InternalKeyComparator,
+    column_family_name: String,
+    target_file_size: usize,
+    compression_type: CompressionType,
+    column_family_id: u32,
 }

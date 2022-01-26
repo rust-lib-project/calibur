@@ -1,5 +1,5 @@
 use super::list::Skiplist;
-use crate::common::{InternalKeyComparator, KeyComparator};
+use crate::common::InternalKeyComparator;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct Memtable {

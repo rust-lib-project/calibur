@@ -11,7 +11,6 @@ pub use file_system::{
     FileSystem, PosixWritableFile, RandomAccessFileReader, WritableFile, WritableFileWriter,
 };
 pub type Result<T> = std::result::Result<T, Error>;
-use bytes::Bytes;
 
 use crate::common::format::VALUE_TYPE_FOR_SEEK;
 use std::cmp::Ordering;

@@ -33,7 +33,7 @@ pub struct TableProperties {
     pub fixed_key_len: u64,
     // ID of column family for this SST file, corresponding to the CF identified
     // by column_family_name.
-    pub column_family_id: u64,
+    pub column_family_id: u32,
     pub creation_time: u64,
     // Timestamp of the earliest key. 0 means unknown.
     pub oldest_key_time: u64,
@@ -42,7 +42,7 @@ pub struct TableProperties {
 
     // Name of the column family with which this SST file is associated.
     // If column family is unknown, `column_family_name` will be an empty string.
-    column_family_name: String,
+    pub(crate) column_family_name: String,
 
     // The name of the filter policy used in this table.
     // If no filter policy is used, `filter_policy_name` will be an empty string.
@@ -53,4 +53,41 @@ pub struct TableProperties {
     // The name of the merge operator used in this table.
     // If no merge operator is used, `merge_operator_name` will be "nullptr".
     pub merge_operator_name: String,
+
+    pub prefix_extractor_name: String,
+
+    pub compression_name: String,
 }
+
+pub const PROPERTIES_BLOCK: &str = "rocksdb.properties";
+// Old property block name for backward compatibility
+pub const PROPERTIES_BLOCK_OLD_NAME: &str = "rocksdb.stats";
+pub const COMPRESSION_DICT_BLOCK: &str = "rocksdb.compression_dict";
+pub const PROPERTIES_DATA_SIZE: &str = "rocksdb.data.size";
+pub const PROPERTIES_INDEX_SIZE: &str = "rocksdb.index.size";
+pub const PROPERTIES_INDEX_PARTITIONS: &str = "rocksdb.index.partitions";
+pub const PROPERTIES_TOP_LEVEL_INDEX_SIZE: &str = "rocksdb.top-level.index.size";
+pub const PROPERTIES_INDEX_KEY_IS_USER_KEY: &str = "rocksdb.index.key.is.user.key";
+pub const PROPERTIES_INDEX_VALUE_IS_DELTA_ENCODED: &str = "rocksdb.index.value.is.delta.encoded";
+pub const PROPERTIES_FILTER_SIZE: &str = "rocksdb.filter.size";
+pub const PROPERTIES_RAW_KEY_SIZE: &str = "rocksdb.raw.key.size";
+pub const PROPERTIES_RAW_VALUE_SIZE: &str = "rocksdb.raw.value.size";
+pub const PROPERTIES_NUM_DATA_BLOCKS: &str = "rocksdb.num.data.blocks";
+pub const PROPERTIES_NUM_ENTRIES: &str = "rocksdb.num.entries";
+pub const PROPERTIES_DELETED_KEYS: &str = "rocksdb.deleted.keys";
+pub const PROPERTIES_MERGE_OPERANDS: &str = "rocksdb.merge.operands";
+pub const PROPERTIES_NUM_RANGE_DELETIONS: &str = "rocksdb.num.range-deletions";
+pub const PROPERTIES_FILTER_POLICY: &str = "rocksdb.filter.policy";
+pub const PROPERTIES_FORMAT_VERSION: &str = "rocksdb.format.version";
+pub const PROPERTIES_FIXED_KEY_LEN: &str = "rocksdb.fixed.key.length";
+pub const PROPERTIES_COLUMN_FAMILY_ID: &str = "rocksdb.column.family.id";
+pub const PROPERTIES_COLUMN_FAMILY_NAME: &str = "rocksdb.column.family.name";
+pub const PROPERTIES_COMPARATOR: &str = "rocksdb.comparator";
+pub const PROPERTIES_MERGE_OPERATOR: &str = "rocksdb.merge.operator";
+pub const PROPERTIES_PREFIX_EXTRACTOR_NAME: &str = "rocksdb.prefix.extractor.name";
+pub const PROPERTIES_PROPERTY_COLLECTORS: &str = "rocksdb.property.collectors";
+pub const PROPERTIES_COMPRESSION: &str = "rocksdb.compression";
+pub const PROPERTIES_COMPRESSION_OPTIONS: &str = "rocksdb.compression_options";
+pub const PROPERTIES_CREATION_TIME: &str = "rocksdb.creation.time";
+pub const PROPERTIES_OLDEST_KEY_TIME: &str = "rocksdb.oldest.key.time";
+pub const PROPERTIES_FILE_CREATION_TIME: &str = "rocksdb.file.creation.time";

@@ -8,7 +8,7 @@ pub struct BloomFilterPolicy {
 
 impl FilterPolicy for BloomFilterPolicy {
     fn name(&self) -> &'static str {
-        todo!()
+        "rocksdb.BuiltinBloomFilter"
     }
 
     fn key_may_match(&self, key: &[u8], filter: &[u8]) -> bool {

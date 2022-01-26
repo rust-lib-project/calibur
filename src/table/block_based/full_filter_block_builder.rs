@@ -1,7 +1,7 @@
-use crate::common::format::BlockHandle;
 use crate::common::SliceTransform;
 use crate::table::block_based::filter_block_builder::*;
 use crate::table::block_based::options::BlockBasedTableOptions;
+use crate::table::format::BlockHandle;
 use crate::util::hash::bloom_hash;
 use std::sync::Arc;
 
@@ -142,7 +142,7 @@ impl FilterBlockBuilder for FullFilterBlockBuilder {
 
     fn start_block(&mut self, _: u64) {}
 
-    fn finish(&mut self, _: &BlockHandle) -> crate::common::Result<&[u8]> {
+    fn finish(&mut self) -> crate::common::Result<&[u8]> {
         if self.num_added != 0 {
             self.filter_data = self.filter_bits_builder.finish();
             return Ok(&self.filter_data);
@@ -190,5 +190,9 @@ impl FilterBuilderFactory for FullFilterBlockFactory {
 
     fn create_policy(&self) -> Box<dyn FilterPolicy> {
         todo!()
+    }
+
+    fn name(&self) -> &'static str {
+        "rocksdb.BuiltinBloomFilter"
     }
 }

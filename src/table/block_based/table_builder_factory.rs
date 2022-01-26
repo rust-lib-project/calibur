@@ -1,7 +1,7 @@
-use crate::common::{InternalKeyComparator, RandomAccessFileReader, WritableFileWriter};
+use crate::common::{RandomAccessFileReader, WritableFileWriter};
 use crate::table::block_based::options::BlockBasedTableOptions;
 use crate::table::block_based::table_builder::BlockBasedTableBuilder;
-use crate::table::{TableBuilder, TableFactory, TableReader};
+use crate::table::{TableBuilder, TableBuilderOptions, TableFactory, TableReader};
 use std::sync::Arc;
 
 pub struct BlockBasedTableFactory {
@@ -22,12 +22,10 @@ impl TableFactory for BlockBasedTableFactory {
 
     fn new_builder(
         &self,
-        comparator: InternalKeyComparator,
-        skip_filters: bool,
+        opts: &TableBuilderOptions,
         file: WritableFileWriter,
     ) -> crate::common::Result<Box<dyn TableBuilder>> {
-        let builder =
-            BlockBasedTableBuilder::new(self.opts.clone(), comparator, skip_filters, file);
+        let builder = BlockBasedTableBuilder::new(opts, self.opts.clone(), file);
         Ok(Box::new(builder))
     }
 }

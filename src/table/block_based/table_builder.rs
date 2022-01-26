@@ -1,16 +1,21 @@
-use crate::common::format::{extract_value_type, BlockHandle, ValueType};
+use crate::common::format::{extract_value_type, ValueType};
 use crate::common::options::CompressionType;
 use crate::common::InternalKeyComparator;
 use crate::common::{Result, WritableFileWriter};
 use crate::table::block_based::block_builder::BlockBuilder;
 use crate::table::block_based::filter_block_builder::FilterBlockBuilder;
 use crate::table::block_based::index_builder::{create_index_builder, IndexBuilder};
-use crate::table::block_based::meta_block::MetaIndexBuilder;
+use crate::table::block_based::meta_block::{MetaIndexBuilder, PropertyBlockBuilder};
+use crate::table::block_based::options::BlockBasedTableOptions;
 use crate::table::block_based::options::DataBlockIndexType;
-use crate::table::block_based::options::{BlockBasedTableOptions, IndexType};
-use crate::table::table_properties::TableProperties;
-use crate::table::TableBuilder;
+use crate::table::format::*;
+use crate::table::table_properties::{TableProperties, PROPERTIES_BLOCK};
+use crate::table::{TableBuilder, TableBuilderOptions};
 use crate::util::extract_user_key;
+
+const FILTER_BLOCK_PREFIX: &str = "filter.";
+const FULL_FILTER_BLOCK_PREFIX: &str = "fullfilter.";
+// const PartitionedFilterBlockPrefix: &str = "partitionedfilter.";
 
 pub struct BuilderRep {
     offset: u64,
@@ -20,6 +25,8 @@ pub struct BuilderRep {
     file: WritableFileWriter,
     alignment: usize,
     options: BlockBasedTableOptions,
+    column_family_name: String,
+    column_family_id: u32,
 }
 
 impl BuilderRep {
@@ -55,19 +62,22 @@ pub struct BlockBasedTableBuilder {
 
 impl BlockBasedTableBuilder {
     pub fn new(
-        options: BlockBasedTableOptions,
-        comparator: InternalKeyComparator,
-        skip_filters: bool,
+        options: &TableBuilderOptions,
+        table_options: BlockBasedTableOptions,
         file: WritableFileWriter,
     ) -> Self {
         let data_block_builder = BlockBuilder::new(
-            options.block_restart_interval,
-            options.use_delta_encoding,
+            table_options.block_restart_interval,
+            table_options.use_delta_encoding,
             DataBlockIndexType::DataBlockBinarySearch,
-            options.data_block_hash_table_util_ratio,
+            table_options.data_block_hash_table_util_ratio,
         );
 
-        let index_builder = create_index_builder(options.index_type, comparator.clone(), &options);
+        let index_builder = create_index_builder(
+            table_options.index_type,
+            options.internal_comparator.clone(),
+            &table_options,
+        );
         let rep = BuilderRep {
             offset: 0,
             last_key: vec![],
@@ -75,15 +85,17 @@ impl BlockBasedTableBuilder {
             props: Default::default(),
             file,
             alignment: 0,
-            options,
+            options: table_options,
+            column_family_name: options.column_family_name.clone(),
+            column_family_id: options.column_family_id,
         };
-        let filter_builder = if skip_filters {
+        let filter_builder = if options.skip_filter {
             None
         } else {
             Some(rep.options.filter_factory.create_builder(&rep.options))
         };
         BlockBasedTableBuilder {
-            comparator,
+            comparator: options.internal_comparator.clone(),
             data_block_builder,
             index_builder,
             filter_builder,
@@ -134,10 +146,59 @@ impl BlockBasedTableBuilder {
     }
 
     fn write_filter_block(&mut self, meta_index_builder: &mut MetaIndexBuilder) -> Result<()> {
+        if let Some(builder) = self.filter_builder.as_mut() {
+            if builder.num_added() == 0 {
+                return Ok(());
+            }
+            let content = builder.finish()?;
+            self.rep.props.filter_size += content.len() as u64;
+            let handle = self.rep.write_raw_block(content, false)?;
+            let mut key = if builder.is_block_based() {
+                FILTER_BLOCK_PREFIX.to_string()
+            } else {
+                FULL_FILTER_BLOCK_PREFIX.to_string()
+            };
+            key.push_str(self.rep.options.filter_factory.name());
+            meta_index_builder.add(key.as_bytes(), &handle);
+        }
         Ok(())
     }
 
     fn write_properties_block(&mut self, meta_index_builder: &mut MetaIndexBuilder) -> Result<()> {
+        let mut property_block_builder = PropertyBlockBuilder::new();
+        self.rep.props.column_family_id = self.rep.column_family_id;
+        self.rep.props.filter_policy_name = self.rep.options.filter_factory.name().to_string();
+        self.rep.props.index_size = self.index_builder.index_size() as u64 + 5;
+        // TODO: add the whole properties
+        property_block_builder.add_table_properties(&self.rep.props);
+        let data = property_block_builder.finish();
+        let properties_block_handle = self.rep.write_raw_block(data, false)?;
+        meta_index_builder.add(PROPERTIES_BLOCK.as_bytes(), &properties_block_handle);
+        Ok(())
+    }
+
+    fn write_footer(
+        &mut self,
+        metaindex_block_handle: BlockHandle,
+        index_block_handle: BlockHandle,
+    ) -> Result<()> {
+        let legacy = (self.rep.options.format_version == 0);
+        let magic_number = if legacy {
+            LEGACY_BLOCK_BASED_TABLE_MAGIC_NUMBER
+        } else {
+            BLOCK_BASED_TABLE_MAGIC_NUMBER
+        };
+        let footer = Footer {
+            version: self.rep.options.format_version,
+            checksum: self.rep.options.checksum as u8,
+            metaindex_handle: metaindex_block_handle,
+            index_handle: index_block_handle,
+            table_magic_number: 0,
+        };
+        let mut buf = vec![];
+        footer.encode_to(&mut buf);
+        self.rep.file.append(&buf)?;
+        self.rep.offset += buf.len() as u64;
         Ok(())
     }
 }
@@ -183,7 +244,14 @@ impl TableBuilder for BlockBasedTableBuilder {
                 self.rep.pending_handle,
             );
         }
-        // MetaIndexBuilder meta_index_builder;
+        // Write meta blocks, metaindex block and footer in the following order.
+        //    1. [meta block: filter]
+        //    2. [meta block: index]
+        //    3. [meta block: compression dictionary]
+        //    4. [meta block: range deletion tombstone]
+        //    5. [meta block: properties]
+        //    6. [metaindex block]
+        //    7. Footer
         let mut meta_index_builder = MetaIndexBuilder::new();
         self.write_filter_block(&mut meta_index_builder)?;
         let index_block_handle = self.write_index_block()?;
@@ -192,7 +260,7 @@ impl TableBuilder for BlockBasedTableBuilder {
         let metaindex_block_handle = self
             .rep
             .write_raw_block(meta_index_builder.finish(), false)?;
-        // self.write_footer(metaindex_block_handle, index_block_handle)?;
+        self.write_footer(metaindex_block_handle, index_block_handle)?;
         Ok(())
     }
 

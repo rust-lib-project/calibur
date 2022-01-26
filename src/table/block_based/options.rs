@@ -1,5 +1,6 @@
 use crate::common::SliceTransform;
 use crate::table::block_based::filter_block_builder::FilterBuilderFactory;
+use crate::table::format::ChecksumType;
 use std::sync::Arc;
 
 #[derive(Eq, PartialEq, Clone)]
@@ -32,6 +33,7 @@ pub struct BlockBasedTableOptions {
     pub block_align: bool,
     pub block_restart_interval: usize,
     pub block_size: usize,
+    pub checksum: ChecksumType,
     pub data_block_hash_table_util_ratio: f64,
     pub data_block_index_type: DataBlockIndexType,
     pub filter_factory: Arc<dyn FilterBuilderFactory>,
