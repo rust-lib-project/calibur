@@ -7,7 +7,7 @@ use std::path::PathBuf;
 pub use file::PosixWritableFile;
 pub use writer::WritableFileWriter;
 
-pub trait RandomAccessFileReader {}
+pub trait RandomAccessFileReader: 'static + Send + Sync {}
 
 pub trait WritableFile {
     fn append(&mut self, data: &[u8]) -> Result<()>;

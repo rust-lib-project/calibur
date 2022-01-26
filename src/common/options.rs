@@ -19,3 +19,10 @@ pub enum CompressionType {
     // DisableCompressionOption is used to disable some compression options.
     DisableCompressionOption = 0xff,
 }
+
+pub struct ReadOptions {
+    pub snapshot: u64,
+    pub fill_cache: bool,
+    pub total_order_seek: bool,
+    pub prefix_same_as_start: bool,
+}

@@ -5,7 +5,6 @@ use crate::table::block_based::options::{BlockBasedTableOptions, DataBlockIndexT
 use crate::table::format::*;
 pub use crate::util::extract_user_key;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 
 pub struct IndexBlocks {
     pub index_block_contents: Vec<u8>,

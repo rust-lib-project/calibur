@@ -2,9 +2,10 @@ mod block_based;
 mod format;
 mod table_properties;
 
-use crate::common::options::CompressionType;
-use crate::common::{InternalKeyComparator, Result};
+use crate::common::options::{CompressionType, ReadOptions};
+use crate::common::{InternalKeyComparator, Result, SliceTransform};
 use crate::common::{RandomAccessFileReader, WritableFileWriter};
+use async_trait::async_trait;
 use std::sync::Arc;
 
 pub trait TableReaderIterator {
@@ -17,9 +18,10 @@ pub trait TableReaderIterator {
     fn value(&self) -> &[u8];
 }
 
-pub trait TableReader {
-    fn get(&self, key: &[u8], sequence: u64) -> Result<Option<Vec<u8>>>;
-    fn new_iterator(&self) -> Box<dyn TableReaderIterator>;
+#[async_trait]
+pub trait TableReader: 'static + Sync + Send {
+    async fn get(&self, opts: &ReadOptions, key: &[u8], sequence: u64) -> Result<Option<Vec<u8>>>;
+    fn new_iterator(&self, opts: &ReadOptions) -> Box<dyn TableReaderIterator>;
 }
 
 pub trait TableBuilder {
@@ -29,9 +31,15 @@ pub trait TableBuilder {
     fn num_entries(&self) -> u64;
 }
 
+#[async_trait]
 pub trait TableFactory {
     fn name(&self) -> &'static str;
-    fn new_reader(&self, file: Arc<dyn RandomAccessFileReader>) -> Result<Arc<dyn TableReader>>;
+    async fn open_reader(
+        &self,
+        options: &TableReaderOptions,
+        file: Arc<dyn RandomAccessFileReader>,
+    ) -> Result<Arc<dyn TableReader>>;
+
     fn new_builder(
         &self,
         options: &TableBuilderOptions,
@@ -46,4 +54,9 @@ pub struct TableBuilderOptions {
     target_file_size: usize,
     compression_type: CompressionType,
     column_family_id: u32,
+}
+
+pub struct TableReaderOptions {
+    prefix_extractor: Arc<dyn SliceTransform>,
+    internal_comparator: InternalKeyComparator,
 }

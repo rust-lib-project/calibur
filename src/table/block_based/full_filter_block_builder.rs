@@ -1,7 +1,6 @@
 use crate::common::SliceTransform;
 use crate::table::block_based::filter_block_builder::*;
 use crate::table::block_based::options::BlockBasedTableOptions;
-use crate::table::format::BlockHandle;
 use crate::util::hash::bloom_hash;
 use std::sync::Arc;
 

@@ -182,7 +182,7 @@ impl BlockBasedTableBuilder {
         metaindex_block_handle: BlockHandle,
         index_block_handle: BlockHandle,
     ) -> Result<()> {
-        let legacy = (self.rep.options.format_version == 0);
+        let legacy = self.rep.options.format_version == 0;
         let magic_number = if legacy {
             LEGACY_BLOCK_BASED_TABLE_MAGIC_NUMBER
         } else {
@@ -193,7 +193,7 @@ impl BlockBasedTableBuilder {
             checksum: self.rep.options.checksum as u8,
             metaindex_handle: metaindex_block_handle,
             index_handle: index_block_handle,
-            table_magic_number: 0,
+            table_magic_number: magic_number,
         };
         let mut buf = vec![];
         footer.encode_to(&mut buf);
