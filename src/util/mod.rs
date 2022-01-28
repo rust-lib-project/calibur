@@ -4,6 +4,10 @@ pub fn decode_fixed_uint32(key: &[u8]) -> u32 {
     unsafe { u32::from_le_bytes(*(key as *const _ as *const [u8; 4])) }
 }
 
+pub fn decode_fixed_uint16(key: &[u8]) -> u16 {
+    unsafe { u16::from_le_bytes(*(key as *const _ as *const [u8; 2])) }
+}
+
 pub fn decode_fixed_uint64(key: &[u8]) -> u64 {
     unsafe { u64::from_le_bytes(*(key as *const _ as *const [u8; 8])) }
 }
@@ -81,6 +85,24 @@ pub fn get_var_uint32(data: &[u8]) -> Option<(usize, u32)> {
         } else {
             ret |= (data[i] as u32) << (i as u32 * 7);
             return Some((i + 1, ret));
+        }
+    }
+    return None;
+}
+
+pub fn get_var_uint64(data: &[u8]) -> Option<(usize, u64)> {
+    const B: u8 = 128;
+    const MASK: u64 = 127;
+
+    let mut ret: u64 = 0;
+    let mut shift = 0;
+    let mut offset = 0;
+    while shift <= 63 && offset < data.len() {
+        if data[offset] & B > 0 {
+            ret |= (data[offset] as u64 & MASK) << shift;
+        } else {
+            ret |= (data[offset] as u64) << shift;
+            return Some((offset + 1, ret));
         }
     }
     return None;

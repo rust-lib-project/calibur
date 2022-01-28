@@ -1,4 +1,5 @@
 use crate::util::hash::key_hash;
+use crate::util::{decode_fixed_uint16, decode_fixed_uint32};
 
 const MAX_RESTART_SUPPORTED_BY_HASH_INDEX: usize = 253;
 const NO_ENTRY: u8 = 255;
@@ -77,5 +78,24 @@ impl DataBlockHashIndexBuilder {
         estimated_num_buckets |= 1;
 
         std::mem::size_of::<u16>() + estimated_num_buckets as usize * std::mem::size_of::<u8>()
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct DataBlockHashIndex {
+    num_buckets: u16,
+}
+
+impl DataBlockHashIndex {
+    pub fn initialize(&mut self, data: &[u8]) -> u16 {
+        let offset = data.len() - std::mem::size_of::<u16>();
+        self.num_buckets = decode_fixed_uint16(&data[offset..]);
+        (offset - self.num_buckets as usize * std::mem::size_of::<u8>()) as u16
+    }
+
+    pub fn lookup(&self, data: &[u8], map_offset: u64, key: &[u8]) -> u8 {
+        let h = key_hash(key);
+        let idx = (h % self.num_buckets) as usize;
+        data[idx + map_offset]
     }
 }

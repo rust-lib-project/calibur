@@ -10,7 +10,7 @@ pub use slice_transform::SliceTransform;
 
 pub use error::Error;
 pub use file_system::{
-    FileSystem, PosixWritableFile, RandomAccessFileReader, WritableFile, WritableFileWriter,
+    FileSystem, RandomAccessFile, RandomAccessFileReader, WritableFile, WritableFileWriter,
 };
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -18,7 +18,8 @@ use crate::common::format::VALUE_TYPE_FOR_SEEK;
 use std::cmp::Ordering;
 use std::sync::Arc;
 
-const MAX_SEQUENCE_NUMBER: u64 = (1u64 << 56) - 1;
+pub const MAX_SEQUENCE_NUMBER: u64 = (1u64 << 56) - 1;
+pub const DISABLE_GLOBAL_SEQUENCE_NUMBER: u64 = u64::MAX;
 
 pub trait KeyComparator: Send + Sync {
     fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> Ordering;

@@ -1,3 +1,4 @@
+mod block;
 mod block_builder;
 mod block_table;
 mod bloom;
@@ -15,3 +16,4 @@ pub use filter_block_builder::FilterBuilderFactory;
 pub use full_filter_block_builder::FullFilterBlockFactory;
 pub use options::BlockBasedTableOptions;
 pub use table_builder_factory::BlockBasedTableFactory;
+const BLOCK_TRAILER_SIZE: usize = 5;

@@ -23,7 +23,7 @@ const MIN_ALLOCATE_SIZE: usize = 4 * 1024;
 /// UNIX-based systems.
 pub struct RawFile(RawFd);
 
-fn from_nix_error(e: nix::Error, custom: &'static str) -> std::io::Error {
+pub fn from_nix_error(e: nix::Error, custom: &'static str) -> std::io::Error {
     let kind = std::io::Error::from(e).kind();
     std::io::Error::new(kind, custom)
 }

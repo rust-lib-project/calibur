@@ -1,13 +1,23 @@
-mod file;
+mod aio_file;
+mod posix_file;
+mod reader;
 mod writer;
 
 use super::Result;
 use std::path::PathBuf;
 
-pub use file::PosixWritableFile;
+use async_trait::async_trait;
+pub use posix_file::PosixWritableFile;
+pub use reader::RandomAccessFileReader;
 pub use writer::WritableFileWriter;
 
-pub trait RandomAccessFileReader: 'static + Send + Sync {}
+#[async_trait]
+pub trait RandomAccessFile: 'static + Send + Sync {
+    async fn read(&self, offset: usize, n: usize, data: &mut [u8]) -> Result<usize>;
+    fn use_direct_io(&self) -> bool {
+        false
+    }
+}
 
 pub trait WritableFile {
     fn append(&mut self, data: &[u8]) -> Result<()>;
@@ -26,4 +36,9 @@ pub trait WritableFile {
 pub trait FileSystem {
     fn open_writable_file(&self, path: PathBuf, file_name: String)
         -> Result<Box<dyn WritableFile>>;
+    fn open_random_access_file(
+        &self,
+        path: PathBuf,
+        file_name: String,
+    ) -> Result<Box<dyn WritableFile>>;
 }

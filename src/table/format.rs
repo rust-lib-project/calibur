@@ -1,4 +1,8 @@
-use crate::util::encode_var_uint64;
+use crate::common::{Error, Result};
+use crate::table::format::ChecksumType::CRC32c;
+use crate::util::{decode_fixed_uint32, encode_var_uint64, get_var_uint32, get_var_uint64};
+
+pub const MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX: usize = 1usize << 16;
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct BlockHandle {
@@ -12,6 +16,23 @@ impl BlockHandle {
         let offset = encode_var_uint64(&mut tmp, self.offset);
         let offset = encode_var_uint64(&mut tmp[offset..], self.size);
         data.extend_from_slice(&tmp[..offset]);
+    }
+
+    pub fn decode_from(&mut self, data: &[u8]) -> Result<usize> {
+        let offset = match get_var_uint64(data) {
+            None => return Err(Error::VarDecode("BlockHandle")),
+            Some((val_len, val)) => {
+                self.offset = val;
+                val_len
+            }
+        };
+        match get_var_uint64(&data[offset..]) {
+            None => Err(Error::VarDecode("BlockHandle")),
+            Some((val_len, val)) => {
+                self.size = val;
+                offset + val_len
+            }
+        }
     }
 }
 
@@ -67,6 +88,7 @@ pub const LEGACY_BLOCK_BASED_TABLE_MAGIC_NUMBER: u64 = 0xdb4775248b80fb57u64;
 pub const LEGACY_PLAIN_TABLE_MAGIC_NUMBER: u64 = 0x4f3418eb7a8f13b8u64;
 pub const BLOCK_BASED_TABLE_MAGIC_NUMBER: u64 = 0x88e241b785f4cff7u64;
 pub const PLAIN_TABLE_MAGIC_NUMBER: u64 = 0x8242229663bf9564u64;
+const MAGIC_NUMBER_LENGTH_BYTE: usize = 8;
 
 pub fn is_legacy_footer_format(magic_number: u64) -> bool {
     magic_number == LEGACY_BLOCK_BASED_TABLE_MAGIC_NUMBER
@@ -82,9 +104,9 @@ pub struct Footer {
     pub table_magic_number: u64,
 }
 
-const BLOCK_HANDLE_MAX_ENCODED_LENGTH: usize = 20;
-const VERSION0ENCODED_LENGTH: usize = 2 * BLOCK_HANDLE_MAX_ENCODED_LENGTH + 8;
-const NEW_VERSIONS_ENCODED_LENGTH: usize = 1 + 2 * BLOCK_HANDLE_MAX_ENCODED_LENGTH + 4 + 8;
+pub const BLOCK_HANDLE_MAX_ENCODED_LENGTH: usize = 20;
+pub const VERSION0ENCODED_LENGTH: usize = 2 * BLOCK_HANDLE_MAX_ENCODED_LENGTH + 8;
+pub const NEW_VERSIONS_ENCODED_LENGTH: usize = 1 + 2 * BLOCK_HANDLE_MAX_ENCODED_LENGTH + 4 + 8;
 
 impl Footer {
     pub fn set_checksum(&mut self, ck: ChecksumType) {
@@ -116,5 +138,41 @@ impl Footer {
             buf.extend_from_slice(&v2.to_le_bytes());
             assert_eq!(buf.len(), origin_size + NEW_VERSIONS_ENCODED_LENGTH);
         }
+    }
+
+    pub fn decode_from(&mut self, data: &[u8]) -> Result<()> {
+        let magic_offset = data.len() - MAGIC_NUMBER_LENGTH_BYTE;
+        let magic_lo = decode_fixed_uint32(&data[magic_offset..]);
+        let magic_hi = decode_fixed_uint32(&data[(magic_offset + 4)..]);
+        let mut magic = ((magic_hi as u64) << 32) | (magic_lo as u64);
+        let legacy = is_legacy_footer_format(magic);
+        if legacy {
+            if magic == LEGACY_BLOCK_BASED_TABLE_MAGIC_NUMBER {
+                magic = BLOCK_BASED_TABLE_MAGIC_NUMBER;
+            } else if magic == LEGACY_PLAIN_TABLE_MAGIC_NUMBER {
+                magic = PLAIN_TABLE_MAGIC_NUMBER;
+            }
+        }
+
+        self.table_magic_number = magic;
+        let mut offset = if legacy {
+            self.version = 0;
+            self.checksum = CRC32c as u8;
+            data.len() - VERSION0ENCODED_LENGTH
+        } else {
+            self.version = decode_fixed_uint32(&data[(magic_offset - 4)..]);
+            let mut offset = data.len() - NEW_VERSIONS_ENCODED_LENGTH;
+            match get_var_uint32(&data[offset..]) {
+                None => return Err(Error::VarDecode("BlockBasedTable Footer")),
+                Some((val_len, val)) => {
+                    self.checksum = val as u8;
+                    offset += val_len;
+                }
+            }
+            offset
+        };
+        offset += self.metaindex_handle.decode_from(&data[offset..])?;
+        self.index_handle.decode_from(&data[offset..])?;
+        Ok(())
     }
 }

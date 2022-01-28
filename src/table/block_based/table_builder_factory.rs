@@ -1,12 +1,12 @@
-use crate::common::{RandomAccessFileReader, WritableFileWriter};
+use crate::common::{RandomAccessFile, RandomAccessFileReader, WritableFileWriter};
 use crate::table::block_based::options::BlockBasedTableOptions;
 use crate::table::block_based::table_builder::BlockBasedTableBuilder;
+use crate::table::block_based::table_reader::BlockBasedTable;
 use crate::table::{
     TableBuilder, TableBuilderOptions, TableFactory, TableReader, TableReaderOptions,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
-use crate::table::block_based::table_reader::BlockBasedTable;
 
 pub struct BlockBasedTableFactory {
     opts: BlockBasedTableOptions,
@@ -21,9 +21,9 @@ impl TableFactory for BlockBasedTableFactory {
     async fn open_reader(
         &self,
         opts: &TableReaderOptions,
-        file: Arc<dyn RandomAccessFileReader>,
+        reader: Box<RandomAccessFileReader>,
     ) -> crate::common::Result<Arc<dyn TableReader>> {
-        let reader = BlockBasedTable::open(opts, file).await?;
+        let reader = BlockBasedTable::open(opts, reader).await?;
         Ok(Arc::new(reader))
     }
 

@@ -1,3 +1,5 @@
+use crate::table::block_based::block::pack_index_type_and_num_restarts;
+use crate::table::format::MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX;
 use super::data_block_hash_index_builder::DataBlockHashIndexBuilder;
 use super::options::DataBlockIndexType;
 use crate::util::{difference_offset, encode_var_uint32, extract_user_key};
@@ -74,6 +76,17 @@ impl BlockBuilder {
     }
 
     pub fn finish(&mut self) -> &[u8] {
+        for i in self.restarts.iter() {
+            self.buff.extend_from_slice(&i.to_le_bytes());
+        }
+        let index_type = if self.hash_index_builder.valid() && self.current_size_estimate()  < MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX {
+            self.hash_index_builder.finish(&mut self.buff);
+            DataBlockIndexType::DataBlockBinaryAndHash
+        } else {
+            DataBlockIndexType::DataBlockBinarySearch
+        };
+        let block_footer = pack_index_type_and_num_restarts(index_type, self.restarts.len() as u32);
+        self.buff.extend_from_slice(&block_footer.to_le_bytes());
         &self.buff
     }
 
