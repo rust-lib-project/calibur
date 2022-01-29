@@ -30,7 +30,7 @@ impl BlockHandle {
             None => Err(Error::VarDecode("BlockHandle")),
             Some((val_len, val)) => {
                 self.size = val;
-                offset + val_len
+                Ok(offset + val_len)
             }
         }
     }

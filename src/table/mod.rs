@@ -3,7 +3,7 @@ mod format;
 mod table_properties;
 
 use crate::common::options::{CompressionType, ReadOptions};
-use crate::common::{InternalKeyComparator, Result, SliceTransform};
+use crate::common::{InternalKeyComparator, RandomAccessFileReader, Result, SliceTransform};
 use crate::common::{RandomAccessFile, WritableFileWriter};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -37,7 +37,8 @@ pub trait TableFactory {
     async fn open_reader(
         &self,
         options: &TableReaderOptions,
-        file: Arc<dyn RandomAccessFile>,
+        file_size: usize,
+        file: Box<RandomAccessFileReader>,
     ) -> Result<Arc<dyn TableReader>>;
 
     fn new_builder(

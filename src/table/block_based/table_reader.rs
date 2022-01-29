@@ -6,7 +6,6 @@ use crate::table::format::{
 };
 use crate::table::{TableReader, TableReaderIterator, TableReaderOptions};
 use async_trait::async_trait;
-use std::sync::Arc;
 
 pub struct BlockBasedTableIterator {}
 
@@ -88,12 +87,10 @@ async fn read_footer_from_file(file: &RandomAccessFileReader, file_size: usize) 
         .read(read_offset, NEW_VERSIONS_ENCODED_LENGTH, &mut data)
         .await?;
     let mut footer = Footer::default();
-    footer.decode_from(&data[..sz]);
+    footer.decode_from(&data[..sz])?;
     assert_eq!(footer.table_magic_number, BLOCK_BASED_TABLE_MAGIC_NUMBER);
     Ok(footer)
 }
-
-async fn read_meta_block() -> Box<Block> {}
 
 async fn read_block_from_file(
     file: &RandomAccessFileReader,

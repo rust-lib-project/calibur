@@ -21,9 +21,10 @@ impl TableFactory for BlockBasedTableFactory {
     async fn open_reader(
         &self,
         opts: &TableReaderOptions,
+        file_size: usize,
         reader: Box<RandomAccessFileReader>,
     ) -> crate::common::Result<Arc<dyn TableReader>> {
-        let reader = BlockBasedTable::open(opts, reader).await?;
+        let reader = BlockBasedTable::open(opts, reader, file_size).await?;
         Ok(Arc::new(reader))
     }
 

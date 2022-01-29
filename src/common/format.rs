@@ -14,6 +14,12 @@ pub enum ValueType {
     MaxValue = 0x7F,                     // Not used for storing records.
 }
 
+#[derive(Default, Clone)]
+pub struct Slice {
+    pub offset: usize,
+    pub limit: usize,
+}
+
 pub const VALUE_TYPE_FOR_SEEK: u8 = ValueType::TypeBlobIndex as u8;
 
 pub fn pack_sequence_and_type(seq: u64, t: u8) -> u64 {

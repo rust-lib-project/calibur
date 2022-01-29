@@ -1,7 +1,7 @@
-use crate::table::block_based::block::pack_index_type_and_num_restarts;
-use crate::table::format::MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX;
 use super::data_block_hash_index_builder::DataBlockHashIndexBuilder;
 use super::options::DataBlockIndexType;
+use crate::table::block_based::block::pack_index_type_and_num_restarts;
+use crate::table::format::MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX;
 use crate::util::{difference_offset, encode_var_uint32, extract_user_key};
 
 pub const DEFAULT_HASH_TABLE_UTIL_RATIO: f64 = 0.75;
@@ -79,7 +79,9 @@ impl BlockBuilder {
         for i in self.restarts.iter() {
             self.buff.extend_from_slice(&i.to_le_bytes());
         }
-        let index_type = if self.hash_index_builder.valid() && self.current_size_estimate()  < MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX {
+        let index_type = if self.hash_index_builder.valid()
+            && self.current_size_estimate() < MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX
+        {
             self.hash_index_builder.finish(&mut self.buff);
             DataBlockIndexType::DataBlockBinaryAndHash
         } else {
@@ -107,5 +109,50 @@ impl BlockBuilder {
             0
         };
         self.estimate + x
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::{
+        DefaultUserComparator, InternalKeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER,
+    };
+    use crate::table::block_based::block::Block;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_block_build_without_global_seqno() {
+        let mut builder =
+            BlockBuilder::new(5, true, DataBlockIndexType::DataBlockBinarySearch, 0.0);
+        let mut kvs = vec![];
+        kvs.push((b"abcdeeeeee00000001".to_vec(), b"v0"));
+        kvs.push((b"abcdefffff00000001".to_vec(), b"v0"));
+        kvs.push((b"abcdeggggg00000001".to_vec(), b"v0"));
+        kvs.push((b"abcdehhhhh00000001".to_vec(), b"v0"));
+        kvs.push((b"abcdeiiiii00000001".to_vec(), b"v0"));
+        kvs.push((b"abcdejjjjj00000001".to_vec(), b"v0"));
+        for i in 0..100u64 {
+            let mut b = b"abcdek".to_vec();
+            b.extend_from_slice(&i.to_le_bytes());
+            kvs.push((b, b"v1"));
+        }
+        for (k, &v) in kvs.iter() {
+            builder.add(&k, &v);
+        }
+        let data = builder.finish().to_vec();
+        let block = Block::new(data, DISABLE_GLOBAL_SEQUENCE_NUMBER);
+        let mut iter = block.new_data_iterator(Arc::new(InternalKeyComparator::new(Arc::new(
+            DefaultUserComparator::default(),
+        ))));
+        iter.seek_to_first();
+        let mut i = 0;
+        for (k, v) in kvs {
+            assert!(iter.valid());
+            assert_eq!(iter.key(), k.as_slice());
+            assert_eq!(iter.value(), v.as_slice());
+            iter.next();
+            i += 1;
+        }
     }
 }

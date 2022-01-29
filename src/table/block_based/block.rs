@@ -1,8 +1,11 @@
-use crate::common::KeyComparator;
+use crate::common::format::{pack_sequence_and_type, Slice};
+use crate::common::{KeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER};
+use crate::compactor::Compactor;
 use crate::table::block_based::data_block_hash_index_builder::DataBlockHashIndex;
 use crate::table::block_based::options::DataBlockIndexType;
 use crate::table::format::MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX;
-use crate::util::decode_fixed_uint32;
+use crate::util::{decode_fixed_uint32, decode_fixed_uint64, get_var_uint32};
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 const DATA_BLOCK_INDEX_TYPE_BIT_SHIFT: u32 = 31;
@@ -14,7 +17,7 @@ const NUM_RESTARTS_MASK: u32 = (1u32 << DATA_BLOCK_INDEX_TYPE_BIT_SHIFT) - 1u32;
 
 pub struct Block {
     pub data: Vec<u8>,
-    pub restart_offset: u32,
+    pub restart_offset: usize,
     pub num_restarts: u32,
     pub global_seqno: u64,
     data_block_hash_index: DataBlockHashIndex,
@@ -34,8 +37,8 @@ impl Block {
             let num_restarts = calculate_num_restarts(&data);
             match calculate_index_type(&data) {
                 DataBlockIndexType::DataBlockBinarySearch => {
-                    let restart_offset =
-                        data.len() as u32 - (1 + num_restarts_) * std::mem::size_of::<u32>();
+                    let restart_offset = data.len() as usize
+                        - (1 + num_restarts as usize) * std::mem::size_of::<u32>();
                     if restart_offset + std::mem::size_of::<u32>() > data.len() {
                         Block {
                             data: vec![],
@@ -59,6 +62,16 @@ impl Block {
                 }
             }
         }
+    }
+
+    pub fn new_data_iterator(&self, comparator: Arc<dyn KeyComparator>) -> DataBlockIter {
+        DataBlockIter::new(
+            &self.data,
+            self.restart_offset,
+            self.num_restarts,
+            self.global_seqno,
+            comparator,
+        )
     }
 }
 
@@ -84,7 +97,7 @@ pub fn calculate_index_type(data: &[u8]) -> DataBlockIndexType {
 }
 
 pub fn un_pack_index_type_and_num_restarts(block_footer: u32) -> (DataBlockIndexType, u32) {
-    let tp = if block_footer & (1u32 << DATA_BLOCK_INDEX_TYPE_BIT_SHIFT) {
+    let tp = if (block_footer & (1u32 << DATA_BLOCK_INDEX_TYPE_BIT_SHIFT)) > 0 {
         DataBlockIndexType::DataBlockBinaryAndHash
     } else {
         DataBlockIndexType::DataBlockBinarySearch
@@ -100,39 +113,196 @@ pub fn pack_index_type_and_num_restarts(tp: DataBlockIndexType, num_restarts: u3
     footer
 }
 
+pub struct GlobalSeqnoAppliedKey {
+    offset: usize,
+    limit: usize,
+    internal_key: Vec<u8>,
+    global_seqno: u64,
+}
+
+impl GlobalSeqnoAppliedKey {
+    fn get_key(&self) -> &[u8] {
+        &self.internal_key
+    }
+
+    fn set_key(&mut self, data: &[u8], offset: usize, key_len: usize) {
+        if self.global_seqno == DISABLE_GLOBAL_SEQUENCE_NUMBER {
+            self.internal_key.clear();
+            self.internal_key
+                .extend_from_slice(&data[offset..(offset + key_len)]);
+            return;
+        }
+        let tail_offset = offset + key_len - 8;
+        let num = decode_fixed_uint64(&data[tail_offset..]);
+        self.internal_key
+            .extend_from_slice(&data[offset..tail_offset]);
+        let num = pack_sequence_and_type(self.global_seqno, (num & 0xff) as u8);
+        self.internal_key.extend_from_slice(&num.to_le_bytes());
+    }
+
+    fn trim_append(&mut self, data: &[u8], offset: usize, shared: usize, non_shared: usize) {
+        self.internal_key.resize(shared, 0);
+        self.internal_key
+            .extend_from_slice(&data[offset..(offset + non_shared)]);
+    }
+}
+
 pub struct DataBlockIter<'a> {
     data: &'a [u8],
     restart_offset: usize,
     comparator: Arc<dyn KeyComparator>,
-    current: u32,
-    num_restars: u32,
+    current: usize,
+    num_restarts: u32,
+    restart_index: u32,
+    applied_key: GlobalSeqnoAppliedKey,
+    value: Slice,
 }
 
-impl DataBlockIter {
-    fn get_restart_point(&self, index: u32) -> u32{
-        let offset = self.restart_offset  + index as usize * std::mem::size_of::<u32>();
+impl<'a> DataBlockIter<'a> {
+    pub fn new(
+        data: &'a [u8],
+        restart_offset: usize,
+        num_restarts: u32,
+        global_seqno: u64,
+        comparator: Arc<dyn KeyComparator>,
+    ) -> Self {
+        Self {
+            data,
+            comparator,
+            restart_offset,
+            current: 0,
+            num_restarts,
+            restart_index: 0,
+            applied_key: GlobalSeqnoAppliedKey {
+                global_seqno,
+                internal_key: vec![],
+                offset: 0,
+                limit: 0,
+            },
+            value: Slice::default(),
+        }
+    }
+
+    fn get_restart_point(&self, index: u32) -> u32 {
+        let offset = self.restart_offset + index as usize * std::mem::size_of::<u32>();
         decode_fixed_uint32(&self.data[offset..])
     }
 
-    fn binary_seek_index(&self, key: &[u8])-> i32 {
+    fn binary_seek_index(&mut self, key: &[u8]) -> i32 {
         let mut left = 0;
-        let mut right = self.num_restars - 1;
+        let mut right = self.num_restarts - 1;
         while left < right {
             let mid = (left + right + 1) / 2;
-            let region_offset = self.get_restart_point(mid);
+            let region_offset = self.get_restart_point(mid) as usize;
+            let (next_offset, shared, non_shared) = decode_key(&self.data[region_offset..]);
+            if next_offset == 0 {
+                return -1;
+            }
+            self.applied_key
+                .set_key(self.data, region_offset + next_offset, non_shared as usize);
+            let ord = self.comparator.compare_key(self.applied_key.get_key(), key);
+            if ord == Ordering::Less {
+                left = mid;
+            } else if ord == Ordering::Greater {
+                right = mid - 1;
+            } else {
+                left = mid;
+                right = mid;
+            }
         }
-        -1
+        left as i32
+    }
+    fn seek_to_restart_point(&mut self, index: u32) {
+        self.restart_index = index;
+        self.get_restart_point(index) as usize;
+        self.value.offset = self.get_restart_point(index) as usize;
+        self.value.limit = self.value.offset;
+    }
+
+    fn parse_next_key(&mut self) -> bool {
+        self.current = self.value.limit;
+        if self.current >= self.restart_offset {
+            return false;
+        }
+        let (offset, shared, non_shared, val_len) = decode_entry(&self.data[self.current..]);
+        if offset == 0 {
+            return false;
+        }
+
+        let current = self.current + offset;
+        if shared == 0 {
+            self.applied_key
+                .set_key(self.data, current, non_shared as usize);
+        } else {
+            self.applied_key
+                .trim_append(self.data, current, shared as usize, non_shared as usize);
+        }
+        self.value.offset = current + non_shared as usize;
+        self.value.limit = self.value.offset + val_len as usize;
+        if shared == 0 {
+            while self.restart_index + 1 < self.num_restarts
+                && self.get_restart_point(self.restart_index + 1) < self.current as u32
+            {
+                self.restart_index += 1;
+            }
+        }
+        true
     }
 
     pub fn seek(&mut self, key: &[u8]) {
+        let index = self.binary_seek_index(key);
+        if index == -1 {
+            return;
+        }
+        self.seek_to_restart_point(index as u32);
+        while self.parse_next_key() && self.comparator.less_than(self.applied_key.get_key(), key) {}
     }
-    pub fn seek_to_first(&mut self) {}
-    pub fn next(&mut self) {}
+
+    pub fn seek_to_first(&mut self) {
+        self.seek_to_restart_point(0);
+        self.parse_next_key();
+    }
+
+    pub fn next(&mut self) {
+        self.parse_next_key();
+    }
+
     pub fn prev(&mut self) {
         unimplemented!();
     }
-    pub fn key(&self) -> &[u8] {}
-    pub fn value(&self) -> &[u8] {}
-    pub fn valid(&self) -> bool {
+    pub fn key(&self) -> &[u8] {
+        self.applied_key.get_key()
     }
+
+    pub fn value(&self) -> &[u8] {
+        &self.data[self.value.offset..self.value.limit]
+    }
+
+    pub fn valid(&self) -> bool {
+        self.current < self.restart_offset
+    }
+}
+
+pub fn decode_key(key: &[u8]) -> (usize, u32, u32) {
+    let (offset, shared, non_shared, _) = decode_entry(key);
+    (offset, shared, non_shared)
+}
+
+pub fn decode_entry(key: &[u8]) -> (usize, u32, u32, u32) {
+    if (key[0] | key[1] | key[2]) < 128 {
+        return (3, key[0] as u32, key[1] as u32, key[2] as u32);
+    }
+    let (next_offset, shared) = match get_var_uint32(key) {
+        Some((offset, val)) => (offset, val),
+        None => return (0, 0, 0, 0),
+    };
+    let (next_offset, non_shared) = match get_var_uint32(&key[next_offset..]) {
+        Some((offset, val)) => (next_offset + offset, val),
+        None => return (0, 0, 0, 0),
+    };
+    let (next_offset, val_len) = match get_var_uint32(&key[next_offset..]) {
+        Some((offset, val)) => (next_offset + offset, val),
+        None => return (0, 0, 0, 0),
+    };
+    (next_offset, shared, non_shared, val_len)
 }

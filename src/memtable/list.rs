@@ -411,11 +411,11 @@ impl<T: AsRef<Skiplist>> IterRef<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::FixedLengthSuffixComparator;
+    use crate::common::DefaultUserComparator;
 
     #[test]
     fn test_find_near() {
-        let comp = FixedLengthSuffixComparator::new(8);
+        let comp = InternalKeyComparator::new(Arc::new(DefaultUserComparator::default()));
         let list = Skiplist::with_capacity(comp, 1 << 20);
         for i in 0..1000 {
             let key = Bytes::from(format!("{:05}{:08}", i * 10 + 5, 0));

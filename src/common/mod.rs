@@ -23,6 +23,9 @@ pub const DISABLE_GLOBAL_SEQUENCE_NUMBER: u64 = u64::MAX;
 
 pub trait KeyComparator: Send + Sync {
     fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> Ordering;
+    fn less_than(&self, lhs: &[u8], rhs: &[u8]) -> bool {
+        self.compare_key(lhs, rhs) == Ordering::Less
+    }
     fn same_key(&self, lhs: &[u8], rhs: &[u8]) -> bool;
     fn find_shortest_separator(&self, start: &mut Vec<u8>, limit: &[u8]);
     fn find_short_successor(&self, key: &mut Vec<u8>) {

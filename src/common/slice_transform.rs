@@ -15,7 +15,7 @@ pub struct InternalKeySliceTransform {
 }
 
 impl InternalKeySliceTransform {
-    pub fn new(transform: Arc<SliceTransform>) -> Self {
+    pub fn new(transform: Arc<dyn SliceTransform>) -> Self {
         Self { transform }
     }
 

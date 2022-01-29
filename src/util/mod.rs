@@ -104,6 +104,8 @@ pub fn get_var_uint64(data: &[u8]) -> Option<(usize, u64)> {
             ret |= (data[offset] as u64) << shift;
             return Some((offset + 1, ret));
         }
+        shift += 7;
+        offset += 1;
     }
     return None;
 }

@@ -1,5 +1,5 @@
 use crate::table::block_based::block_builder::BlockBuilder;
-use crate::table::block_based::options::{DataBlockIndexType, IndexType};
+use crate::table::block_based::options::DataBlockIndexType;
 use crate::table::format::BlockHandle;
 use crate::table::table_properties::*;
 use crate::util::encode_var_uint64;
