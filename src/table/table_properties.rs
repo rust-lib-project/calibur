@@ -1,3 +1,8 @@
+use std::collections::BTreeMap;
+use crate::table::InternalIterator;
+use crate::common::Result;
+use crate::table::format::BlockHandle;
+
 #[derive(Default, Debug, Clone)]
 pub struct TableProperties {
     pub data_size: u64,
@@ -57,6 +62,8 @@ pub struct TableProperties {
     pub prefix_extractor_name: String,
 
     pub compression_name: String,
+    pub version: u32,
+    pub global_seqno: u64,
 }
 
 pub const PROPERTIES_BLOCK: &str = "rocksdb.properties";
@@ -91,3 +98,44 @@ pub const PROPERTIES_COMPRESSION_OPTIONS: &str = "rocksdb.compression_options";
 pub const PROPERTIES_CREATION_TIME: &str = "rocksdb.creation.time";
 pub const PROPERTIES_OLDEST_KEY_TIME: &str = "rocksdb.oldest.key.time";
 pub const PROPERTIES_FILE_CREATION_TIME: &str = "rocksdb.file.creation.time";
+
+// value of this property is a fixed uint32 number.
+pub const PROPERTIES_VERSION: &str = "rocksdb.external_sst_file.version";
+// value of this property is a fixed uint64 number.
+pub const PROPERTIES_GLOBAL_SEQNO: &str = "rocksdb.external_sst_file.global_seqno";
+
+fn seek_to_metablock<I: InternalIterator>(meta_iter: &mut I, block_name: &str, block_handle: Option<&mut BlockHandle>) -> Result<bool> {
+    meta_iter.seek(block_name.as_bytes());
+    if meta_iter.valid() {
+        if meta_iter.key().eq(block_name.as_bytes()) {
+            if let Some(handle) = block_handle {
+                handle.decode_from(meta_iter.value())?;
+            }
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+pub fn seek_to_properties_block<I: InternalIterator>(meta_iter: &mut I) -> Result<bool> {
+    if !seek_to_metablock(meta_iter, PROPERTIES_BLOCK, None)? {
+        return seek_to_metablock(meta_iter, PROPERTIES_BLOCK_OLD_NAME, None);
+    }
+    Ok(true)
+}
+
+// pub struct UserCollectedProperties{
+//     inner: BTreeMap<String, Vec<u8>>,
+// }
+//
+// impl UserCollectedProperties {
+//     pub fn get_ref(&self, key: &str) -> Option<&Vec<u8>> {
+//         self.inner.get(key)
+//     }
+//     pub fn get(&self, key: &str) -> Option<Vec<u8>> {
+//         self.inner.get(key).map(|v|v.clone())
+//     }
+//     pub fn insert(&mut self, key: &str, value: Vec<u8>) {
+//         self.inner.insert(key.to_string(), value);
+//     }
+// }

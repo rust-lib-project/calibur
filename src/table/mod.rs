@@ -8,9 +8,11 @@ use crate::common::{RandomAccessFile, WritableFileWriter};
 use async_trait::async_trait;
 use std::sync::Arc;
 
-pub trait TableReaderIterator {
+pub trait InternalIterator {
     fn valid(&self) -> bool;
     fn seek(&mut self, key: &[u8]);
+    fn seek_to_first(&mut self);
+    fn seek_to_last(&mut self);
     fn seek_for_prev(&mut self, key: &[u8]);
     fn next(&mut self);
     fn prev(&mut self);
@@ -21,7 +23,7 @@ pub trait TableReaderIterator {
 #[async_trait]
 pub trait TableReader: 'static + Sync + Send {
     async fn get(&self, opts: &ReadOptions, key: &[u8], sequence: u64) -> Result<Option<Vec<u8>>>;
-    fn new_iterator(&self, opts: &ReadOptions) -> Box<dyn TableReaderIterator>;
+    fn new_iterator(&self, opts: &ReadOptions) -> Box<dyn InternalIterator>;
 }
 
 pub trait TableBuilder {
@@ -37,7 +39,6 @@ pub trait TableFactory {
     async fn open_reader(
         &self,
         options: &TableReaderOptions,
-        file_size: usize,
         file: Box<RandomAccessFileReader>,
     ) -> Result<Arc<dyn TableReader>>;
 
@@ -60,4 +61,8 @@ pub struct TableBuilderOptions {
 pub struct TableReaderOptions {
     prefix_extractor: Arc<dyn SliceTransform>,
     internal_comparator: InternalKeyComparator,
+    skip_filters: bool,
+    level: u32,
+    file_size: usize,
+    largest_seqno: u64,
 }

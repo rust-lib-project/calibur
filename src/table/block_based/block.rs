@@ -1,12 +1,14 @@
 use crate::common::format::{pack_sequence_and_type, Slice};
-use crate::common::{KeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER};
+use crate::common::{KeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER, RandomAccessFileReader, Result};
 use crate::compactor::Compactor;
 use crate::table::block_based::data_block_hash_index_builder::DataBlockHashIndex;
 use crate::table::block_based::options::DataBlockIndexType;
-use crate::table::format::MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX;
+use crate::table::format::{BlockHandle, MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX};
 use crate::util::{decode_fixed_uint32, decode_fixed_uint64, get_var_uint32};
 use std::cmp::Ordering;
 use std::sync::Arc;
+use crate::table::block_based::BLOCK_TRAILER_SIZE;
+use crate::table::InternalIterator;
 
 const DATA_BLOCK_INDEX_TYPE_BIT_SHIFT: u32 = 31;
 
@@ -158,6 +160,50 @@ pub struct DataBlockIter<'a> {
     value: Slice,
 }
 
+impl <'a> InternalIterator for DataBlockIter<'a> {
+    fn valid(&self) -> bool {
+        self.current < self.restart_offset
+    }
+    fn seek(&mut self, key: &[u8]) {
+        let index = self.binary_seek_index(key);
+        if index == -1 {
+            self.current = self.restart_offset;
+            return;
+        }
+        self.seek_to_restart_point(index as u32);
+        while self.parse_next_key() && self.comparator.less_than(self.applied_key.get_key(), key) {}
+    }
+
+    fn seek_to_first(&mut self) {
+        self.seek_to_restart_point(0);
+        self.parse_next_key();
+    }
+
+    fn seek_to_last(&mut self) {
+        unimplemented!()
+    }
+
+    fn seek_for_prev(&mut self, key: &[u8]) {
+        unimplemented!()
+    }
+
+    fn next(&mut self) {
+        self.parse_next_key();
+    }
+
+    fn prev(&mut self) {
+        unimplemented!()
+    }
+
+    fn key(&self) -> &[u8] {
+        self.applied_key.get_key()
+    }
+
+    fn value(&self) -> &[u8] {
+        &self.data[self.value.offset..self.value.limit]
+    }
+}
+
 impl<'a> DataBlockIter<'a> {
     pub fn new(
         data: &'a [u8],
@@ -249,38 +295,6 @@ impl<'a> DataBlockIter<'a> {
         true
     }
 
-    pub fn seek(&mut self, key: &[u8]) {
-        let index = self.binary_seek_index(key);
-        if index == -1 {
-            return;
-        }
-        self.seek_to_restart_point(index as u32);
-        while self.parse_next_key() && self.comparator.less_than(self.applied_key.get_key(), key) {}
-    }
-
-    pub fn seek_to_first(&mut self) {
-        self.seek_to_restart_point(0);
-        self.parse_next_key();
-    }
-
-    pub fn next(&mut self) {
-        self.parse_next_key();
-    }
-
-    pub fn prev(&mut self) {
-        unimplemented!();
-    }
-    pub fn key(&self) -> &[u8] {
-        self.applied_key.get_key()
-    }
-
-    pub fn value(&self) -> &[u8] {
-        &self.data[self.value.offset..self.value.limit]
-    }
-
-    pub fn valid(&self) -> bool {
-        self.current < self.restart_offset
-    }
 }
 
 pub fn decode_key(key: &[u8]) -> (usize, u32, u32) {
@@ -305,4 +319,17 @@ pub fn decode_entry(key: &[u8]) -> (usize, u32, u32, u32) {
         None => return (0, 0, 0, 0),
     };
     (next_offset, shared, non_shared, val_len)
+}
+
+pub async fn read_block_from_file(
+    file: &RandomAccessFileReader,
+    handle: &BlockHandle,
+    global_seqno: u64,
+) -> Result<Box<Block>> {
+    let read_len = handle.size as usize + BLOCK_TRAILER_SIZE;
+    let mut data = vec![0u8; read_len];
+    file.read(handle.offset as usize, read_len, data.as_mut_slice())
+        .await?;
+    // TODO: uncompress block
+    Ok(Box::new(Block::new(data, global_seqno)))
 }

@@ -6,6 +6,7 @@ use crate::util::{difference_offset, encode_var_uint32, extract_user_key};
 
 pub const DEFAULT_HASH_TABLE_UTIL_RATIO: f64 = 0.75;
 
+// TODO: support encode delta value encoding
 pub struct BlockBuilder {
     buff: Vec<u8>,
     restarts: Vec<u32>,
@@ -118,6 +119,7 @@ mod tests {
     use crate::common::{
         DefaultUserComparator, InternalKeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER,
     };
+    use crate::table::InternalIterator;
     use crate::table::block_based::block::Block;
     use std::sync::Arc;
 
