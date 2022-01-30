@@ -12,6 +12,7 @@ mod table_builder;
 mod table_builder_factory;
 mod table_reader;
 mod index_reader;
+mod table_iterator;
 
 pub use filter_block_builder::FilterBuilderFactory;
 pub use full_filter_block_builder::FullFilterBlockFactory;

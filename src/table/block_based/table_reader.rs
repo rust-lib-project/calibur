@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use crate::common::{DefaultUserComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER, options::ReadOptions, RandomAccessFile, RandomAccessFileReader, Result};
+use crate::common::{DefaultUserComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER, InternalKeyComparator, options::ReadOptions, RandomAccessFile, RandomAccessFileReader, Result};
 use crate::table::block_based::block::{Block, DataBlockIter, read_block_from_file};
 use crate::table::block_based::{BLOCK_TRAILER_SIZE, BlockBasedTableOptions};
 use crate::table::format::{
@@ -9,66 +9,17 @@ use crate::table::{TableReader, InternalIterator, TableReaderOptions};
 use async_trait::async_trait;
 use crate::table::block_based::index_reader::IndexReader;
 use crate::table::block_based::meta_block::read_properties;
+use crate::table::block_based::table_iterator::BlockBasedTableIterator;
 use crate::table::table_properties::{seek_to_properties_block, TableProperties};
-
-pub struct BlockBasedTableIterator {}
-
-impl InternalIterator for BlockBasedTableIterator {
-    fn valid(&self) -> bool {
-        todo!()
-    }
-
-    fn seek(&mut self, key: &[u8]) {
-        todo!()
-    }
-
-    fn seek_to_first(&mut self) {
-        todo!()
-    }
-
-    fn seek_to_last(&mut self) {
-        todo!()
-    }
-
-    fn seek_for_prev(&mut self, key: &[u8]) {
-        todo!()
-    }
-
-    fn next(&mut self) {
-        todo!()
-    }
-
-    fn prev(&mut self) {
-        todo!()
-    }
-
-    fn key(&self) -> &[u8] {
-        todo!()
-    }
-
-    fn value(&self) -> &[u8] {
-        todo!()
-    }
-}
 
 pub struct BlockBasedTable {
     footer: Footer,
     file: Box<RandomAccessFileReader>,
     index_reader: IndexReader,
     properties: Option<Box<TableProperties>>,
+    internal_comparator: Arc<InternalKeyComparator>,
 }
 
-#[async_trait]
-impl TableReader for BlockBasedTable {
-    async fn get(&self, opts: &ReadOptions, key: &[u8], sequence: u64) -> Result<Option<Vec<u8>>> {
-        Ok(None)
-    }
-
-    fn new_iterator(&self, opts: &ReadOptions) -> Box<dyn InternalIterator> {
-        let it = BlockBasedTableIterator {};
-        Box::new(it)
-    }
-}
 
 impl BlockBasedTable {
     pub async fn open(
@@ -95,18 +46,20 @@ impl BlockBasedTable {
         let properties = if seek_to_properties_block(&mut meta_iter)? {
             let (properties, _handle) = read_properties(meta_iter.value(), file.as_ref(), &footer).await?;
             // TODO: checksum
-            global_seqno = get_global_seqno(properties.as_ref(), largest_seqno)?;
+            global_seqno = get_global_seqno(properties.as_ref(), opts.largest_seqno)?;
             Some(properties)
         } else {
             None
         };
-        let policy = if opts.skip_filters {
-            None
-        } else {
-            Some(table_opts.filter_factory.clone())
-        };
+        // TODO: open filter reader
+        // let policy = if opts.skip_filters {
+        //     None
+        // } else {
+        //     Some(table_opts.filter_factory.clone())
+        // };
         let index_reader = IndexReader::open(file.as_ref(), &footer.index_handle, global_seqno).await?;
-        let mut table = BlockBasedTable { footer, file, properties, index_reader };
+        let mut table = BlockBasedTable { footer, file, properties, index_reader,
+            internal_comparator: Arc::new(opts.internal_comparator.clone()) };
         Ok(table)
     }
 
@@ -144,4 +97,18 @@ fn get_global_seqno(propertoes: &TableProperties, largest_seqno: u64) -> Result<
         return Ok(DISABLE_GLOBAL_SEQUENCE_NUMBER);
     }
     Ok(propertoes.global_seqno)
+}
+
+#[async_trait]
+impl TableReader for BlockBasedTable {
+    async fn get(&self, opts: &ReadOptions, key: &[u8], sequence: u64) -> Result<Option<Vec<u8>>> {
+        todo!()
+    }
+
+    fn new_iterator(&self, opts: &ReadOptions) -> Box<dyn InternalIterator> {
+        let index_iter = self.index_reader.new_iterator(self.internal_comparator.clone());
+        let iter = BlockBasedTableIterator::new(
+            self.internal_comparator.clone(), index_iter);
+        Box::new(iter)
+    }
 }

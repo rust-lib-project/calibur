@@ -100,9 +100,9 @@ impl IndexBuilder for ShortenedIndexBuilder {
         }
         let sep = last_key_in_current_block.as_slice();
         let entry =
-            IndexValueRef::new(block_handle.clone(), &self.current_block_first_internal_key);
+            IndexValueRef::new(block_handle.clone());
         let mut encoded_entry = vec![];
-        entry.encode_to(&mut encoded_entry, self.include_first_key);
+        entry.encode_to(&mut encoded_entry);
         self.last_encoded_handle = block_handle;
         self.index_block_builder.add(sep, &encoded_entry);
         if !self.seperator_is_key_plus_seq {

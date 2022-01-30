@@ -1,3 +1,6 @@
+use crate::common::DISABLE_GLOBAL_SEQUENCE_NUMBER;
+use crate::util::{decode_fixed_uint64, extract_user_key};
+
 pub enum ValueType {
     TypeDeletion = 0x0,
     TypeValue = 0x1,
@@ -46,3 +49,58 @@ pub fn is_extended_value_type(t: u8) -> bool {
         || t == ValueType::TypeBlobIndex as u8
         || t == ValueType::TypeRangeDeletion as u8
 }
+
+pub struct GlobalSeqnoAppliedKey {
+    internal_key: Vec<u8>,
+    global_seqno: u64,
+    is_user_key:  bool,
+}
+
+impl GlobalSeqnoAppliedKey {
+    pub fn new(global_seqno: u64, is_user_key:  bool) -> Self {
+        Self {
+            internal_key: vec![],
+            global_seqno,
+            is_user_key,
+        }
+    }
+
+    pub fn get_key(&self) -> &[u8] {
+        &self.internal_key
+    }
+
+    pub fn get_user_key(&self) -> &[u8] {
+        if self.is_user_key {
+            &self.internal_key
+        } else {
+            extract_user_key(&self.internal_key)
+        }
+    }
+
+    pub fn set_user_key(&mut self, key: &[u8]) {
+        self.is_user_key = true;
+        self.set_key(key);
+    }
+
+    pub fn set_key(&mut self, key: &[u8]) {
+        if self.global_seqno == DISABLE_GLOBAL_SEQUENCE_NUMBER {
+            self.internal_key.clear();
+            self.internal_key
+                .extend_from_slice(key);
+            return;
+        }
+        let tail_offset = key.len() - 8;
+        let num = decode_fixed_uint64(&key[tail_offset..]);
+        self.internal_key
+            .extend_from_slice(&key[..tail_offset]);
+        let num = pack_sequence_and_type(self.global_seqno, (num & 0xff) as u8);
+        self.internal_key.extend_from_slice(&num.to_le_bytes());
+    }
+
+    pub fn trim_append(&mut self, data: &[u8], offset: usize, shared: usize, non_shared: usize) {
+        self.internal_key.resize(shared, 0);
+        self.internal_key
+            .extend_from_slice(&data[offset..(offset + non_shared)]);
+    }
+}
+

@@ -1,10 +1,10 @@
-use crate::common::format::{pack_sequence_and_type, Slice};
+use crate::common::format::{GlobalSeqnoAppliedKey, pack_sequence_and_type, Slice};
 use crate::common::{KeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER, RandomAccessFileReader, Result};
 use crate::compactor::Compactor;
 use crate::table::block_based::data_block_hash_index_builder::DataBlockHashIndex;
 use crate::table::block_based::options::DataBlockIndexType;
-use crate::table::format::{BlockHandle, MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX};
-use crate::util::{decode_fixed_uint32, decode_fixed_uint64, get_var_uint32};
+use crate::table::format::{BlockHandle, IndexValue, MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX};
+use crate::util::{decode_fixed_uint32, decode_fixed_uint64, extract_user_key, get_var_uint32};
 use std::cmp::Ordering;
 use std::sync::Arc;
 use crate::table::block_based::BLOCK_TRAILER_SIZE;
@@ -72,8 +72,19 @@ impl Block {
             self.restart_offset,
             self.num_restarts,
             self.global_seqno,
+            false,
             comparator,
         )
+    }
+
+    // TODO: support encode index key without seq
+    pub fn new_index_iterator(&self, comparator: Arc<dyn KeyComparator>) -> IndexBlockIter {
+        let inner = self.new_data_iterator(comparator);
+        IndexBlockIter {
+            inner,
+            decoded_value: Default::default(),
+            key_includes_seq: true
+        }
     }
 }
 
@@ -113,40 +124,6 @@ pub fn pack_index_type_and_num_restarts(tp: DataBlockIndexType, num_restarts: u3
         footer |= 1u32 << DATA_BLOCK_INDEX_TYPE_BIT_SHIFT;
     }
     footer
-}
-
-pub struct GlobalSeqnoAppliedKey {
-    offset: usize,
-    limit: usize,
-    internal_key: Vec<u8>,
-    global_seqno: u64,
-}
-
-impl GlobalSeqnoAppliedKey {
-    fn get_key(&self) -> &[u8] {
-        &self.internal_key
-    }
-
-    fn set_key(&mut self, data: &[u8], offset: usize, key_len: usize) {
-        if self.global_seqno == DISABLE_GLOBAL_SEQUENCE_NUMBER {
-            self.internal_key.clear();
-            self.internal_key
-                .extend_from_slice(&data[offset..(offset + key_len)]);
-            return;
-        }
-        let tail_offset = offset + key_len - 8;
-        let num = decode_fixed_uint64(&data[tail_offset..]);
-        self.internal_key
-            .extend_from_slice(&data[offset..tail_offset]);
-        let num = pack_sequence_and_type(self.global_seqno, (num & 0xff) as u8);
-        self.internal_key.extend_from_slice(&num.to_le_bytes());
-    }
-
-    fn trim_append(&mut self, data: &[u8], offset: usize, shared: usize, non_shared: usize) {
-        self.internal_key.resize(shared, 0);
-        self.internal_key
-            .extend_from_slice(&data[offset..(offset + non_shared)]);
-    }
 }
 
 pub struct DataBlockIter<'a> {
@@ -210,6 +187,7 @@ impl<'a> DataBlockIter<'a> {
         restart_offset: usize,
         num_restarts: u32,
         global_seqno: u64,
+        is_user_key: bool,
         comparator: Arc<dyn KeyComparator>,
     ) -> Self {
         Self {
@@ -219,12 +197,7 @@ impl<'a> DataBlockIter<'a> {
             current: 0,
             num_restarts,
             restart_index: 0,
-            applied_key: GlobalSeqnoAppliedKey {
-                global_seqno,
-                internal_key: vec![],
-                offset: 0,
-                limit: 0,
-            },
+            applied_key: GlobalSeqnoAppliedKey::new(global_seqno, is_user_key),
             value: Slice::default(),
         }
     }
@@ -244,8 +217,10 @@ impl<'a> DataBlockIter<'a> {
             if next_offset == 0 {
                 return -1;
             }
+            let start = region_offset + next_offset;
+            let limit = start + non_shared as usize;
             self.applied_key
-                .set_key(self.data, region_offset + next_offset, non_shared as usize);
+                .set_key(&self.data[start..limit]);
             let ord = self.comparator.compare_key(self.applied_key.get_key(), key);
             if ord == Ordering::Less {
                 left = mid;
@@ -276,15 +251,15 @@ impl<'a> DataBlockIter<'a> {
         }
 
         let current = self.current + offset;
+        self.value.offset = current + non_shared as usize;
+        self.value.limit = self.value.offset + val_len as usize;
         if shared == 0 {
             self.applied_key
-                .set_key(self.data, current, non_shared as usize);
+                .set_key(&self.data[current..self.value.offset]);
         } else {
             self.applied_key
                 .trim_append(self.data, current, shared as usize, non_shared as usize);
         }
-        self.value.offset = current + non_shared as usize;
-        self.value.limit = self.value.offset + val_len as usize;
         if shared == 0 {
             while self.restart_index + 1 < self.num_restarts
                 && self.get_restart_point(self.restart_index + 1) < self.current as u32
@@ -294,7 +269,69 @@ impl<'a> DataBlockIter<'a> {
         }
         true
     }
+}
 
+pub struct IndexBlockIter<'a> {
+    inner: DataBlockIter<'a>,
+    decoded_value: IndexValue,
+    key_includes_seq: bool,
+}
+
+impl<'a> IndexBlockIter<'a> {
+    fn update_current_key(&mut self) {
+        let _ = self.decoded_value.decode_from(self.value());
+    }
+
+    pub fn index_value(&self) -> &IndexValue {
+        &self.decoded_value
+    }
+}
+
+impl<'a> InternalIterator for IndexBlockIter<'a> {
+    fn valid(&self) -> bool {
+        self.inner.valid()
+    }
+
+    fn seek(&mut self, key: &[u8]) {
+        if self.key_includes_seq {
+            self.inner.seek(key);
+        } else {
+            self.inner.seek(extract_user_key(key));
+        }
+        self.update_current_key();
+    }
+
+    fn seek_to_first(&mut self) {
+        self.inner.seek_to_first();
+        self.update_current_key();
+    }
+
+    fn seek_to_last(&mut self) {
+        self.inner.seek_to_last();
+        self.update_current_key();
+    }
+
+    fn seek_for_prev(&mut self, key: &[u8]) {
+        unimplemented!();
+    }
+
+    fn next(&mut self) {
+        self.inner.next();
+        self.update_current_key();
+    }
+
+    fn prev(&mut self) {
+        self.inner.prev();
+        self.update_current_key();
+    }
+
+    fn key(&self) -> &[u8] {
+        self.inner.key()
+    }
+
+    fn value(&self) -> &[u8] {
+        self.inner.value()
+    }
 }
 
 pub fn decode_key(key: &[u8]) -> (usize, u32, u32) {

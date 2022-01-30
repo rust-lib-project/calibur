@@ -41,37 +41,42 @@ pub const NULL_BLOCK_HANDLE: BlockHandle = BlockHandle { offset: 0, size: 0 };
 #[derive(Default, Debug, Clone)]
 pub struct IndexValue {
     pub handle: BlockHandle,
-    pub first_internal_key: Vec<u8>,
 }
 
-pub struct IndexValueRef<'a> {
+impl IndexValue {
+    pub fn decode_from(&mut self, data: &[u8]) -> Result<()> {
+        self.handle.decode_from(data)?;
+        Ok(())
+    }
+}
+
+pub struct IndexValueRef {
     pub handle: BlockHandle,
-    pub first_internal_key: &'a [u8],
 }
 
-impl<'a> IndexValueRef<'a> {
-    pub fn new(handle: BlockHandle, first_internal_key: &'a [u8]) -> Self {
+impl IndexValueRef {
+    pub fn new(handle: BlockHandle) -> Self {
         Self {
             handle,
-            first_internal_key,
         }
     }
 
     pub fn to_owned(&self) -> IndexValue {
         IndexValue {
             handle: self.handle.clone(),
-            first_internal_key: self.first_internal_key.to_vec(),
         }
     }
 
-    pub fn encode_to(&self, buff: &mut Vec<u8>, have_first_key: bool) {}
+    pub fn encode_to(&self, buff: &mut Vec<u8>) {
+        self.handle.encode_to(buff);
+        // TODO: support encode the first key
+    }
 }
 
 impl IndexValue {
     pub fn as_ref(&self) -> IndexValueRef {
         IndexValueRef {
             handle: self.handle.clone(),
-            first_internal_key: self.first_internal_key.as_slice(),
         }
     }
 }

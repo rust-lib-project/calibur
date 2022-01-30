@@ -169,6 +169,11 @@ impl BlockBasedTableBuilder {
         self.rep.props.column_family_id = self.rep.column_family_id;
         self.rep.props.filter_policy_name = self.rep.options.filter_factory.name().to_string();
         self.rep.props.index_size = self.index_builder.index_size() as u64 + 5;
+        if self.index_builder.seperator_is_key_plus_seq() {
+            self.rep.props.index_key_is_user_key = 0;
+        } else {
+            self.rep.props.index_key_is_user_key = 1;
+        }
         // TODO: add the whole properties
         property_block_builder.add_table_properties(&self.rep.props);
         let data = property_block_builder.finish();
