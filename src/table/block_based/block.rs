@@ -407,6 +407,7 @@ pub async fn read_block_from_file(
     let mut data = vec![0u8; read_len];
     file.read(handle.offset as usize, read_len, data.as_mut_slice())
         .await?;
+    data.resize(handle.size as usize, 0);
     // TODO: uncompress block
     Ok(Arc::new(Block::new(data, global_seqno)))
 }

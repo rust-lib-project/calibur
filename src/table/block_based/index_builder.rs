@@ -16,10 +16,10 @@ pub trait IndexBuilder {
         &mut self,
         last_key_in_current_block: &mut Vec<u8>,
         first_key_in_next_block: &[u8],
-        block_handle: BlockHandle,
+        block_handle: &BlockHandle,
     );
     fn on_key_added(&mut self, key: &[u8]);
-    fn finish(&mut self) -> Result<IndexBlocks>;
+    fn finish(&mut self) -> Result<&[u8]>;
     fn index_size(&self) -> usize;
     fn seperator_is_key_plus_seq(&self) -> bool {
         true
@@ -31,7 +31,6 @@ pub struct ShortenedIndexBuilder {
     index_block_builder_without_seq: BlockBuilder,
     include_first_key: bool,
     shortening_mode: IndexShorteningMode,
-    last_encoded_handle: BlockHandle,
     current_block_first_internal_key: Vec<u8>,
     comparator: InternalKeyComparator,
     seperator_is_key_plus_seq: bool,
@@ -63,7 +62,6 @@ impl ShortenedIndexBuilder {
             index_block_builder_without_seq,
             include_first_key,
             shortening_mode,
-            last_encoded_handle: Default::default(),
             current_block_first_internal_key: vec![],
             comparator,
             seperator_is_key_plus_seq: format_version <= 2,
@@ -77,7 +75,7 @@ impl IndexBuilder for ShortenedIndexBuilder {
         &mut self,
         last_key_in_current_block: &mut Vec<u8>,
         first_key_in_next_block: &[u8],
-        block_handle: BlockHandle,
+        block_handle: &BlockHandle,
     ) {
         if !first_key_in_next_block.is_empty() {
             if self.shortening_mode != IndexShorteningMode::NoShortening {
@@ -99,10 +97,9 @@ impl IndexBuilder for ShortenedIndexBuilder {
             }
         }
         let sep = last_key_in_current_block.as_slice();
-        let entry = IndexValueRef::new(block_handle.clone());
+        let entry = IndexValueRef::new(block_handle);
         let mut encoded_entry = vec![];
         entry.encode_to(&mut encoded_entry);
-        self.last_encoded_handle = block_handle;
         self.index_block_builder.add(sep, &encoded_entry);
         if !self.seperator_is_key_plus_seq {
             self.index_block_builder_without_seq
@@ -117,21 +114,23 @@ impl IndexBuilder for ShortenedIndexBuilder {
         }
     }
 
-    fn finish(&mut self) -> Result<IndexBlocks> {
+    fn finish(&mut self) -> Result<&[u8]> {
         let buf = if self.seperator_is_key_plus_seq {
             self.index_block_builder.finish()
         } else {
             self.index_block_builder_without_seq.finish()
         };
         self.index_size = buf.len();
-        Ok(IndexBlocks {
-            index_block_contents: buf.to_vec(),
-            // meta_blocks: HashMap::default(),
-        })
+        Ok(buf)
+        // meta_blocks: HashMap::default(),
     }
 
     fn index_size(&self) -> usize {
         self.index_size
+    }
+
+    fn seperator_is_key_plus_seq(&self) -> bool {
+        self.seperator_is_key_plus_seq
     }
 }
 
@@ -153,12 +152,72 @@ pub fn create_index_builder(
 mod tests {
     use super::*;
     use crate::common::{
-        DefaultUserComparator, InternalKeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER,
+        DefaultUserComparator, FileSystem, InMemFileSystem, InternalKeyComparator,
+        DISABLE_GLOBAL_SEQUENCE_NUMBER,
     };
     use crate::table::block_based::block::Block;
+    use crate::table::block_based::index_reader::IndexReader;
     use crate::table::InternalIterator;
+    use std::path::PathBuf;
     use std::sync::Arc;
+    use tokio::runtime::Runtime;
 
     #[test]
-    fn test_index_builder() {}
+    fn test_index_builder() {
+        let mut builder = ShortenedIndexBuilder::new(
+            InternalKeyComparator::default(),
+            1,
+            2,
+            false,
+            IndexShorteningMode::ShortenSeparators,
+        );
+        let mut kvs = vec![];
+        kvs.push((b"abcdeeeeee".to_vec(), BlockHandle::new(100, 50)));
+        kvs.push((b"abcdefffff".to_vec(), BlockHandle::new(150, 50)));
+        kvs.push((b"abcdeggggg".to_vec(), BlockHandle::new(200, 50)));
+        kvs.push((b"abcdehhhhh".to_vec(), BlockHandle::new(250, 50)));
+        kvs.push((b"abcdeiiiii".to_vec(), BlockHandle::new(300, 50)));
+        kvs.push((b"abcdejjjjj".to_vec(), BlockHandle::new(350, 50)));
+        for (k, _) in kvs.iter_mut() {
+            k.extend_from_slice(&0u64.to_le_bytes());
+        }
+        let comparator = Arc::new(DefaultUserComparator::default());
+        for (k, v) in kvs.iter() {
+            builder.add_index_entry(&mut k.clone(), &[], v);
+        }
+        let data = builder.finish().unwrap().to_vec();
+        let seperate = builder.seperator_is_key_plus_seq();
+        let fs = InMemFileSystem::default();
+        let mut f = fs
+            .open_writable_file(PathBuf::default(), "index_block".to_string())
+            .unwrap();
+        f.append(&data).unwrap();
+        let trailer: [u8; 5] = [0; 5];
+        f.append(&trailer).unwrap();
+        f.sync().unwrap();
+        let readfile = fs
+            .open_random_access_file(PathBuf::default(), "index_block".to_string())
+            .unwrap();
+        let handle = BlockHandle::new(0, data.len() as u64);
+
+        let f = IndexReader::open(
+            readfile.as_ref(),
+            &handle,
+            DISABLE_GLOBAL_SEQUENCE_NUMBER,
+            seperate,
+        );
+        let r = Runtime::new().unwrap();
+        let reader = r.block_on(f).unwrap();
+        let mut iter = reader.new_iterator(Arc::new(DefaultUserComparator::default()));
+        iter.seek_to_first();
+        for (k, v) in kvs {
+            assert!(iter.valid());
+            assert_eq!(iter.key(), k.as_slice());
+            assert_eq!(iter.index_value().handle, v);
+            iter.next();
+        }
+        iter.seek(b"abcde");
+        assert!(iter.valid());
+        assert_eq!(iter.index_value().handle.offset, 100);
+    }
 }

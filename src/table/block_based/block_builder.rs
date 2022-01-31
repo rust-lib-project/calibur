@@ -191,14 +191,14 @@ mod tests {
         kvs.push((b"abcdehhhhh".to_vec(), b"v0"));
         kvs.push((b"abcdeiiiii".to_vec(), b"v0"));
         kvs.push((b"abcdejjjjj".to_vec(), b"v0"));
+        let mut b = b"abcdek".to_vec();
         for i in 0..100u64 {
-            let mut b = b"abcdek".to_vec();
             if *b.last().unwrap() < 255u8 {
                 *b.last_mut().unwrap() += 1;
             } else {
                 b.push(1);
             }
-            kvs.push((b, b"v1"));
+            kvs.push((b.clone(), b"v1"));
         }
         for (k, &v) in kvs.iter() {
             let mut key = k.clone();

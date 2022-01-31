@@ -7,6 +7,9 @@ pub struct RandomAccessFileReader {
 }
 
 impl RandomAccessFileReader {
+    pub fn new(file: Box<dyn RandomAccessFile>, filename: String) -> Self {
+        Self { file, filename }
+    }
     pub async fn read(&self, offset: usize, n: usize, buf: &mut [u8]) -> Result<usize> {
         self.file.read(offset, n, buf).await
     }

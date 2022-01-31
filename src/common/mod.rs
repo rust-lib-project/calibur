@@ -10,7 +10,8 @@ pub use slice_transform::SliceTransform;
 
 pub use error::Error;
 pub use file_system::{
-    FileSystem, RandomAccessFile, RandomAccessFileReader, WritableFile, WritableFileWriter,
+    FileSystem, InMemFileSystem, RandomAccessFile, RandomAccessFileReader, WritableFile,
+    WritableFileWriter,
 };
 pub type Result<T> = std::result::Result<T, Error>;
 

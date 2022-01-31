@@ -121,7 +121,7 @@ impl AsyncIterator for BlockBasedTableIterator {
             return;
         }
         self.data_iter.as_mut().unwrap().seek_to_last();
-        self.find_key_backward();
+        self.find_key_backward().await;
     }
 
     async fn seek_for_prev(&mut self, key: &[u8]) {

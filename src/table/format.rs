@@ -4,18 +4,22 @@ use crate::util::{decode_fixed_uint32, encode_var_uint64, get_var_uint32, get_va
 
 pub const MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX: usize = 1usize << 16;
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockHandle {
     pub offset: u64,
     pub size: u64,
 }
 
 impl BlockHandle {
+    pub fn new(offset: u64, size: u64) -> BlockHandle {
+        Self { offset, size }
+    }
+
     pub fn encode_to(&self, data: &mut Vec<u8>) {
         let mut tmp: [u8; 20] = [0u8; 20];
-        let offset = encode_var_uint64(&mut tmp, self.offset);
-        let offset = encode_var_uint64(&mut tmp[offset..], self.size);
-        data.extend_from_slice(&tmp[..offset]);
+        let offset1 = encode_var_uint64(&mut tmp, self.offset);
+        let offset2 = encode_var_uint64(&mut tmp[offset1..], self.size);
+        data.extend_from_slice(&tmp[..(offset1 + offset2)]);
     }
 
     pub fn decode_from(&mut self, data: &[u8]) -> Result<usize> {
@@ -38,7 +42,7 @@ impl BlockHandle {
 
 pub const NULL_BLOCK_HANDLE: BlockHandle = BlockHandle { offset: 0, size: 0 };
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, PartialEq, Eq, Clone)]
 pub struct IndexValue {
     pub handle: BlockHandle,
 }
@@ -50,12 +54,12 @@ impl IndexValue {
     }
 }
 
-pub struct IndexValueRef {
-    pub handle: BlockHandle,
+pub struct IndexValueRef<'a> {
+    pub handle: &'a BlockHandle,
 }
 
-impl IndexValueRef {
-    pub fn new(handle: BlockHandle) -> Self {
+impl<'a> IndexValueRef<'a> {
+    pub fn new(handle: &'a BlockHandle) -> Self {
         Self { handle }
     }
 
@@ -74,7 +78,7 @@ impl IndexValueRef {
 impl IndexValue {
     pub fn as_ref(&self) -> IndexValueRef {
         IndexValueRef {
-            handle: self.handle.clone(),
+            handle: &self.handle,
         }
     }
 }

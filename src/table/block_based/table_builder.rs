@@ -37,8 +37,8 @@ impl BuilderRep {
         };
         self.file.append(block)?;
         let mut trailer: [u8; 5] = [0; 5];
-        // todo: Add checksum for every block.
         trailer[0] = CompressionType::NoCompression as u8;
+        // todo: Add checksum for every block.
         trailer[1..].copy_from_slice(&(0 as u32).to_le_bytes());
         self.file.append(&trailer)?;
         self.offset += block.len() as u64 + trailer.len() as u64;
@@ -141,8 +141,7 @@ impl BlockBasedTableBuilder {
     fn write_index_block(&mut self) -> Result<BlockHandle> {
         let index_blocks = self.index_builder.finish()?;
         // TODO: build index block for hash index table.
-        self.rep
-            .write_raw_block(&index_blocks.index_block_contents, false)
+        self.rep.write_raw_block(index_blocks, false)
     }
 
     fn write_filter_block(&mut self, meta_index_builder: &mut MetaIndexBuilder) -> Result<()> {
@@ -218,7 +217,7 @@ impl TableBuilder for BlockBasedTableBuilder {
             self.index_builder.add_index_entry(
                 &mut self.rep.last_key,
                 key,
-                self.rep.pending_handle,
+                &self.rep.pending_handle,
             );
         }
         if let Some(builder) = self.filter_builder.as_mut() {
@@ -246,7 +245,7 @@ impl TableBuilder for BlockBasedTableBuilder {
             self.index_builder.add_index_entry(
                 &mut self.rep.last_key,
                 &[],
-                self.rep.pending_handle,
+                &self.rep.pending_handle,
             );
         }
         // Write meta blocks, metaindex block and footer in the following order.
@@ -260,7 +259,6 @@ impl TableBuilder for BlockBasedTableBuilder {
         let mut meta_index_builder = MetaIndexBuilder::new();
         self.write_filter_block(&mut meta_index_builder)?;
         let index_block_handle = self.write_index_block()?;
-        // self.write_compression_dict_block(&mut meta_index_builder)?;
         self.write_properties_block(&mut meta_index_builder)?;
         let metaindex_block_handle = self
             .rep
