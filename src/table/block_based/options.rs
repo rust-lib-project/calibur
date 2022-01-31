@@ -1,8 +1,8 @@
 use crate::common::SliceTransform;
 use crate::table::block_based::filter_block_builder::FilterBuilderFactory;
+use crate::table::block_based::FullFilterBlockFactory;
 use crate::table::format::ChecksumType;
 use std::sync::Arc;
-use crate::table::block_based::FullFilterBlockFactory;
 
 #[derive(Eq, PartialEq, Clone)]
 pub enum DataBlockIndexType {
@@ -64,7 +64,7 @@ impl Default for BlockBasedTableOptions {
             index_shortening: IndexShorteningMode::NoShortening,
             index_type: IndexType::BinarySearch,
             use_delta_encoding: true,
-            whole_key_filtering: false
+            whole_key_filtering: false,
         }
     }
 }

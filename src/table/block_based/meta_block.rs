@@ -1,15 +1,17 @@
+use crate::common::Result;
+use crate::common::{
+    DefaultUserComparator, RandomAccessFileReader, DISABLE_GLOBAL_SEQUENCE_NUMBER,
+};
+use crate::table::block_based::block::Block;
 use crate::table::block_based::block_builder::BlockBuilder;
 use crate::table::block_based::options::DataBlockIndexType;
+use crate::table::block_based::BLOCK_TRAILER_SIZE;
 use crate::table::format::{BlockHandle, Footer};
 use crate::table::table_properties::*;
+use crate::table::InternalIterator;
 use crate::util::{encode_var_uint64, get_var_uint64};
-use crate::common::{DefaultUserComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER, RandomAccessFileReader};
-use crate::common::Result;
-use crate::table::block_based::block::Block;
-use crate::table::block_based::BLOCK_TRAILER_SIZE;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::table::InternalIterator;
 
 pub struct MetaIndexBuilder {
     meta_index_block: BlockBuilder,
@@ -173,7 +175,11 @@ impl PropertyBlockBuilder {
     }
 }
 
-pub async fn read_properties(data: &[u8], file: &RandomAccessFileReader, footer: &Footer) -> Result<(Box<TableProperties>, BlockHandle)> {
+pub async fn read_properties(
+    data: &[u8],
+    file: &RandomAccessFileReader,
+    footer: &Footer,
+) -> Result<(Box<TableProperties>, BlockHandle)> {
     let mut handle = BlockHandle::default();
     handle.decode_from(data)?;
     let read_len = handle.size as usize + BLOCK_TRAILER_SIZE;
@@ -181,7 +187,7 @@ pub async fn read_properties(data: &[u8], file: &RandomAccessFileReader, footer:
     file.read(handle.offset as usize, read_len, data.as_mut_slice())
         .await?;
     // TODO: uncompress block
-    let block = Block::new(data, DISABLE_GLOBAL_SEQUENCE_NUMBER);
+    let block = Arc::new(Block::new(data, DISABLE_GLOBAL_SEQUENCE_NUMBER));
     let mut iter = block.new_data_iterator(Arc::new(DefaultUserComparator::default()));
     iter.seek_to_first();
     let mut properties = Box::new(TableProperties::default());
@@ -193,9 +199,9 @@ pub async fn read_properties(data: &[u8], file: &RandomAccessFileReader, footer:
         iter.next();
     }
     tmp_properties.get(PROPERTIES_DATA_SIZE).map(|v| {
-       if let Some((_, v)) = get_var_uint64(v) {
-           properties.data_size = v;
-       }
+        if let Some((_, v)) = get_var_uint64(v) {
+            properties.data_size = v;
+        }
     });
     tmp_properties.get(PROPERTIES_INDEX_SIZE).map(|v| {
         if let Some((_, v)) = get_var_uint64(v) {

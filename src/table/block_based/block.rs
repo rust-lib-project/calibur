@@ -1,14 +1,16 @@
-use crate::common::format::{GlobalSeqnoAppliedKey, pack_sequence_and_type, Slice};
-use crate::common::{KeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER, RandomAccessFileReader, Result};
+use crate::common::format::{pack_sequence_and_type, GlobalSeqnoAppliedKey, Slice};
+use crate::common::{
+    KeyComparator, RandomAccessFileReader, Result, DISABLE_GLOBAL_SEQUENCE_NUMBER,
+};
 use crate::compactor::Compactor;
 use crate::table::block_based::data_block_hash_index_builder::DataBlockHashIndex;
 use crate::table::block_based::options::DataBlockIndexType;
+use crate::table::block_based::BLOCK_TRAILER_SIZE;
 use crate::table::format::{BlockHandle, IndexValue, MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX};
+use crate::table::InternalIterator;
 use crate::util::{decode_fixed_uint32, decode_fixed_uint64, extract_user_key, get_var_uint32};
 use std::cmp::Ordering;
 use std::sync::Arc;
-use crate::table::block_based::BLOCK_TRAILER_SIZE;
-use crate::table::InternalIterator;
 
 const DATA_BLOCK_INDEX_TYPE_BIT_SHIFT: u32 = 31;
 
@@ -66,9 +68,12 @@ impl Block {
         }
     }
 
-    pub fn new_data_iterator(&self, comparator: Arc<dyn KeyComparator>) -> DataBlockIter {
+    pub fn new_data_iterator(
+        self: &Arc<Self>,
+        comparator: Arc<dyn KeyComparator>,
+    ) -> DataBlockIter {
         DataBlockIter::new(
-            &self.data,
+            self.clone(),
             self.restart_offset,
             self.num_restarts,
             self.global_seqno,
@@ -78,12 +83,15 @@ impl Block {
     }
 
     // TODO: support encode index key without seq
-    pub fn new_index_iterator(&self, comparator: Arc<dyn KeyComparator>) -> IndexBlockIter {
+    pub fn new_index_iterator(
+        self: &Arc<Self>,
+        comparator: Arc<dyn KeyComparator>,
+    ) -> IndexBlockIter {
         let inner = self.new_data_iterator(comparator);
         IndexBlockIter {
             inner,
             decoded_value: Default::default(),
-            key_includes_seq: true
+            key_includes_seq: true,
         }
     }
 }
@@ -126,8 +134,8 @@ pub fn pack_index_type_and_num_restarts(tp: DataBlockIndexType, num_restarts: u3
     footer
 }
 
-pub struct DataBlockIter<'a> {
-    data: &'a [u8],
+pub struct DataBlockIter {
+    block: Arc<Block>,
     restart_offset: usize,
     comparator: Arc<dyn KeyComparator>,
     current: usize,
@@ -137,7 +145,7 @@ pub struct DataBlockIter<'a> {
     value: Slice,
 }
 
-impl <'a> InternalIterator for DataBlockIter<'a> {
+impl InternalIterator for DataBlockIter {
     fn valid(&self) -> bool {
         self.current < self.restart_offset
     }
@@ -177,13 +185,13 @@ impl <'a> InternalIterator for DataBlockIter<'a> {
     }
 
     fn value(&self) -> &[u8] {
-        &self.data[self.value.offset..self.value.limit]
+        &self.block.data[self.value.offset..self.value.limit]
     }
 }
 
-impl<'a> DataBlockIter<'a> {
+impl DataBlockIter {
     pub fn new(
-        data: &'a [u8],
+        block: Arc<Block>,
         restart_offset: usize,
         num_restarts: u32,
         global_seqno: u64,
@@ -191,7 +199,7 @@ impl<'a> DataBlockIter<'a> {
         comparator: Arc<dyn KeyComparator>,
     ) -> Self {
         Self {
-            data,
+            block,
             comparator,
             restart_offset,
             current: 0,
@@ -204,7 +212,7 @@ impl<'a> DataBlockIter<'a> {
 
     fn get_restart_point(&self, index: u32) -> u32 {
         let offset = self.restart_offset + index as usize * std::mem::size_of::<u32>();
-        decode_fixed_uint32(&self.data[offset..])
+        decode_fixed_uint32(&self.block.data[offset..])
     }
 
     fn binary_seek_index(&mut self, key: &[u8]) -> i32 {
@@ -213,14 +221,13 @@ impl<'a> DataBlockIter<'a> {
         while left < right {
             let mid = (left + right + 1) / 2;
             let region_offset = self.get_restart_point(mid) as usize;
-            let (next_offset, shared, non_shared) = decode_key(&self.data[region_offset..]);
+            let (next_offset, shared, non_shared) = decode_key(&self.block.data[region_offset..]);
             if next_offset == 0 {
                 return -1;
             }
             let start = region_offset + next_offset;
             let limit = start + non_shared as usize;
-            self.applied_key
-                .set_key(&self.data[start..limit]);
+            self.applied_key.set_key(&self.block.data[start..limit]);
             let ord = self.comparator.compare_key(self.applied_key.get_key(), key);
             if ord == Ordering::Less {
                 left = mid;
@@ -245,7 +252,7 @@ impl<'a> DataBlockIter<'a> {
         if self.current >= self.restart_offset {
             return false;
         }
-        let (offset, shared, non_shared, val_len) = decode_entry(&self.data[self.current..]);
+        let (offset, shared, non_shared, val_len) = decode_entry(&self.block.data[self.current..]);
         if offset == 0 {
             return false;
         }
@@ -255,10 +262,14 @@ impl<'a> DataBlockIter<'a> {
         self.value.limit = self.value.offset + val_len as usize;
         if shared == 0 {
             self.applied_key
-                .set_key(&self.data[current..self.value.offset]);
+                .set_key(&self.block.data[current..self.value.offset]);
         } else {
-            self.applied_key
-                .trim_append(self.data, current, shared as usize, non_shared as usize);
+            self.applied_key.trim_append(
+                &self.block.data,
+                current,
+                shared as usize,
+                non_shared as usize,
+            );
         }
         if shared == 0 {
             while self.restart_index + 1 < self.num_restarts
@@ -271,15 +282,15 @@ impl<'a> DataBlockIter<'a> {
     }
 }
 
-pub struct IndexBlockIter<'a> {
-    inner: DataBlockIter<'a>,
+pub struct IndexBlockIter {
+    inner: DataBlockIter,
     decoded_value: IndexValue,
     key_includes_seq: bool,
 }
 
-impl<'a> IndexBlockIter<'a> {
+impl IndexBlockIter {
     fn update_current_key(&mut self) {
-        let _ = self.decoded_value.decode_from(self.value());
+        let _ = self.decoded_value.decode_from(self.inner.value());
     }
 
     pub fn index_value(&self) -> &IndexValue {
@@ -287,7 +298,7 @@ impl<'a> IndexBlockIter<'a> {
     }
 }
 
-impl<'a> InternalIterator for IndexBlockIter<'a> {
+impl InternalIterator for IndexBlockIter {
     fn valid(&self) -> bool {
         self.inner.valid()
     }
@@ -362,11 +373,11 @@ pub async fn read_block_from_file(
     file: &RandomAccessFileReader,
     handle: &BlockHandle,
     global_seqno: u64,
-) -> Result<Box<Block>> {
+) -> Result<Arc<Block>> {
     let read_len = handle.size as usize + BLOCK_TRAILER_SIZE;
     let mut data = vec![0u8; read_len];
     file.read(handle.offset as usize, read_len, data.as_mut_slice())
         .await?;
     // TODO: uncompress block
-    Ok(Box::new(Block::new(data, global_seqno)))
+    Ok(Arc::new(Block::new(data, global_seqno)))
 }

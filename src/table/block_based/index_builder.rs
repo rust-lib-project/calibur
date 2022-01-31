@@ -99,8 +99,7 @@ impl IndexBuilder for ShortenedIndexBuilder {
             }
         }
         let sep = last_key_in_current_block.as_slice();
-        let entry =
-            IndexValueRef::new(block_handle.clone());
+        let entry = IndexValueRef::new(block_handle.clone());
         let mut encoded_entry = vec![];
         entry.encode_to(&mut encoded_entry);
         self.last_encoded_handle = block_handle;

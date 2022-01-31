@@ -21,16 +21,22 @@ pub trait InternalIterator {
 }
 
 #[async_trait]
-pub trait TableReader: 'static + Sync + Send {
-    async fn get(&self, opts: &ReadOptions, key: &[u8], sequence: u64) -> Result<Option<Vec<u8>>>;
-    fn new_iterator(&self, opts: &ReadOptions) -> Box<dyn InternalIterator>;
+pub trait AsyncIterator {
+    fn valid(&self) -> bool;
+    async fn seek(&mut self, key: &[u8]);
+    async fn seek_to_first(&mut self);
+    async fn seek_to_last(&mut self);
+    async fn seek_for_prev(&mut self, key: &[u8]);
+    async fn next(&mut self);
+    async fn prev(&mut self);
+    fn key(&self) -> &[u8];
+    fn value(&self) -> &[u8];
 }
 
-pub trait TableBuilder {
-    fn add(&mut self, key: &[u8], value: &[u8]) -> Result<()>;
-    fn finish(&mut self) -> Result<()>;
-    fn file_size(&self) -> u64;
-    fn num_entries(&self) -> u64;
+#[async_trait]
+pub trait TableReader: 'static + Sync + Send {
+    async fn get(&self, opts: &ReadOptions, key: &[u8], sequence: u64) -> Result<Option<Vec<u8>>>;
+    fn new_iterator(&self, opts: &ReadOptions) -> Box<dyn AsyncIterator>;
 }
 
 #[async_trait]
@@ -47,6 +53,13 @@ pub trait TableFactory {
         options: &TableBuilderOptions,
         w: WritableFileWriter,
     ) -> Result<Box<dyn TableBuilder>>;
+}
+
+pub trait TableBuilder {
+    fn add(&mut self, key: &[u8], value: &[u8]) -> Result<()>;
+    fn finish(&mut self) -> Result<()>;
+    fn file_size(&self) -> u64;
+    fn num_entries(&self) -> u64;
 }
 
 pub struct TableBuilderOptions {

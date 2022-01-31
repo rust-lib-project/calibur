@@ -53,11 +53,11 @@ pub fn is_extended_value_type(t: u8) -> bool {
 pub struct GlobalSeqnoAppliedKey {
     internal_key: Vec<u8>,
     global_seqno: u64,
-    is_user_key:  bool,
+    is_user_key: bool,
 }
 
 impl GlobalSeqnoAppliedKey {
-    pub fn new(global_seqno: u64, is_user_key:  bool) -> Self {
+    pub fn new(global_seqno: u64, is_user_key: bool) -> Self {
         Self {
             internal_key: vec![],
             global_seqno,
@@ -85,14 +85,12 @@ impl GlobalSeqnoAppliedKey {
     pub fn set_key(&mut self, key: &[u8]) {
         if self.global_seqno == DISABLE_GLOBAL_SEQUENCE_NUMBER {
             self.internal_key.clear();
-            self.internal_key
-                .extend_from_slice(key);
+            self.internal_key.extend_from_slice(key);
             return;
         }
         let tail_offset = key.len() - 8;
         let num = decode_fixed_uint64(&key[tail_offset..]);
-        self.internal_key
-            .extend_from_slice(&key[..tail_offset]);
+        self.internal_key.extend_from_slice(&key[..tail_offset]);
         let num = pack_sequence_and_type(self.global_seqno, (num & 0xff) as u8);
         self.internal_key.extend_from_slice(&num.to_le_bytes());
     }
@@ -103,4 +101,3 @@ impl GlobalSeqnoAppliedKey {
             .extend_from_slice(&data[offset..(offset + non_shared)]);
     }
 }
-

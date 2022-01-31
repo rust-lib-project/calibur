@@ -119,8 +119,8 @@ mod tests {
     use crate::common::{
         DefaultUserComparator, InternalKeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER,
     };
-    use crate::table::InternalIterator;
     use crate::table::block_based::block::Block;
+    use crate::table::InternalIterator;
     use std::sync::Arc;
 
     #[test]

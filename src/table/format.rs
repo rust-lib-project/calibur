@@ -56,9 +56,7 @@ pub struct IndexValueRef {
 
 impl IndexValueRef {
     pub fn new(handle: BlockHandle) -> Self {
-        Self {
-            handle,
-        }
+        Self { handle }
     }
 
     pub fn to_owned(&self) -> IndexValue {
