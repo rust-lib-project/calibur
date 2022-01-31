@@ -90,6 +90,12 @@ pub struct InternalKeyComparator {
     user_comparator: Arc<dyn KeyComparator>,
 }
 
+impl Default for InternalKeyComparator {
+    fn default() -> Self {
+        InternalKeyComparator::new(Arc::new(DefaultUserComparator::default()))
+    }
+}
+
 impl InternalKeyComparator {
     pub fn new(user_comparator: Arc<dyn KeyComparator>) -> InternalKeyComparator {
         InternalKeyComparator { user_comparator }
@@ -97,12 +103,6 @@ impl InternalKeyComparator {
 
     pub fn get_user_comparator(&self) -> &Arc<dyn KeyComparator> {
         &self.user_comparator
-    }
-}
-
-impl Default for InternalKeyComparator {
-    fn default() -> Self {
-        InternalKeyComparator::new(Arc::new(DefaultUserComparator {}))
     }
 }
 

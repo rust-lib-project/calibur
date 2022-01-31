@@ -149,3 +149,16 @@ pub fn create_index_builder(
     );
     Box::new(builder)
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::{
+        DefaultUserComparator, InternalKeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER,
+    };
+    use crate::table::block_based::block::Block;
+    use crate::table::InternalIterator;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_index_builder() {}
+}

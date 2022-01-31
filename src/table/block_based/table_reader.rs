@@ -63,11 +63,13 @@ impl BlockBasedTable {
         let mut meta_iter =
             meta_block.new_data_iterator(Arc::new(DefaultUserComparator::default()));
         let mut global_seqno = DISABLE_GLOBAL_SEQUENCE_NUMBER;
+        let mut index_key_includes_seq = true;
         let properties = if seek_to_properties_block(&mut meta_iter)? {
             let (properties, _handle) =
                 read_properties(meta_iter.value(), file.as_ref(), &footer).await?;
             // TODO: checksum
             global_seqno = get_global_seqno(properties.as_ref(), opts.largest_seqno)?;
+            index_key_includes_seq = properties.index_key_is_user_key == 0;
             Some(properties)
         } else {
             None
@@ -78,8 +80,13 @@ impl BlockBasedTable {
         // } else {
         //     Some(table_opts.filter_factory.clone())
         // };
-        let index_reader =
-            IndexReader::open(file.as_ref(), &footer.index_handle, global_seqno).await?;
+        let index_reader = IndexReader::open(
+            file.as_ref(),
+            &footer.index_handle,
+            global_seqno,
+            index_key_includes_seq,
+        )
+        .await?;
         let mut table = BlockBasedTable {
             rep: Arc::new(BlockBasedTableRep {
                 footer,

@@ -3,8 +3,9 @@ mod format;
 mod table_properties;
 
 use crate::common::options::{CompressionType, ReadOptions};
-use crate::common::{InternalKeyComparator, RandomAccessFileReader, Result, SliceTransform};
-use crate::common::{RandomAccessFile, WritableFileWriter};
+use crate::common::{
+    InternalKeyComparator, RandomAccessFileReader, Result, SliceTransform, WritableFileWriter,
+};
 use async_trait::async_trait;
 use std::sync::Arc;
 

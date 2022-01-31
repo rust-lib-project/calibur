@@ -1,14 +1,11 @@
-use crate::common::format::{pack_sequence_and_type, GlobalSeqnoAppliedKey, Slice};
-use crate::common::{
-    KeyComparator, RandomAccessFileReader, Result, DISABLE_GLOBAL_SEQUENCE_NUMBER,
-};
-use crate::compactor::Compactor;
+use crate::common::format::{GlobalSeqnoAppliedKey, Slice};
+use crate::common::{KeyComparator, RandomAccessFileReader, Result};
 use crate::table::block_based::data_block_hash_index_builder::DataBlockHashIndex;
 use crate::table::block_based::options::DataBlockIndexType;
 use crate::table::block_based::BLOCK_TRAILER_SIZE;
 use crate::table::format::{BlockHandle, IndexValue, MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX};
 use crate::table::InternalIterator;
-use crate::util::{decode_fixed_uint32, decode_fixed_uint64, extract_user_key, get_var_uint32};
+use crate::util::{decode_fixed_uint32, extract_user_key, get_var_uint32};
 use std::cmp::Ordering;
 use std::sync::Arc;
 
@@ -86,12 +83,13 @@ impl Block {
     pub fn new_index_iterator(
         self: &Arc<Self>,
         comparator: Arc<dyn KeyComparator>,
+        key_includes_seq: bool,
     ) -> IndexBlockIter {
         let inner = self.new_data_iterator(comparator);
         IndexBlockIter {
             inner,
             decoded_value: Default::default(),
-            key_includes_seq: true,
+            key_includes_seq,
         }
     }
 }
@@ -165,11 +163,25 @@ impl InternalIterator for DataBlockIter {
     }
 
     fn seek_to_last(&mut self) {
-        unimplemented!()
+        self.seek_to_restart_point(self.num_restarts - 1);
+        while self.parse_next_key() && self.value.limit < self.restart_offset {}
     }
 
     fn seek_for_prev(&mut self, key: &[u8]) {
-        unimplemented!()
+        let index = self.binary_seek_index(key);
+        if index == -1 {
+            self.current = self.restart_offset;
+            return;
+        }
+        self.seek_to_restart_point(index as u32);
+        while self.parse_next_key() && self.comparator.less_than(self.applied_key.get_key(), key) {}
+        if !self.valid() {
+            self.seek_to_last();
+        } else {
+            while self.valid() && self.comparator.less_than(key, self.applied_key.get_key()) {
+                self.prev();
+            }
+        }
     }
 
     fn next(&mut self) {
@@ -177,7 +189,21 @@ impl InternalIterator for DataBlockIter {
     }
 
     fn prev(&mut self) {
-        unimplemented!()
+        let original = self.current;
+        while self.get_restart_point(self.restart_index) as usize >= original {
+            if self.restart_index == 0 {
+                self.current = self.restart_offset;
+                self.restart_index = self.num_restarts;
+                return;
+            }
+            self.restart_index -= 1;
+        }
+        self.seek_to_restart_point(self.restart_index);
+        while self.parse_next_key() {
+            if self.value.limit >= original {
+                break;
+            }
+        }
     }
 
     fn key(&self) -> &[u8] {
@@ -265,10 +291,8 @@ impl DataBlockIter {
                 .set_key(&self.block.data[current..self.value.offset]);
         } else {
             self.applied_key.trim_append(
-                &self.block.data,
-                current,
+                &self.block.data[current..self.value.offset],
                 shared as usize,
-                non_shared as usize,
             );
         }
         if shared == 0 {
@@ -323,7 +347,12 @@ impl InternalIterator for IndexBlockIter {
     }
 
     fn seek_for_prev(&mut self, key: &[u8]) {
-        unimplemented!();
+        if self.key_includes_seq {
+            self.inner.seek_for_prev(key);
+        } else {
+            self.inner.seek_for_prev(extract_user_key(key));
+        }
+        self.update_current_key();
     }
 
     fn next(&mut self) {

@@ -52,6 +52,7 @@ pub fn is_extended_value_type(t: u8) -> bool {
 
 pub struct GlobalSeqnoAppliedKey {
     internal_key: Vec<u8>,
+    buf: Vec<u8>,
     global_seqno: u64,
     is_user_key: bool,
 }
@@ -60,6 +61,7 @@ impl GlobalSeqnoAppliedKey {
     pub fn new(global_seqno: u64, is_user_key: bool) -> Self {
         Self {
             internal_key: vec![],
+            buf: vec![],
             global_seqno,
             is_user_key,
         }
@@ -90,14 +92,36 @@ impl GlobalSeqnoAppliedKey {
         }
         let tail_offset = key.len() - 8;
         let num = decode_fixed_uint64(&key[tail_offset..]);
+        self.buf.clear();
+        self.buf.extend_from_slice(key);
+        self.internal_key.clear();
         self.internal_key.extend_from_slice(&key[..tail_offset]);
         let num = pack_sequence_and_type(self.global_seqno, (num & 0xff) as u8);
         self.internal_key.extend_from_slice(&num.to_le_bytes());
     }
 
-    pub fn trim_append(&mut self, data: &[u8], offset: usize, shared: usize, non_shared: usize) {
-        self.internal_key.resize(shared, 0);
-        self.internal_key
-            .extend_from_slice(&data[offset..(offset + non_shared)]);
+    pub fn trim_append(&mut self, key: &[u8], shared: usize) {
+        if self.global_seqno == DISABLE_GLOBAL_SEQUENCE_NUMBER {
+            self.internal_key.resize(shared, 0);
+            self.internal_key.extend_from_slice(key);
+            return;
+        }
+        self.buf.resize(shared, 0);
+        self.buf.extend_from_slice(key);
+        let tail_offset = self.buf.len() - 8;
+        let num = decode_fixed_uint64(&self.buf[tail_offset..]);
+        let num = pack_sequence_and_type(self.global_seqno, (num & 0xff) as u8);
+        if self.internal_key.len() > self.buf.len() {
+            let limit = shared + key.len();
+            self.internal_key[shared..limit].copy_from_slice(key);
+            self.internal_key.resize(limit, 0);
+            self.internal_key[tail_offset..limit].copy_from_slice(&num.to_le_bytes());
+            assert_eq!(limit, self.buf.len());
+        } else {
+            self.internal_key.clear();
+            self.internal_key
+                .extend_from_slice(&self.buf[..tail_offset]);
+            self.internal_key.extend_from_slice(&num.to_le_bytes());
+        }
     }
 }

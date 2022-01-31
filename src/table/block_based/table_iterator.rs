@@ -10,6 +10,7 @@ pub struct BlockBasedTableIterator {
     comparator: Arc<InternalKeyComparator>,
     index_iter: Box<IndexBlockIter>,
     data_iter: Option<DataBlockIter>,
+    // TODO: check whether the data block is in upper bound.
     is_out_of_bound: bool,
 }
 
@@ -54,6 +55,21 @@ impl BlockBasedTableIterator {
             if !self.init_data_block().await {
                 return;
             }
+            self.data_iter.as_mut().unwrap().seek_to_first();
+        }
+    }
+
+    async fn find_key_backward(&mut self) {
+        while self.data_iter.as_ref().map_or(false, |iter| !iter.valid()) {
+            self.data_iter.take();
+            self.index_iter.prev();
+            if !self.index_iter.valid() {
+                return;
+            }
+            if !self.init_data_block().await {
+                return;
+            }
+            self.data_iter.as_mut().unwrap().seek_to_last();
         }
     }
 }
@@ -96,26 +112,50 @@ impl AsyncIterator for BlockBasedTableIterator {
     }
 
     async fn seek_to_last(&mut self) {
-        todo!()
+        self.index_iter.seek_to_last();
+        if !self.index_iter.valid() {
+            self.data_iter.take();
+            return;
+        }
+        if !self.init_data_block().await {
+            return;
+        }
+        self.data_iter.as_mut().unwrap().seek_to_last();
+        self.find_key_backward();
     }
 
     async fn seek_for_prev(&mut self, key: &[u8]) {
-        todo!()
+        self.index_iter.seek(key);
+        if !self.index_iter.valid() {
+            self.index_iter.seek_to_last();
+        }
+        if !self.init_data_block().await {
+            return;
+        }
+        self.data_iter.as_mut().unwrap().seek_for_prev(key);
     }
 
     async fn next(&mut self) {
-        todo!()
+        if !self.data_iter.is_some() {
+            return;
+        }
+        self.data_iter.as_mut().unwrap().next();
+        self.find_block_forward().await;
     }
 
     async fn prev(&mut self) {
-        todo!()
+        if !self.data_iter.is_some() {
+            return;
+        }
+        self.data_iter.as_mut().unwrap().prev();
+        self.find_key_backward().await;
     }
 
     fn key(&self) -> &[u8] {
-        todo!()
+        self.data_iter.as_ref().unwrap().key()
     }
 
     fn value(&self) -> &[u8] {
-        todo!()
+        self.data_iter.as_ref().unwrap().value()
     }
 }

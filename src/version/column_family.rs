@@ -1,7 +1,7 @@
 use crate::memtable::Memtable;
 use crate::version::{MemtableList, SuperVersion, Version};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{atomic::AtomicU64, Arc, Mutex};
+use std::sync::{atomic::AtomicU64, Arc};
 
 pub struct ColumnFamily {
     mem: Arc<Memtable>,

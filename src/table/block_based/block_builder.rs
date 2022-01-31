@@ -116,8 +116,9 @@ impl BlockBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::format::{pack_sequence_and_type, ValueType};
     use crate::common::{
-        DefaultUserComparator, InternalKeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER,
+        DefaultUserComparator, InternalKeyComparator, KeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER,
     };
     use crate::table::block_based::block::Block;
     use crate::table::InternalIterator;
@@ -128,30 +129,97 @@ mod tests {
         let mut builder =
             BlockBuilder::new(5, true, DataBlockIndexType::DataBlockBinarySearch, 0.0);
         let mut kvs = vec![];
-        kvs.push((b"abcdeeeeee00000001".to_vec(), b"v0"));
-        kvs.push((b"abcdefffff00000001".to_vec(), b"v0"));
-        kvs.push((b"abcdeggggg00000001".to_vec(), b"v0"));
-        kvs.push((b"abcdehhhhh00000001".to_vec(), b"v0"));
-        kvs.push((b"abcdeiiiii00000001".to_vec(), b"v0"));
-        kvs.push((b"abcdejjjjj00000001".to_vec(), b"v0"));
+        kvs.push((b"abcdeeeeee".to_vec(), b"v0"));
+        kvs.push((b"abcdefffff".to_vec(), b"v0"));
+        kvs.push((b"abcdeggggg".to_vec(), b"v0"));
+        kvs.push((b"abcdehhhhh".to_vec(), b"v0"));
+        kvs.push((b"abcdeiiiii".to_vec(), b"v0"));
+        kvs.push((b"abcdejjjjj".to_vec(), b"v0"));
+
         for i in 0..100u64 {
             let mut b = b"abcdek".to_vec();
             b.extend_from_slice(&i.to_le_bytes());
             kvs.push((b, b"v1"));
         }
+        let comparator = Arc::new(DefaultUserComparator::default());
+        kvs.sort_by(|a, b| comparator.compare_key(a.0.as_slice(), b.0.as_slice()));
         for (k, &v) in kvs.iter() {
             builder.add(&k, &v);
         }
         let data = builder.finish().to_vec();
-        let block = Block::new(data, DISABLE_GLOBAL_SEQUENCE_NUMBER);
-        let mut iter = block.new_data_iterator(Arc::new(InternalKeyComparator::new(Arc::new(
-            DefaultUserComparator::default(),
-        ))));
+        let block = Arc::new(Block::new(data, DISABLE_GLOBAL_SEQUENCE_NUMBER));
+        let mut iter = block.new_data_iterator(comparator);
         iter.seek_to_first();
         let mut i = 0;
         for (k, v) in kvs {
             assert!(iter.valid());
             assert_eq!(iter.key(), k.as_slice());
+            assert_eq!(iter.value(), v.as_slice());
+            iter.next();
+            i += 1;
+        }
+        iter.seek(b"abcde");
+        assert!(iter.valid());
+        assert_eq!(iter.key(), b"abcdeeeeee");
+        iter.seek(b"abcdejjjjj");
+        assert_eq!(iter.key(), b"abcdejjjjj");
+        iter.seek(b"abc");
+        assert_eq!(iter.key(), b"abcdeeeeee");
+        iter.seek(b"abcdek");
+        let mut b = b"abcdek".to_vec();
+        b.extend_from_slice(&0u64.to_le_bytes());
+        assert_eq!(iter.key(), &b);
+        b.resize(6, 0);
+        b.extend_from_slice(&99u64.to_le_bytes());
+        iter.seek(&b);
+        assert!(iter.valid());
+        assert_eq!(iter.key(), &b);
+        b.resize(6, 0);
+        b.extend_from_slice(&100u64.to_le_bytes());
+        iter.seek(&b);
+        assert!(!iter.valid());
+    }
+
+    #[test]
+    fn test_block_build_with_global_seqno() {
+        let mut builder =
+            BlockBuilder::new(5, true, DataBlockIndexType::DataBlockBinarySearch, 0.0);
+        let mut kvs = vec![];
+        kvs.push((b"abcdeeeeee".to_vec(), b"v0"));
+        kvs.push((b"abcdefffff".to_vec(), b"v0"));
+        kvs.push((b"abcdeggggg".to_vec(), b"v0"));
+        kvs.push((b"abcdehhhhh".to_vec(), b"v0"));
+        kvs.push((b"abcdeiiiii".to_vec(), b"v0"));
+        kvs.push((b"abcdejjjjj".to_vec(), b"v0"));
+        for i in 0..100u64 {
+            let mut b = b"abcdek".to_vec();
+            if *b.last().unwrap() < 255u8 {
+                *b.last_mut().unwrap() += 1;
+            } else {
+                b.push(1);
+            }
+            kvs.push((b, b"v1"));
+        }
+        for (k, &v) in kvs.iter() {
+            let mut key = k.clone();
+            key.extend_from_slice(
+                &pack_sequence_and_type(0, ValueType::TypeValue as u8).to_le_bytes(),
+            );
+            builder.add(&key, &v);
+        }
+        let data = builder.finish().to_vec();
+        const GLOBAL_SEQNO: u64 = 12;
+        let block = Arc::new(Block::new(data, GLOBAL_SEQNO));
+        let mut iter = block.new_data_iterator(Arc::new(InternalKeyComparator::default()));
+        iter.seek_to_first();
+        let mut i = 0;
+        for (k, v) in kvs {
+            assert!(iter.valid());
+            let mut key = k.clone();
+            key.extend_from_slice(
+                &pack_sequence_and_type(GLOBAL_SEQNO, ValueType::TypeValue as u8).to_le_bytes(),
+            );
+            assert_eq!(iter.key(), key.as_slice());
             assert_eq!(iter.value(), v.as_slice());
             iter.next();
             i += 1;
