@@ -11,7 +11,6 @@ mod util;
 mod version;
 mod wal;
 mod write_batch;
-mod write_thread;
 
 pub use db::*;
 

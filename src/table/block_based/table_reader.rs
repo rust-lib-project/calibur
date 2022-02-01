@@ -9,7 +9,7 @@ use crate::table::block_based::filter_reader::FilterBlockReader;
 use crate::table::block_based::index_reader::IndexReader;
 use crate::table::block_based::meta_block::read_properties;
 use crate::table::block_based::table_iterator::BlockBasedTableIterator;
-use crate::table::block_based::{BlockBasedTableOptions, BLOCK_TRAILER_SIZE};
+use crate::table::block_based::BlockBasedTableOptions;
 use crate::table::block_based::{FILTER_BLOCK_PREFIX, FULL_FILTER_BLOCK_PREFIX};
 use crate::table::format::{
     BlockHandle, Footer, BLOCK_BASED_TABLE_MAGIC_NUMBER, NEW_VERSIONS_ENCODED_LENGTH,

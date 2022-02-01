@@ -6,7 +6,7 @@ use crate::table::block_based::block::Block;
 use crate::table::block_based::block_builder::BlockBuilder;
 use crate::table::block_based::options::DataBlockIndexType;
 use crate::table::block_based::BLOCK_TRAILER_SIZE;
-use crate::table::format::{BlockHandle, Footer};
+use crate::table::format::BlockHandle;
 use crate::table::table_properties::*;
 use crate::table::InternalIterator;
 use crate::util::{encode_var_uint64, get_var_uint64};

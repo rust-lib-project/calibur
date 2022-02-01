@@ -1,7 +1,5 @@
-use crate::common::SliceTransform;
 use crate::util::decode_fixed_uint32;
 use crate::util::hash::bloom_hash;
-use std::sync::Arc;
 
 pub trait FilterBlockReader: Sync + Send {
     fn is_block_based(&self) -> bool {

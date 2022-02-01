@@ -16,7 +16,7 @@ pub struct Wal {
 
 impl Wal {
     /// open or create a WAL from options
-    pub fn open(path: PathBuf) -> Result<Wal> {
+    pub fn open(_path: PathBuf) -> Result<Wal> {
         unimplemented!()
     }
 

@@ -87,8 +87,8 @@ impl IndexValue {
 pub enum ChecksumType {
     NoChecksum = 0x0,
     CRC32c = 0x1,
-    xxHash = 0x2,
-    xxHash64 = 0x3,
+    // xxHash = 0x2,
+    // xxHash64 = 0x3,
 }
 
 pub const LEGACY_BLOCK_BASED_TABLE_MAGIC_NUMBER: u64 = 0xdb4775248b80fb57u64;

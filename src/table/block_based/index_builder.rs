@@ -148,6 +148,7 @@ pub fn create_index_builder(
     );
     Box::new(builder)
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,7 +217,9 @@ mod tests {
             assert_eq!(iter.index_value().handle, v);
             iter.next();
         }
-        iter.seek(b"abcde");
+        let mut w = b"abcde".to_vec();
+        w.extend_from_slice(&0u64.to_le_bytes());
+        iter.seek(&w);
         assert!(iter.valid());
         assert_eq!(iter.index_value().handle.offset, 100);
     }

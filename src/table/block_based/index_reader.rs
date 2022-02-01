@@ -1,4 +1,4 @@
-use crate::common::{InternalKeyComparator, KeyComparator, RandomAccessFileReader, Result};
+use crate::common::{InternalKeyComparator, RandomAccessFileReader, Result};
 use crate::table::block_based::block::{read_block_from_file, Block, IndexBlockIter};
 use crate::table::format::BlockHandle;
 use std::sync::Arc;

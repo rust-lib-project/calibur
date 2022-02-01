@@ -1,5 +1,4 @@
 use crate::common::Result;
-use crate::table::block_based::block::Block;
 use crate::table::block_based::filter_reader::FilterBlockReader;
 use crate::table::block_based::options::BlockBasedTableOptions;
 
