@@ -1,7 +1,6 @@
 use crate::common::Result;
 use crate::table::format::BlockHandle;
 use crate::table::InternalIterator;
-use std::collections::BTreeMap;
 
 #[derive(Default, Debug, Clone)]
 pub struct TableProperties {
@@ -104,7 +103,7 @@ pub const PROPERTIES_VERSION: &str = "rocksdb.external_sst_file.version";
 // value of this property is a fixed uint64 number.
 pub const PROPERTIES_GLOBAL_SEQNO: &str = "rocksdb.external_sst_file.global_seqno";
 
-fn seek_to_metablock<I: InternalIterator>(
+pub fn seek_to_metablock<I: InternalIterator>(
     meta_iter: &mut I,
     block_name: &str,
     block_handle: Option<&mut BlockHandle>,

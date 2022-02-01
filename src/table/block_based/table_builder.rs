@@ -8,13 +8,12 @@ use crate::table::block_based::index_builder::{create_index_builder, IndexBuilde
 use crate::table::block_based::meta_block::{MetaIndexBuilder, PropertyBlockBuilder};
 use crate::table::block_based::options::BlockBasedTableOptions;
 use crate::table::block_based::options::DataBlockIndexType;
+use crate::table::block_based::{FILTER_BLOCK_PREFIX, FULL_FILTER_BLOCK_PREFIX};
 use crate::table::format::*;
 use crate::table::table_properties::{TableProperties, PROPERTIES_BLOCK};
 use crate::table::{TableBuilder, TableBuilderOptions};
 use crate::util::extract_user_key;
 
-const FILTER_BLOCK_PREFIX: &str = "filter.";
-const FULL_FILTER_BLOCK_PREFIX: &str = "fullfilter.";
 // const PartitionedFilterBlockPrefix: &str = "partitionedfilter.";
 
 pub struct BuilderRep {
@@ -272,6 +271,6 @@ impl TableBuilder for BlockBasedTableBuilder {
     }
 
     fn num_entries(&self) -> u64 {
-        0
+        self.rep.props.num_entries
     }
 }

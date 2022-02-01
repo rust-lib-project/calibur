@@ -152,7 +152,7 @@ impl RawFile {
 
 impl Drop for RawFile {
     fn drop(&mut self) {
-        if let Err(e) = self.close() {
+        if let Err(_e) = self.close() {
             // error!("error while closing file: {}", e);
         }
     }

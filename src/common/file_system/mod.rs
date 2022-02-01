@@ -15,7 +15,10 @@ pub use writer::WritableFileWriter;
 
 #[async_trait]
 pub trait RandomAccessFile: 'static + Send + Sync {
-    async fn read(&self, offset: usize, n: usize, data: &mut [u8]) -> Result<usize>;
+    async fn read(&self, offset: usize, data: &mut [u8]) -> Result<usize> {
+        self.read_exact(offset, data.len(), data).await
+    }
+    async fn read_exact(&self, offset: usize, n: usize, data: &mut [u8]) -> Result<usize>;
     fn use_direct_io(&self) -> bool {
         false
     }
@@ -75,7 +78,7 @@ impl WritableFile for InMemFile {
         Ok(())
     }
 
-    fn allocate(&mut self, offset: u64, len: u64) -> Result<()> {
+    fn allocate(&mut self, _offset: u64, _len: u64) -> Result<()> {
         Ok(())
     }
 
@@ -92,7 +95,20 @@ impl WritableFile for InMemFile {
 
 #[async_trait]
 impl RandomAccessFile for InMemFile {
-    async fn read(&self, offset: usize, n: usize, data: &mut [u8]) -> Result<usize> {
+    async fn read(&self, offset: usize, data: &mut [u8]) -> Result<usize> {
+        if offset >= self.buf.len() {
+            Ok(0)
+        } else if offset + data.len() > self.buf.len() {
+            let rest = self.buf.len() - offset;
+            data.copy_from_slice(&self.buf[offset..(offset + rest)]);
+            Ok(rest)
+        } else {
+            data.copy_from_slice(&self.buf[offset..(offset + data.len())]);
+            Ok(self.buf.len())
+        }
+    }
+
+    async fn read_exact(&self, offset: usize, n: usize, data: &mut [u8]) -> Result<usize> {
         if offset >= self.buf.len() {
             Ok(0)
         } else if offset + n > self.buf.len() {
@@ -100,7 +116,7 @@ impl RandomAccessFile for InMemFile {
             data.copy_from_slice(&self.buf[offset..(offset + rest)]);
             Ok(rest)
         } else {
-            data.copy_from_slice(&self.buf);
+            data.copy_from_slice(&self.buf[offset..(offset + n)]);
             Ok(self.buf.len())
         }
     }

@@ -248,6 +248,7 @@ impl DataBlockIter {
             let mid = (left + right + 1) / 2;
             let region_offset = self.get_restart_point(mid) as usize;
             let (next_offset, shared, non_shared) = decode_key(&self.block.data[region_offset..]);
+            assert_eq!(shared, 0);
             if next_offset == 0 {
                 return -1;
             }
@@ -405,9 +406,22 @@ pub async fn read_block_from_file(
 ) -> Result<Arc<Block>> {
     let read_len = handle.size as usize + BLOCK_TRAILER_SIZE;
     let mut data = vec![0u8; read_len];
-    file.read(handle.offset as usize, read_len, data.as_mut_slice())
+    file.read_exact(handle.offset as usize, read_len, data.as_mut_slice())
         .await?;
     data.resize(handle.size as usize, 0);
     // TODO: uncompress block
     Ok(Arc::new(Block::new(data, global_seqno)))
+}
+
+pub async fn read_block_content_from_file(
+    file: &RandomAccessFileReader,
+    handle: &BlockHandle,
+) -> Result<Vec<u8>> {
+    let read_len = handle.size as usize + BLOCK_TRAILER_SIZE;
+    let mut data = vec![0u8; read_len];
+    file.read_exact(handle.offset as usize, read_len, data.as_mut_slice())
+        .await?;
+    data.resize(handle.size as usize, 0);
+    // TODO: uncompress block
+    Ok(data)
 }

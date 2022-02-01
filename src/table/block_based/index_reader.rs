@@ -22,10 +22,17 @@ impl IndexReader {
         };
         Ok(reader)
     }
-    pub fn new_iterator(&self, comparator: Arc<dyn KeyComparator>) -> Box<IndexBlockIter> {
-        let iter = self
-            .index_block
-            .new_index_iterator(comparator, self.index_key_includes_seq);
+
+    pub fn new_iterator(&self, comparator: Arc<InternalKeyComparator>) -> Box<IndexBlockIter> {
+        let iter = if self.index_key_includes_seq {
+            self.index_block
+                .new_index_iterator(comparator, self.index_key_includes_seq)
+        } else {
+            self.index_block.new_index_iterator(
+                comparator.get_user_comparator().clone(),
+                self.index_key_includes_seq,
+            )
+        };
         Box::new(iter)
     }
 }

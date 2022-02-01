@@ -1,6 +1,5 @@
 use crate::common::format::*;
 use crate::util::{encode_var_uint32, get_var_uint32};
-use bytes::{BufMut, BytesMut};
 
 const WRITE_BATCH_HEADER: usize = 12;
 

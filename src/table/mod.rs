@@ -2,11 +2,13 @@ mod block_based;
 mod format;
 mod table_properties;
 
+use crate::common::format::ValueType;
 use crate::common::options::{CompressionType, ReadOptions};
 use crate::common::{
     InternalKeyComparator, RandomAccessFileReader, Result, SliceTransform, WritableFileWriter,
 };
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub trait InternalIterator {
@@ -36,7 +38,7 @@ pub trait AsyncIterator {
 
 #[async_trait]
 pub trait TableReader: 'static + Sync + Send {
-    async fn get(&self, opts: &ReadOptions, key: &[u8], sequence: u64) -> Result<Option<Vec<u8>>>;
+    async fn get(&self, opts: &ReadOptions, key: &[u8]) -> Result<Option<Vec<u8>>>;
     fn new_iterator(&self, opts: &ReadOptions) -> Box<dyn AsyncIterator>;
 }
 
@@ -63,6 +65,26 @@ pub trait TableBuilder {
     fn num_entries(&self) -> u64;
 }
 
+pub trait TablePropertiesCollector: Send + Sync {
+    fn add(&mut self, key: &[u8], value: &[u8]) -> Result<()>;
+    fn add_user_key(
+        &mut self,
+        key: &[u8],
+        value: &[u8],
+        _tp: ValueType,
+        _seqno: u64,
+        _file_size: usize,
+    ) -> Result<()> {
+        self.add(key, value)
+    }
+    fn finish(&mut self) -> Result<HashMap<String, Vec<u8>>>;
+}
+
+pub trait TablePropertiesCollectorFactory: Send + Sync {
+    fn name(&self) -> &'static str;
+    fn create_table_properties_collector(&self, cf_id: u32) -> Box<dyn TablePropertiesCollector>;
+}
+
 pub struct TableBuilderOptions {
     skip_filter: bool,
     internal_comparator: InternalKeyComparator,
@@ -70,6 +92,8 @@ pub struct TableBuilderOptions {
     target_file_size: usize,
     compression_type: CompressionType,
     column_family_id: u32,
+    // TODO: add user properties to sst
+    table_properties_collector_factories: Vec<Arc<dyn TablePropertiesCollectorFactory>>,
 }
 
 pub struct TableReaderOptions {

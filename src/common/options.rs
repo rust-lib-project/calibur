@@ -25,4 +25,5 @@ pub struct ReadOptions {
     pub fill_cache: bool,
     pub total_order_seek: bool,
     pub prefix_same_as_start: bool,
+    pub skip_filter: bool,
 }

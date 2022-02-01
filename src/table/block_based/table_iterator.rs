@@ -1,6 +1,6 @@
 use crate::common::InternalKeyComparator;
 use crate::table::block_based::block::{DataBlockIter, IndexBlockIter};
-use crate::table::block_based::table_reader::{BlockBasedTable, BlockBasedTableRep};
+use crate::table::block_based::table_reader::BlockBasedTableRep;
 use crate::table::{AsyncIterator, InternalIterator};
 use async_trait::async_trait;
 use std::sync::Arc;

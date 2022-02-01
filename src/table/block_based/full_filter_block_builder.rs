@@ -1,5 +1,6 @@
 use crate::common::SliceTransform;
 use crate::table::block_based::filter_block_builder::*;
+use crate::table::block_based::filter_reader::{FilterBlockReader, FullFilterBlockReader};
 use crate::table::block_based::options::BlockBasedTableOptions;
 use crate::util::hash::bloom_hash;
 use std::sync::Arc;
@@ -176,7 +177,7 @@ impl FullFilterBlockFactory {
     }
 }
 
-impl FilterBuilderFactory for FullFilterBlockFactory {
+impl FilterBlockFactory for FullFilterBlockFactory {
     fn create_builder(&self, opts: &BlockBasedTableOptions) -> Box<dyn FilterBlockBuilder> {
         let bits = FullFilterBitsBuilder {
             hash_entries: vec![],
@@ -187,8 +188,8 @@ impl FilterBuilderFactory for FullFilterBlockFactory {
         Box::new(builder)
     }
 
-    fn create_policy(&self) -> Box<dyn FilterPolicy> {
-        todo!()
+    fn create_filter_reader(&self, filter_block: Vec<u8>) -> Box<dyn FilterBlockReader> {
+        Box::new(FullFilterBlockReader::new(filter_block))
     }
 
     fn name(&self) -> &'static str {

@@ -1,4 +1,4 @@
-use crate::common::{RandomAccessFile, RandomAccessFileReader, WritableFileWriter};
+use crate::common::{RandomAccessFileReader, WritableFileWriter};
 use crate::table::block_based::options::BlockBasedTableOptions;
 use crate::table::block_based::table_builder::BlockBasedTableBuilder;
 use crate::table::block_based::table_reader::BlockBasedTable;

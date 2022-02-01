@@ -1,4 +1,6 @@
 use crate::common::Result;
+use crate::table::block_based::block::Block;
+use crate::table::block_based::filter_reader::FilterBlockReader;
 use crate::table::block_based::options::BlockBasedTableOptions;
 
 pub trait FilterBlockBuilder {
@@ -11,14 +13,11 @@ pub trait FilterBlockBuilder {
     fn num_added(&self) -> usize;
 }
 
-pub trait FilterPolicy {
-    fn name(&self) -> &'static str;
-    fn key_may_match(&self, key: &[u8], filter: &[u8]) -> bool;
-    fn create_filter(&self, keys: &[&[u8]], dst: &mut Vec<u8>);
-}
-
-pub trait FilterBuilderFactory: Send + Sync {
+pub trait FilterBlockFactory: Send + Sync {
     fn create_builder(&self, opts: &BlockBasedTableOptions) -> Box<dyn FilterBlockBuilder>;
-    fn create_policy(&self) -> Box<dyn FilterPolicy>;
+    fn create_filter_reader(&self, filter_block: Vec<u8>) -> Box<dyn FilterBlockReader>;
     fn name(&self) -> &'static str;
+    fn is_block_based(&self) -> bool {
+        false
+    }
 }

@@ -208,7 +208,7 @@ mod tests {
         );
         let r = Runtime::new().unwrap();
         let reader = r.block_on(f).unwrap();
-        let mut iter = reader.new_iterator(Arc::new(DefaultUserComparator::default()));
+        let mut iter = reader.new_iterator(Arc::new(InternalKeyComparator::default()));
         iter.seek_to_first();
         for (k, v) in kvs {
             assert!(iter.valid());

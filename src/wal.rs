@@ -1,5 +1,4 @@
 use crate::common::{Result, WritableFile};
-use std::io::Cursor;
 use std::path::PathBuf;
 
 pub const MAX_HEADER_SIZE: usize = 21;
