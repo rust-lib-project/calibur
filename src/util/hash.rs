@@ -1,17 +1,17 @@
 use super::decode_fixed_uint32;
 
-pub fn hash(data: &[u8], seed: u32) -> u32 {
+pub fn hash(data: &[u8], seed: u64) -> u32 {
     const M: u32 = 0xc6a4a793;
     const R: u32 = 24;
-    let mut h = seed ^ (data.len() as u32 * M);
+    let mut h = (seed ^ (data.len() as u64 * M as u64)) as u32;
 
     // Pick up four bytes at a time
     let mut offset = 0;
     while offset + 4 <= data.len() {
         let w = decode_fixed_uint32(&data[offset..]);
         offset += 4;
-        h += w;
-        h *= M;
+        h = h.wrapping_add(w);
+        h = h.wrapping_mul(M);
         h ^= h >> 16;
     }
 
@@ -33,7 +33,7 @@ pub fn hash(data: &[u8], seed: u32) -> u32 {
     }
     if rest >= 1 {
         h += data[offset] as u32;
-        h *= M;
+        h = h.wrapping_mul(M);
         h ^= h >> R;
     }
     return h;

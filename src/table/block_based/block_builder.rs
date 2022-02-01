@@ -150,13 +150,11 @@ mod tests {
         let block = Arc::new(Block::new(data, DISABLE_GLOBAL_SEQUENCE_NUMBER));
         let mut iter = block.new_data_iterator(comparator);
         iter.seek_to_first();
-        let mut i = 0;
         for (k, v) in kvs {
             assert!(iter.valid());
             assert_eq!(iter.key(), k.as_slice());
             assert_eq!(iter.value(), v.as_slice());
             iter.next();
-            i += 1;
         }
         iter.seek(b"abcde");
         assert!(iter.valid());
@@ -192,7 +190,7 @@ mod tests {
         kvs.push((b"abcdeiiiii".to_vec(), b"v0"));
         kvs.push((b"abcdejjjjj".to_vec(), b"v0"));
         let mut b = b"abcdek".to_vec();
-        for i in 0..100u64 {
+        for _ in 0..100u64 {
             if *b.last().unwrap() < 255u8 {
                 *b.last_mut().unwrap() += 1;
             } else {
@@ -212,7 +210,6 @@ mod tests {
         let block = Arc::new(Block::new(data, GLOBAL_SEQNO));
         let mut iter = block.new_data_iterator(Arc::new(InternalKeyComparator::default()));
         iter.seek_to_first();
-        let mut i = 0;
         for (k, v) in kvs {
             assert!(iter.valid());
             let mut key = k.clone();
@@ -222,7 +219,6 @@ mod tests {
             assert_eq!(iter.key(), key.as_slice());
             assert_eq!(iter.value(), v.as_slice());
             iter.next();
-            i += 1;
         }
     }
 }

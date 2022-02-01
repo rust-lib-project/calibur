@@ -49,6 +49,7 @@ pub trait FileSystem {
         path: PathBuf,
         file_name: String,
     ) -> Result<Box<RandomAccessFileReader>>;
+    fn file_exist(&self, path: PathBuf, file_name: String) -> Result<bool>;
 }
 #[derive(Default)]
 pub struct InMemFileSystemRep {
@@ -158,5 +159,10 @@ impl FileSystem for InMemFileSystem {
                 Ok(Box::new(RandomAccessFileReader::new(Box::new(f), filename)))
             }
         }
+    }
+
+    fn file_exist(&self, _path: PathBuf, filename: String) -> Result<bool> {
+        let fs = self.inner.lock().unwrap();
+        Ok(fs.files.get(&filename).is_some())
     }
 }

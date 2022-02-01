@@ -50,7 +50,7 @@ impl FullFilterBlockReader {
             if (self.data[bitpos as usize / 8] & (1u8 << (bitpos % 8) as u8)) == 0 {
                 return false;
             }
-            h += delta;
+            h = h.wrapping_add(delta);
         }
         true
     }

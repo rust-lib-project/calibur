@@ -153,10 +153,8 @@ pub fn create_index_builder(
 mod tests {
     use super::*;
     use crate::common::{
-        DefaultUserComparator, FileSystem, InMemFileSystem, InternalKeyComparator,
-        DISABLE_GLOBAL_SEQUENCE_NUMBER,
+        FileSystem, InMemFileSystem, InternalKeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER,
     };
-    use crate::table::block_based::block::Block;
     use crate::table::block_based::index_reader::IndexReader;
     use crate::table::InternalIterator;
     use std::path::PathBuf;
@@ -182,7 +180,6 @@ mod tests {
         for (k, _) in kvs.iter_mut() {
             k.extend_from_slice(&0u64.to_le_bytes());
         }
-        let comparator = Arc::new(DefaultUserComparator::default());
         for (k, v) in kvs.iter() {
             builder.add_index_entry(&mut k.clone(), &[], v);
         }

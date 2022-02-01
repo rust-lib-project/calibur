@@ -2,6 +2,7 @@
 
 use std::io::{Result as IoResult, Write};
 use std::os::unix::io::RawFd;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::common::file_system::WritableFile;
@@ -12,7 +13,9 @@ use nix::sys::uio::{pread, pwrite};
 use nix::unistd::{close, ftruncate, lseek, Whence};
 use nix::NixPath;
 
-use crate::common::{Error, Result};
+use crate::common::{
+    Error, FileSystem, RandomAccessFile, RandomAccessFileReader, Result, WritableFileWriter,
+};
 
 const FILE_ALLOCATE_SIZE: usize = 2 * 1024 * 1024;
 const MIN_ALLOCATE_SIZE: usize = 4 * 1024;
@@ -158,7 +161,7 @@ impl Drop for RawFile {
     }
 }
 
-/// A `WritableFile` is a `RawFile` wrapper that implements `Seek`, `Write` and `Read`.
+/// A `WritableFile` is a `RawFile` wrapper that implements `Write`.
 pub struct PosixWritableFile {
     inner: Arc<RawFile>,
     offset: usize,
@@ -239,5 +242,67 @@ impl Write for PosixWritableFile {
 
     fn flush(&mut self) -> IoResult<()> {
         Ok(())
+    }
+}
+
+pub struct PosixReadableFile {
+    inner: Arc<RawFile>,
+    file_size: usize,
+}
+
+impl PosixReadableFile {
+    pub fn open<P: ?Sized + NixPath>(path: &P) -> IoResult<Self> {
+        let fd = RawFile::open(path)?;
+        let file_size = fd.file_size()?;
+        Ok(Self {
+            inner: Arc::new(fd),
+            file_size,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl RandomAccessFile for PosixReadableFile {
+    async fn read(&self, offset: usize, data: &mut [u8]) -> Result<usize> {
+        self.inner
+            .read(offset, data)
+            .map_err(|e| Error::Io(Box::new(e)))
+    }
+
+    async fn read_exact(&self, offset: usize, n: usize, data: &mut [u8]) -> Result<usize> {
+        self.inner
+            .read(offset, &mut data[..n])
+            .map_err(|e| Error::Io(Box::new(e)))
+    }
+}
+
+pub struct SyncPoxisFileSystem {}
+
+impl FileSystem for SyncPoxisFileSystem {
+    fn open_writable_file(
+        &self,
+        path: PathBuf,
+        file_name: String,
+    ) -> Result<Box<WritableFileWriter>> {
+        let p = path.join(&file_name);
+        let f = PosixWritableFile::open(&p).map_err(|e| Error::Io(Box::new(e)))?;
+        let writer = WritableFileWriter::new(Box::new(f), file_name, 65536);
+        Ok(Box::new(writer))
+    }
+
+    fn open_random_access_file(
+        &self,
+        path: PathBuf,
+        file_name: String,
+    ) -> Result<Box<RandomAccessFileReader>> {
+        let p = path.join(&file_name);
+        let f = PosixReadableFile::open(&p).map_err(|e| Error::Io(Box::new(e)))?;
+        let reader = RandomAccessFileReader::new(Box::new(f), file_name);
+        Ok(Box::new(reader))
+    }
+
+    fn file_exist(&self, path: PathBuf, file_name: String) -> Result<bool> {
+        let p = path.join(&file_name);
+        Ok(p.exists())
     }
 }

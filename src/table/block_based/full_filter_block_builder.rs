@@ -42,7 +42,7 @@ impl FullFilterBitsBuilder {
         for _ in 0..self.num_probes {
             let bitpos = b + (h % (CACHE_LINE_SIZE * 8));
             data[bitpos as usize / 8] |= (1 << (bitpos % 8)) as u8;
-            h += delta;
+            h = h.wrapping_add(delta);
         }
     }
 
@@ -194,5 +194,34 @@ impl FilterBlockFactory for FullFilterBlockFactory {
 
     fn name(&self) -> &'static str {
         "rocksdb.BuiltinBloomFilter"
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_index_builder() {
+        let mut options = BlockBasedTableOptions::default();
+        options.whole_key_filtering = true;
+        let factory = FullFilterBlockFactory::new(10);
+        let mut builder = factory.create_builder(&options);
+        builder.add(b"abcdeeeeee");
+        builder.add(b"abcdefffff");
+        builder.add(b"abcdeggggg");
+        builder.add(b"abcdehhhhh");
+        builder.add(b"abcdeiiiii");
+        builder.add(b"abcdejjjjj");
+        let data = builder.finish().unwrap().to_vec();
+        let reader = factory.create_filter_reader(data);
+        assert!(reader.key_may_match(b"abcdeeeeee"));
+        assert!(reader.key_may_match(b"abcdefffff"));
+        assert!(reader.key_may_match(b"abcdeggggg"));
+        assert!(reader.key_may_match(b"abcdehhhhh"));
+        assert!(reader.key_may_match(b"abcdeiiiii"));
+        assert!(reader.key_may_match(b"abcdejjjjj"));
+        assert!(!reader.key_may_match(b"abcdejjjjjk"));
+        assert!(!reader.key_may_match(b"abcdejjjj"));
+        assert!(!reader.key_may_match(b"abcdejjjjjj"));
     }
 }
