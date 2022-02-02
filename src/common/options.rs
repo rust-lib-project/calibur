@@ -20,6 +20,7 @@ pub enum CompressionType {
     DisableCompressionOption = 0xff,
 }
 
+#[derive(Default, Clone)]
 pub struct ReadOptions {
     pub snapshot: u64,
     pub fill_cache: bool,

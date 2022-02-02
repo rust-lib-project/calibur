@@ -6,7 +6,7 @@ mod slice_transform;
 mod snapshot;
 
 use crate::util::{decode_fixed_uint64, extract_user_key};
-pub use slice_transform::SliceTransform;
+pub use slice_transform::{InternalKeySliceTransform, SliceTransform};
 
 pub use error::Error;
 pub use file_system::{

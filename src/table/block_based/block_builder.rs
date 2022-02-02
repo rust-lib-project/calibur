@@ -98,6 +98,8 @@ impl BlockBuilder {
         self.restarts.clear();
         self.restarts.push(0); // First restart point is at offset 0
         self.estimate = std::mem::size_of::<u32>() * 2;
+        self.count = 0;
+        self.last_key.clear();
         if self.hash_index_builder.valid() {
             self.hash_index_builder.clear();
         }

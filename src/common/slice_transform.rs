@@ -24,6 +24,12 @@ impl InternalKeySliceTransform {
     }
 }
 
+impl Default for InternalKeySliceTransform {
+    fn default() -> Self {
+        InternalKeySliceTransform::new(Arc::new(NoopTransform::default()))
+    }
+}
+
 impl SliceTransform for InternalKeySliceTransform {
     fn name(&self) -> &'static str {
         self.transform.name()
@@ -39,5 +45,21 @@ impl SliceTransform for InternalKeySliceTransform {
 
     fn in_range(&self, key: &[u8]) -> bool {
         self.transform.in_range(extract_user_key(key))
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct NoopTransform {}
+impl SliceTransform for NoopTransform {
+    fn name(&self) -> &'static str {
+        "NoopTransform"
+    }
+
+    fn transform<'a>(&self, key: &'a [u8]) -> &'a [u8] {
+        key
+    }
+
+    fn in_domain(&self, key: &[u8]) -> bool {
+        true
     }
 }

@@ -109,3 +109,21 @@ pub fn get_var_uint64(data: &[u8]) -> Option<(usize, u64)> {
     }
     return None;
 }
+
+pub fn next_key(key: &mut Vec<u8>) {
+    if *key.last().unwrap() < 255u8 {
+        *key.last_mut().unwrap() += 1;
+    } else {
+        key.push(0);
+    }
+}
+
+pub fn get_next_key(key: &[u8]) -> Vec<u8> {
+    let mut data = key.to_vec();
+    if *data.last().unwrap() < 255u8 {
+        *data.last_mut().unwrap() += 1;
+    } else {
+        data.push(0);
+    }
+    data
+}

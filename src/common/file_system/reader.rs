@@ -25,4 +25,8 @@ impl RandomAccessFileReader {
     pub fn use_direct_io(&self) -> bool {
         self.file.use_direct_io()
     }
+
+    pub fn file_size(&self) -> usize {
+        self.file.file_size()
+    }
 }

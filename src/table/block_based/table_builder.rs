@@ -21,7 +21,7 @@ pub struct BuilderRep {
     last_key: Vec<u8>,
     pending_handle: BlockHandle,
     props: TableProperties,
-    file: WritableFileWriter,
+    file: Box<WritableFileWriter>,
     alignment: usize,
     options: BlockBasedTableOptions,
     column_family_name: String,
@@ -63,7 +63,7 @@ impl BlockBasedTableBuilder {
     pub fn new(
         options: &TableBuilderOptions,
         table_options: BlockBasedTableOptions,
-        file: WritableFileWriter,
+        file: Box<WritableFileWriter>,
     ) -> Self {
         let data_block_builder = BlockBuilder::new(
             table_options.block_restart_interval,
@@ -263,6 +263,7 @@ impl TableBuilder for BlockBasedTableBuilder {
             .rep
             .write_raw_block(meta_index_builder.finish(), false)?;
         self.write_footer(metaindex_block_handle, index_block_handle)?;
+        self.rep.file.sync();
         Ok(())
     }
 
@@ -272,5 +273,70 @@ impl TableBuilder for BlockBasedTableBuilder {
 
     fn num_entries(&self) -> u64 {
         self.rep.props.num_entries
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::format::{pack_sequence_and_type, ValueType};
+    use crate::common::options::ReadOptions;
+    use crate::common::{
+        DefaultUserComparator, FileSystem, InMemFileSystem, InternalKeyComparator, KeyComparator,
+        DISABLE_GLOBAL_SEQUENCE_NUMBER,
+    };
+    use crate::table::block_based::block::Block;
+    use crate::table::block_based::table_reader::BlockBasedTable;
+    use crate::table::{InternalIterator, TableReader, TableReaderOptions};
+    use crate::util::{get_next_key, next_key};
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use tokio::runtime::Runtime;
+
+    #[test]
+    fn test_table_builder() {
+        let mut opts = BlockBasedTableOptions::default();
+        opts.block_size = 128;
+        let fs = InMemFileSystem::default();
+        let w = fs
+            .open_writable_file(PathBuf::new(), "sst0".to_string())
+            .unwrap();
+        let tbl_opts = TableBuilderOptions::default();
+        let mut builder = BlockBasedTableBuilder::new(&tbl_opts, opts.clone(), w);
+        let mut key = b"abcdef".to_vec();
+        let mut kvs = vec![];
+        for _ in 0..1000u64 {
+            next_key(&mut key);
+            let mut k1 = key.clone();
+            k1.extend_from_slice(&200u64.to_le_bytes());
+            builder.add(&k1, b"v0").unwrap();
+            kvs.push((k1.clone(), b"v0".to_vec()));
+            k1.resize(key.len(), 0);
+
+            k1.extend_from_slice(&100u64.to_le_bytes());
+            builder.add(&k1, b"v1").unwrap();
+            kvs.push((k1, b"v1".to_vec()));
+        }
+        builder.finish().unwrap();
+        let r = fs
+            .open_random_access_file(PathBuf::new(), "sst0".to_string())
+            .unwrap();
+        let mut tbl_opts = TableReaderOptions::default();
+        tbl_opts.file_size = r.file_size();
+        let runtime = Runtime::new().unwrap();
+        let reader = runtime
+            .block_on(BlockBasedTable::open(&tbl_opts, opts, r))
+            .unwrap();
+        let mut iter = reader.new_iterator();
+        runtime.block_on(iter.seek_to_first());
+        let mut ret = vec![];
+        while iter.valid() {
+            ret.push((iter.key().to_vec(), iter.value().to_vec()));
+            runtime.block_on(iter.next());
+        }
+        for i in 0..ret.len() {
+            assert_eq!(ret[i], kvs[i]);
+        }
+        assert_eq!(ret, kvs);
     }
 }

@@ -5,7 +5,8 @@ mod table_properties;
 use crate::common::format::ValueType;
 use crate::common::options::{CompressionType, ReadOptions};
 use crate::common::{
-    InternalKeyComparator, RandomAccessFileReader, Result, SliceTransform, WritableFileWriter,
+    InternalKeyComparator, InternalKeySliceTransform, RandomAccessFileReader, Result,
+    SliceTransform, WritableFileWriter,
 };
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -39,7 +40,10 @@ pub trait AsyncIterator {
 #[async_trait]
 pub trait TableReader: 'static + Sync + Send {
     async fn get(&self, opts: &ReadOptions, key: &[u8]) -> Result<Option<Vec<u8>>>;
-    fn new_iterator(&self, opts: &ReadOptions) -> Box<dyn AsyncIterator>;
+    fn new_iterator_opts(&self, opts: &ReadOptions) -> Box<dyn AsyncIterator>;
+    fn new_iterator(&self) -> Box<dyn AsyncIterator> {
+        self.new_iterator_opts(&ReadOptions::default())
+    }
 }
 
 #[async_trait]
@@ -54,7 +58,7 @@ pub trait TableFactory {
     fn new_builder(
         &self,
         options: &TableBuilderOptions,
-        w: WritableFileWriter,
+        w: Box<WritableFileWriter>,
     ) -> Result<Box<dyn TableBuilder>>;
 }
 
@@ -96,6 +100,20 @@ pub struct TableBuilderOptions {
     table_properties_collector_factories: Vec<Arc<dyn TablePropertiesCollectorFactory>>,
 }
 
+impl Default for TableBuilderOptions {
+    fn default() -> Self {
+        TableBuilderOptions {
+            skip_filter: false,
+            internal_comparator: InternalKeyComparator::default(),
+            column_family_name: "default".to_string(),
+            target_file_size: 32 * 1024 * 1024, // 8MB
+            compression_type: CompressionType::NoCompression,
+            column_family_id: 0,
+            table_properties_collector_factories: vec![],
+        }
+    }
+}
+
 pub struct TableReaderOptions {
     prefix_extractor: Arc<dyn SliceTransform>,
     internal_comparator: InternalKeyComparator,
@@ -103,4 +121,17 @@ pub struct TableReaderOptions {
     level: u32,
     file_size: usize,
     largest_seqno: u64,
+}
+
+impl Default for TableReaderOptions {
+    fn default() -> Self {
+        TableReaderOptions {
+            prefix_extractor: Arc::new(InternalKeySliceTransform::default()),
+            internal_comparator: InternalKeyComparator::default(),
+            skip_filters: false,
+            level: 0,
+            file_size: 0,
+            largest_seqno: 0,
+        }
+    }
 }

@@ -274,6 +274,10 @@ impl RandomAccessFile for PosixReadableFile {
             .read(offset, &mut data[..n])
             .map_err(|e| Error::Io(Box::new(e)))
     }
+
+    fn file_size(&self) -> usize {
+        self.inner.file_size().unwrap()
+    }
 }
 
 pub struct SyncPoxisFileSystem {}

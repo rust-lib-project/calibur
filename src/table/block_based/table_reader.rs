@@ -190,7 +190,7 @@ impl TableReader for BlockBasedTable {
         Ok(None)
     }
 
-    fn new_iterator(&self, _opts: &ReadOptions) -> Box<dyn AsyncIterator> {
+    fn new_iterator_opts(&self, _opts: &ReadOptions) -> Box<dyn AsyncIterator> {
         let index_iter = self
             .rep
             .index_reader

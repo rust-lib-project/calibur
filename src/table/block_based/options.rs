@@ -53,7 +53,7 @@ impl Default for BlockBasedTableOptions {
         Self {
             block_align: false,
             block_restart_interval: 16,
-            block_size: 0,
+            block_size: 4096,
             checksum: ChecksumType::NoChecksum,
             data_block_hash_table_util_ratio: 0.75,
             data_block_index_type: DataBlockIndexType::DataBlockBinarySearch,

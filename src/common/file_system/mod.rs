@@ -19,6 +19,7 @@ pub trait RandomAccessFile: 'static + Send + Sync {
         self.read_exact(offset, data.len(), data).await
     }
     async fn read_exact(&self, offset: usize, n: usize, data: &mut [u8]) -> Result<usize>;
+    fn file_size(&self) -> usize;
     fn use_direct_io(&self) -> bool {
         false
     }
@@ -105,7 +106,7 @@ impl RandomAccessFile for InMemFile {
             Ok(rest)
         } else {
             data.copy_from_slice(&self.buf[offset..(offset + data.len())]);
-            Ok(self.buf.len())
+            Ok(data.len())
         }
     }
 
@@ -118,8 +119,11 @@ impl RandomAccessFile for InMemFile {
             Ok(rest)
         } else {
             data.copy_from_slice(&self.buf[offset..(offset + n)]);
-            Ok(self.buf.len())
+            Ok(n)
         }
+    }
+    fn file_size(&self) -> usize {
+        self.buf.len()
     }
 }
 

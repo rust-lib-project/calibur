@@ -30,7 +30,7 @@ impl TableFactory for BlockBasedTableFactory {
     fn new_builder(
         &self,
         opts: &TableBuilderOptions,
-        file: WritableFileWriter,
+        file: Box<WritableFileWriter>,
     ) -> crate::common::Result<Box<dyn TableBuilder>> {
         let builder = BlockBasedTableBuilder::new(opts, self.opts.clone(), file);
         Ok(Box::new(builder))
