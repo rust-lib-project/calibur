@@ -5,11 +5,11 @@ mod common;
 mod compaction;
 mod compactor;
 mod db;
+mod log;
 mod memtable;
 mod table;
 mod util;
 mod version;
-mod wal;
 mod write_batch;
 
 pub use db::*;

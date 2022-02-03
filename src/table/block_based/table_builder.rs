@@ -29,22 +29,22 @@ pub struct BuilderRep {
 }
 
 impl BuilderRep {
-    fn write_raw_block(&mut self, block: &[u8], is_data_block: bool) -> Result<BlockHandle> {
+    async fn write_raw_block(&mut self, block: &[u8], is_data_block: bool) -> Result<BlockHandle> {
         let handle = BlockHandle {
             offset: self.offset,
             size: block.len() as u64,
         };
-        self.file.append(block)?;
+        self.file.append(block).await?;
         let mut trailer: [u8; 5] = [0; 5];
         trailer[0] = CompressionType::NoCompression as u8;
         // todo: Add checksum for every block.
         trailer[1..].copy_from_slice(&(0 as u32).to_le_bytes());
-        self.file.append(&trailer)?;
+        self.file.append(&trailer).await?;
         self.offset += block.len() as u64 + trailer.len() as u64;
         if self.options.block_align && is_data_block {
             let pad_bytes = (self.alignment - ((block.len() + 5) & (self.alignment - 1)))
                 & (self.alignment - 1);
-            self.file.pad(pad_bytes)?;
+            self.file.pad(pad_bytes).await?;
             self.offset += pad_bytes as u64;
         }
         Ok(handle)
@@ -56,6 +56,7 @@ pub struct BlockBasedTableBuilder {
     data_block_builder: BlockBuilder,
     index_builder: Box<dyn IndexBuilder>,
     filter_builder: Option<Box<dyn FilterBlockBuilder>>,
+    after_flush: bool,
     rep: BuilderRep,
 }
 
@@ -98,36 +99,14 @@ impl BlockBasedTableBuilder {
             data_block_builder,
             index_builder,
             filter_builder,
+            after_flush: false,
             rep,
         }
     }
 
-    fn should_flush(&self) -> bool {
-        self.data_block_builder.current_size_estimate() >= self.rep.options.block_size
-    }
-
-    fn flush(&mut self) -> Result<()> {
-        if self.data_block_builder.is_empty() {
-            return Ok(());
-        }
-        self.rep.pending_handle = self.flush_data_block()?;
-        Ok(())
-    }
-
-    fn write_block(
-        &mut self,
-        block_builder: &mut BlockBuilder,
-        is_data_block: bool,
-    ) -> Result<BlockHandle> {
-        let buf = block_builder.finish();
-        let handle = self.rep.write_raw_block(buf, is_data_block)?;
-        block_builder.clear();
-        Ok(handle)
-    }
-
-    fn flush_data_block(&mut self) -> Result<BlockHandle> {
+    async fn flush_data_block(&mut self) -> Result<BlockHandle> {
         let buf = self.data_block_builder.finish();
-        let handle = self.rep.write_raw_block(buf, true)?;
+        let handle = self.rep.write_raw_block(buf, true).await?;
         if let Some(builder) = self.filter_builder.as_mut() {
             builder.start_block(self.rep.offset);
         }
@@ -137,20 +116,23 @@ impl BlockBasedTableBuilder {
         Ok(handle)
     }
 
-    fn write_index_block(&mut self) -> Result<BlockHandle> {
+    async fn write_index_block(&mut self) -> Result<BlockHandle> {
         let index_blocks = self.index_builder.finish()?;
         // TODO: build index block for hash index table.
-        self.rep.write_raw_block(index_blocks, false)
+        self.rep.write_raw_block(index_blocks, false).await
     }
 
-    fn write_filter_block(&mut self, meta_index_builder: &mut MetaIndexBuilder) -> Result<()> {
+    async fn write_filter_block(
+        &mut self,
+        meta_index_builder: &mut MetaIndexBuilder,
+    ) -> Result<()> {
         if let Some(builder) = self.filter_builder.as_mut() {
             if builder.num_added() == 0 {
                 return Ok(());
             }
             let content = builder.finish()?;
             self.rep.props.filter_size += content.len() as u64;
-            let handle = self.rep.write_raw_block(content, false)?;
+            let handle = self.rep.write_raw_block(content, false).await?;
             let mut key = if builder.is_block_based() {
                 FILTER_BLOCK_PREFIX.to_string()
             } else {
@@ -162,7 +144,10 @@ impl BlockBasedTableBuilder {
         Ok(())
     }
 
-    fn write_properties_block(&mut self, meta_index_builder: &mut MetaIndexBuilder) -> Result<()> {
+    async fn write_properties_block(
+        &mut self,
+        meta_index_builder: &mut MetaIndexBuilder,
+    ) -> Result<()> {
         let mut property_block_builder = PropertyBlockBuilder::new();
         self.rep.props.column_family_id = self.rep.column_family_id;
         self.rep.props.filter_policy_name = self.rep.options.filter_factory.name().to_string();
@@ -175,12 +160,12 @@ impl BlockBasedTableBuilder {
         // TODO: add the whole properties
         property_block_builder.add_table_properties(&self.rep.props);
         let data = property_block_builder.finish();
-        let properties_block_handle = self.rep.write_raw_block(data, false)?;
+        let properties_block_handle = self.rep.write_raw_block(data, false).await?;
         meta_index_builder.add(PROPERTIES_BLOCK.as_bytes(), &properties_block_handle);
         Ok(())
     }
 
-    fn write_footer(
+    async fn write_footer(
         &mut self,
         metaindex_block_handle: BlockHandle,
         index_block_handle: BlockHandle,
@@ -200,24 +185,24 @@ impl BlockBasedTableBuilder {
         };
         let mut buf = vec![];
         footer.encode_to(&mut buf);
-        self.rep.file.append(&buf)?;
+        self.rep.file.append(&buf).await?;
         self.rep.offset += buf.len() as u64;
         Ok(())
     }
 }
 
+#[async_trait::async_trait]
 impl TableBuilder for BlockBasedTableBuilder {
     fn add(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
         let value_type = extract_value_type(key);
         // TODO: check out of order
-        let should_flush = self.should_flush();
-        if should_flush {
-            self.flush()?;
+        if self.after_flush {
             self.index_builder.add_index_entry(
                 &mut self.rep.last_key,
                 key,
                 &self.rep.pending_handle,
             );
+            self.after_flush = false;
         }
         if let Some(builder) = self.filter_builder.as_mut() {
             builder.add(extract_user_key(key));
@@ -237,9 +222,13 @@ impl TableBuilder for BlockBasedTableBuilder {
         Ok(())
     }
 
-    fn finish(&mut self) -> crate::common::Result<()> {
+    fn should_flush(&self) -> bool {
+        self.data_block_builder.current_size_estimate() >= self.rep.options.block_size
+    }
+
+    async fn finish(&mut self) -> crate::common::Result<()> {
         let empty_data_block = self.data_block_builder.is_empty();
-        self.flush()?;
+        self.flush().await?;
         if !empty_data_block {
             self.index_builder.add_index_entry(
                 &mut self.rep.last_key,
@@ -256,14 +245,25 @@ impl TableBuilder for BlockBasedTableBuilder {
         //    6. [metaindex block]
         //    7. Footer
         let mut meta_index_builder = MetaIndexBuilder::new();
-        self.write_filter_block(&mut meta_index_builder)?;
-        let index_block_handle = self.write_index_block()?;
-        self.write_properties_block(&mut meta_index_builder)?;
+        self.write_filter_block(&mut meta_index_builder).await?;
+        let index_block_handle = self.write_index_block().await?;
+        self.write_properties_block(&mut meta_index_builder).await?;
         let metaindex_block_handle = self
             .rep
-            .write_raw_block(meta_index_builder.finish(), false)?;
-        self.write_footer(metaindex_block_handle, index_block_handle)?;
-        self.rep.file.sync();
+            .write_raw_block(meta_index_builder.finish(), false)
+            .await?;
+        self.write_footer(metaindex_block_handle, index_block_handle)
+            .await?;
+        self.rep.file.sync().await?;
+        Ok(())
+    }
+
+    async fn flush(&mut self) -> Result<()> {
+        if self.data_block_builder.is_empty() {
+            return Ok(());
+        }
+        self.rep.pending_handle = self.flush_data_block().await?;
+        self.after_flush = true;
         Ok(())
     }
 
@@ -305,6 +305,7 @@ mod tests {
         let mut builder = BlockBasedTableBuilder::new(&tbl_opts, opts.clone(), w);
         let mut key = b"abcdef".to_vec();
         let mut kvs = vec![];
+        let runtime = Runtime::new().unwrap();
         for _ in 0..1000u64 {
             next_key(&mut key);
             let mut k1 = key.clone();
@@ -316,14 +317,16 @@ mod tests {
             k1.extend_from_slice(&100u64.to_le_bytes());
             builder.add(&k1, b"v1").unwrap();
             kvs.push((k1, b"v1".to_vec()));
+            if builder.should_flush() {
+                runtime.block_on(builder.flush()).unwrap();
+            }
         }
-        builder.finish().unwrap();
+        runtime.block_on(builder.finish()).unwrap();
         let r = fs
             .open_random_access_file(PathBuf::new(), "sst0".to_string())
             .unwrap();
         let mut tbl_opts = TableReaderOptions::default();
         tbl_opts.file_size = r.file_size();
-        let runtime = Runtime::new().unwrap();
         let reader = runtime
             .block_on(BlockBasedTable::open(&tbl_opts, opts, r))
             .unwrap();

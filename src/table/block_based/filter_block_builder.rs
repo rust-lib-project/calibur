@@ -2,7 +2,7 @@ use crate::common::Result;
 use crate::table::block_based::filter_reader::FilterBlockReader;
 use crate::table::block_based::options::BlockBasedTableOptions;
 
-pub trait FilterBlockBuilder {
+pub trait FilterBlockBuilder: Send {
     fn is_block_based(&self) -> bool {
         false
     }

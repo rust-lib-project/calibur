@@ -59,7 +59,7 @@ impl SliceTransform for NoopTransform {
         key
     }
 
-    fn in_domain(&self, key: &[u8]) -> bool {
+    fn in_domain(&self, _key: &[u8]) -> bool {
         true
     }
 }

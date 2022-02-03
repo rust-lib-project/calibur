@@ -11,7 +11,7 @@ pub struct IndexBlocks {
     // pub meta_blocks: std::collections::HashMap<Vec<u8>, Vec<u8>>,
 }
 
-pub trait IndexBuilder {
+pub trait IndexBuilder: Send {
     fn add_index_entry(
         &mut self,
         last_key_in_current_block: &mut Vec<u8>,
@@ -189,10 +189,11 @@ mod tests {
         let mut f = fs
             .open_writable_file(PathBuf::default(), "index_block".to_string())
             .unwrap();
-        f.append(&data).unwrap();
+        let r = Runtime::new().unwrap();
+        r.block_on(f.append(&data)).await.unwrap();
         let trailer: [u8; 5] = [0; 5];
-        f.append(&trailer).unwrap();
-        f.sync().unwrap();
+        r.block_on(f.append(&trailer)).unwrap();
+        r.block_on(f.sync()).unwrap();
         let readfile = fs
             .open_random_access_file(PathBuf::default(), "index_block".to_string())
             .unwrap();
@@ -204,7 +205,6 @@ mod tests {
             DISABLE_GLOBAL_SEQUENCE_NUMBER,
             seperate,
         );
-        let r = Runtime::new().unwrap();
         let reader = r.block_on(f).unwrap();
         let mut iter = reader.new_iterator(Arc::new(InternalKeyComparator::default()));
         iter.seek_to_first();

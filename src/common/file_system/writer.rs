@@ -26,21 +26,24 @@ impl WritableFileWriter {
         }
     }
 
-    pub fn append(&mut self, data: &[u8]) -> Result<()> {
+    pub async fn append(&mut self, data: &[u8]) -> Result<()> {
         // TODO: We will cache data in buf when we use direct_io for write operation.
-        self.writable_file.append(data)
-    }
-
-    pub fn flush(&mut self) -> Result<()> {
+        self.writable_file.append(data).await?;
         Ok(())
     }
 
-    pub fn pad(&mut self, pad_bytes: usize) -> Result<()> {
-        self.buf.resize(pad_bytes, 0);
-        self.writable_file.append(&self.buf)
+    pub async fn flush(&mut self) -> Result<()> {
+        Ok(())
     }
 
-    pub fn sync(&self) -> Result<()> {
-        self.writable_file.sync()
+    pub async fn pad(&mut self, pad_bytes: usize) -> Result<()> {
+        self.buf.resize(pad_bytes, 0);
+        self.writable_file.append(&self.buf).await?;
+        Ok(())
+    }
+
+    pub async fn sync(&mut self) -> Result<()> {
+        self.writable_file.sync().await?;
+        Ok(())
     }
 }

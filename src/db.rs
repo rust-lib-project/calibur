@@ -1,6 +1,5 @@
 use crate::common::Result;
 use crate::version::{ColumnFamily, VersionSet};
-use crate::wal::WalManager;
 use crate::write_batch::WriteBatch;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
@@ -30,7 +29,6 @@ impl Core {
 pub struct Engine {
     core: Arc<Mutex<Core>>,
     cf_cache: Vec<Arc<ColumnFamily>>,
-    wal: Arc<Mutex<WalManager>>,
     last_sequence: Arc<AtomicU64>,
 }
 

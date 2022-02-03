@@ -11,4 +11,5 @@ rand = "0.7"
 bytes = "1.0"
 nix = "0.22"
 async-trait = "0.1"
+crc32c = "0.6"
 tokio = { version = "1", features = ["full"] }

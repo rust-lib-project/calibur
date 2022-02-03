@@ -62,9 +62,12 @@ pub trait TableFactory {
     ) -> Result<Box<dyn TableBuilder>>;
 }
 
-pub trait TableBuilder {
+#[async_trait]
+pub trait TableBuilder: Send {
     fn add(&mut self, key: &[u8], value: &[u8]) -> Result<()>;
-    fn finish(&mut self) -> Result<()>;
+    fn should_flush(&self) -> bool;
+    async fn finish(&mut self) -> Result<()>;
+    async fn flush(&mut self) -> Result<()>;
     fn file_size(&self) -> u64;
     fn num_entries(&self) -> u64;
 }

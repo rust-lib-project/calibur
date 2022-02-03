@@ -190,8 +190,9 @@ impl PosixWritableFile {
     }
 }
 
+#[async_trait::async_trait]
 impl WritableFile for PosixWritableFile {
-    fn append(&mut self, data: &[u8]) -> Result<()> {
+    async fn append(&mut self, data: &[u8]) -> Result<()> {
         self.write_all(data).map_err(|e| Error::Io(Box::new(e)))
     }
 
@@ -214,11 +215,11 @@ impl WritableFile for PosixWritableFile {
         Ok(())
     }
 
-    fn sync(&self) -> Result<()> {
+    async fn sync(&mut self) -> Result<()> {
         self.inner.sync().map_err(|e| Error::Io(Box::new(e)))
     }
 
-    fn fsync(&self) -> Result<()> {
+    async fn fsync(&mut self) -> Result<()> {
         self.inner.sync().map_err(|e| Error::Io(Box::new(e)))
     }
 }

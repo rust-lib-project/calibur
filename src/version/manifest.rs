@@ -1,1 +1,1 @@
-
+pub struct Manifest {}

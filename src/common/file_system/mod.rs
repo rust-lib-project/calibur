@@ -25,12 +25,13 @@ pub trait RandomAccessFile: 'static + Send + Sync {
     }
 }
 
-pub trait WritableFile {
-    fn append(&mut self, data: &[u8]) -> Result<()>;
+#[async_trait]
+pub trait WritableFile: Send {
+    async fn append(&mut self, data: &[u8]) -> Result<()>;
     fn truncate(&mut self, offset: u64) -> Result<()>;
     fn allocate(&mut self, offset: u64, len: u64) -> Result<()>;
-    fn sync(&self) -> Result<()>;
-    fn fsync(&self) -> Result<()>;
+    async fn sync(&mut self) -> Result<()>;
+    async fn fsync(&mut self) -> Result<()>;
     fn use_direct_io(&mut self) -> bool {
         false
     }
@@ -69,8 +70,9 @@ pub struct InMemFile {
     filename: String,
 }
 
+#[async_trait]
 impl WritableFile for InMemFile {
-    fn append(&mut self, data: &[u8]) -> Result<()> {
+    async fn append(&mut self, data: &[u8]) -> Result<()> {
         self.buf.extend_from_slice(data);
         Ok(())
     }
@@ -84,11 +86,11 @@ impl WritableFile for InMemFile {
         Ok(())
     }
 
-    fn sync(&self) -> Result<()> {
-        self.fsync()
+    async fn sync(&mut self) -> Result<()> {
+        self.fsync().await
     }
 
-    fn fsync(&self) -> Result<()> {
+    async fn fsync(&mut self) -> Result<()> {
         let mut fs = self.fs.lock().unwrap();
         fs.files.insert(self.filename.clone(), self.buf.clone());
         Ok(())
