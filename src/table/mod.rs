@@ -93,14 +93,14 @@ pub trait TablePropertiesCollectorFactory: Send + Sync {
 }
 
 pub struct TableBuilderOptions {
-    skip_filter: bool,
-    internal_comparator: InternalKeyComparator,
-    column_family_name: String,
-    target_file_size: usize,
-    compression_type: CompressionType,
-    column_family_id: u32,
+    pub skip_filter: bool,
+    pub internal_comparator: InternalKeyComparator,
+    pub column_family_name: String,
+    pub target_file_size: usize,
+    pub compression_type: CompressionType,
+    pub column_family_id: u32,
     // TODO: add user properties to sst
-    table_properties_collector_factories: Vec<Arc<dyn TablePropertiesCollectorFactory>>,
+    pub table_properties_collector_factories: Vec<Arc<dyn TablePropertiesCollectorFactory>>,
 }
 
 impl Default for TableBuilderOptions {

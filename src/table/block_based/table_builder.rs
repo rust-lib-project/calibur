@@ -279,9 +279,7 @@ impl TableBuilder for BlockBasedTableBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{
-        FileSystem, InMemFileSystem,
-    };
+    use crate::common::{FileSystem, InMemFileSystem};
     use crate::table::block_based::table_reader::BlockBasedTable;
     use crate::table::{TableReader, TableReaderOptions};
     use crate::util::next_key;

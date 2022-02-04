@@ -686,14 +686,16 @@ where
 }
 
 #[derive(Clone)]
-pub struct BTree<T: ComparableRecord> {
-    node: Arc<BTreePage<T, BTreePage<T, LeafPage<T>>>>,
+pub struct BTree<T: ComparableRecord, P: Page<T>> {
+    node: Arc<P>,
+    _phantom: PhantomData<T>,
 }
 
-impl<T: ComparableRecord> BTree<T> {
+impl<T: ComparableRecord, P: Page<T>> BTree<T, P> {
     pub fn new(max_page_size: usize) -> Self {
         Self {
-            node: Arc::new(BTreePage::<T, BTreePage<T, LeafPage<T>>>::new_page(max_page_size)),
+            node: Arc::new(P::new_page(max_page_size)),
+            _phantom: PhantomData,
         }
     }
 
@@ -715,17 +717,21 @@ impl<T: ComparableRecord> BTree<T> {
             to_add.sort_by(|a, b| a.smallest().cmp(b.smallest()));
             node.insert(to_add);
         }
-        BTree {
+        Self {
             node: Arc::new(node),
+            _phantom: PhantomData,
         }
     }
 
-    pub fn new_iterator(&self) -> BTreePageIterator<T, BTreePage<T, LeafPage<T>>> {
+    pub fn new_iterator(&self) -> P::Iter {
         self.node.new_iterator()
     }
 }
 
-pub type BTreeIterator<T> = BTreePageIterator<T, BTreePage<T, LeafPage<T>>>;
+pub type ThreeLevelBTreeIterator<T> = BTreePageIterator<T, BTreePage<T, LeafPage<T>>>;
+pub type TwoLevelBTreeIterator<T> = BTreePageIterator<T, LeafPage<T>>;
+pub type ThreeLevelBTree<T> = BTree<T, BTreePage<T, BTreePage<T, LeafPage<T>>>>;
+pub type TwoLevelBTree<T> = BTree<T, BTreePage<T, LeafPage<T>>>;
 
 #[cfg(test)]
 mod tests {
@@ -816,7 +822,12 @@ mod tests {
         assert_eq!(it.record().unwrap().id, 214);
     }
 
-    fn insert_to_tree(tree: BTree<FakeTable>, left: u64, right: u64, gap: u64) -> BTree<FakeTable> {
+    fn insert_to_tree(
+        tree: ThreeLevelBTree<FakeTable>,
+        left: u64,
+        right: u64,
+        gap: u64,
+    ) -> ThreeLevelBTree<FakeTable> {
         let mut ops = vec![];
         for i in left..right {
             let smallest = i * gap;
@@ -831,11 +842,11 @@ mod tests {
     }
 
     fn delete_from_tree(
-        tree: BTree<FakeTable>,
+        tree: ThreeLevelBTree<FakeTable>,
         left: u64,
         right: u64,
         gap: u64,
-    ) -> BTree<FakeTable> {
+    ) -> ThreeLevelBTree<FakeTable> {
         let mut ops = vec![];
         for i in left..right {
             let smallest = i * gap;
@@ -851,7 +862,7 @@ mod tests {
 
     #[test]
     fn test_leveltree() {
-        let tree = BTree::<FakeTable>::new(64);
+        let tree = ThreeLevelBTree::<FakeTable>::new(64);
         let tree = insert_to_tree(tree, 100, 228, 100);
         let t = tree.get(&Bytes::from("20000"));
         assert!(t.is_some());

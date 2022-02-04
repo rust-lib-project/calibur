@@ -284,14 +284,10 @@ impl RandomAccessFile for PosixReadableFile {
 pub struct SyncPoxisFileSystem {}
 
 impl FileSystem for SyncPoxisFileSystem {
-    fn open_writable_file(
-        &self,
-        path: PathBuf,
-        file_name: String,
-    ) -> Result<Box<WritableFileWriter>> {
-        let p = path.join(&file_name);
-        let f = PosixWritableFile::open(&p).map_err(|e| Error::Io(Box::new(e)))?;
-        let writer = WritableFileWriter::new(Box::new(f), file_name, 65536);
+    fn open_writable_file(&self, file_name: PathBuf) -> Result<Box<WritableFileWriter>> {
+        let f = PosixWritableFile::open(&file_name).map_err(|e| Error::Io(Box::new(e)))?;
+        let writer =
+            WritableFileWriter::new(Box::new(f), file_name.to_str().unwrap().to_string(), 65536);
         Ok(Box::new(writer))
     }
 

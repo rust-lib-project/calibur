@@ -3,10 +3,10 @@
 mod column_family;
 mod common;
 mod compaction;
-mod compactor;
 mod db;
 mod log;
 mod memtable;
+mod options;
 mod table;
 mod util;
 mod version;

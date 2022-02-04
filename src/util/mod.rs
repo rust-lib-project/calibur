@@ -1,5 +1,9 @@
-pub mod hash;
 mod btree;
+pub mod hash;
+pub use btree::{
+    ComparableRecord as BtreeComparable, ThreeLevelBTree as BTree,
+    ThreeLevelBTreeIterator as BTreeIter,
+};
 
 pub fn decode_fixed_uint32(key: &[u8]) -> u32 {
     unsafe { u32::from_le_bytes(*(key as *const _ as *const [u8; 4])) }
@@ -58,6 +62,12 @@ pub fn encode_var_uint32(data: &mut [u8], n: u32) -> usize {
     }
 }
 
+pub fn put_var_uint32(data: &mut Vec<u8>, n: u32) {
+    let mut tmp: [u8; 5] = [0u8; 5];
+    let offset = encode_var_uint32(&mut tmp, n);
+    data.extend_from_slice(&tmp[..offset]);
+}
+
 pub fn encode_var_uint64(data: &mut [u8], mut v: u64) -> usize {
     const B: u64 = 128;
     let mut offset = 0;
@@ -68,6 +78,46 @@ pub fn encode_var_uint64(data: &mut [u8], mut v: u64) -> usize {
     }
     data[offset] = v as u8;
     offset + 1
+}
+
+pub fn put_var_uint64(data: &mut Vec<u8>, n: u64) {
+    let mut tmp: [u8; 10] = [0u8; 10];
+    let offset = encode_var_uint64(&mut tmp, n);
+    data.extend_from_slice(&tmp[..offset]);
+}
+
+pub fn put_varint32varint32(dist: &mut Vec<u8>, v1: u32, v2: u32) {
+    let mut tmp: [u8; 10] = [0u8; 10];
+    let offset1 = encode_var_uint32(&mut tmp, v1);
+    let offset2 = encode_var_uint32(&mut tmp[offset1..], v2) + offset1;
+    dist.extend_from_slice(&tmp[..offset2]);
+}
+
+pub fn put_varint32varint64(dist: &mut Vec<u8>, v1: u32, v2: u64) {
+    let mut tmp: [u8; 15] = [0u8; 15];
+    let offset1 = encode_var_uint32(&mut tmp, v1);
+    let offset2 = encode_var_uint64(&mut tmp[offset1..], v2) + offset1;
+    dist.extend_from_slice(&tmp[..offset2]);
+}
+
+pub fn put_varint64varint64(dist: &mut Vec<u8>, v1: u64, v2: u64) {
+    let mut tmp: [u8; 20] = [0u8; 20];
+    let offset1 = encode_var_uint64(&mut tmp, v1);
+    let offset2 = encode_var_uint64(&mut tmp[offset1..], v2) + offset1;
+    dist.extend_from_slice(&tmp[..offset2]);
+}
+
+pub fn put_varint32varint32varint64(dist: &mut Vec<u8>, v1: u32, v2: u32, v3: u64) {
+    let mut tmp: [u8; 20] = [0u8; 20];
+    let offset1 = encode_var_uint32(&mut tmp, v1);
+    let offset2 = encode_var_uint32(&mut tmp[offset1..], v2) + offset1;
+    let offset3 = encode_var_uint64(&mut tmp[offset2..], v3) + offset2;
+    dist.extend_from_slice(&tmp[..offset3]);
+}
+
+pub fn put_length_prefixed_slice(buf: &mut Vec<u8>, data: &[u8]) {
+    put_var_uint32(buf, data.len() as u32);
+    buf.extend_from_slice(data);
 }
 
 pub fn get_var_uint32(data: &[u8]) -> Option<(usize, u32)> {

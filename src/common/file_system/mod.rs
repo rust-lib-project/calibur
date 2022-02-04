@@ -41,11 +41,17 @@ pub trait WritableFile: Send {
 }
 
 pub trait FileSystem: Send + Sync {
-    fn open_writable_file(
+    fn open_writable_file_in(
         &self,
         path: PathBuf,
         file_name: String,
-    ) -> Result<Box<WritableFileWriter>>;
+    ) -> Result<Box<WritableFileWriter>> {
+        let f = path.join(file_name);
+        self.open_writable_file(f)
+    }
+
+    fn open_writable_file(&self, file_name: PathBuf) -> Result<Box<WritableFileWriter>>;
+
     fn open_random_access_file(
         &self,
         path: PathBuf,
@@ -53,6 +59,7 @@ pub trait FileSystem: Send + Sync {
     ) -> Result<Box<RandomAccessFileReader>>;
     fn file_exist(&self, path: PathBuf, file_name: String) -> Result<bool>;
 }
+
 #[derive(Default)]
 pub struct InMemFileSystemRep {
     files: HashMap<String, Vec<u8>>,
@@ -130,15 +137,15 @@ impl RandomAccessFile for InMemFile {
 }
 
 impl FileSystem for InMemFileSystem {
-    fn open_writable_file(&self, _: PathBuf, filename: String) -> Result<Box<WritableFileWriter>> {
+    fn open_writable_file(&self, filename: PathBuf) -> Result<Box<WritableFileWriter>> {
         let f = InMemFile {
             fs: self.inner.clone(),
             buf: vec![],
-            filename: filename.clone(),
+            filename: filename.to_str().unwrap().to_string(),
         };
         Ok(Box::new(WritableFileWriter::new(
             Box::new(f),
-            filename,
+            filename.to_str().unwrap().to_string(),
             128,
         )))
     }

@@ -52,6 +52,14 @@ impl LogWriter {
         self.writer.as_mut()
     }
 
+    pub fn get_file_size(&self) -> usize {
+        self.writer.file_size()
+    }
+
+    pub async fn fsync(&mut self) -> Result<()> {
+        self.writer.sync().await
+    }
+
     pub async fn add_record(&mut self, data: &[u8]) -> Result<()> {
         let mut left = data.len();
         let mut begin = true;

@@ -1,9 +1,11 @@
 mod error;
+mod file;
 mod file_system;
 pub mod format;
 pub mod options;
 mod slice_transform;
 mod snapshot;
+pub use file::*;
 
 use crate::util::{decode_fixed_uint64, extract_user_key};
 pub use slice_transform::{InternalKeySliceTransform, SliceTransform};
@@ -23,6 +25,7 @@ pub const MAX_SEQUENCE_NUMBER: u64 = (1u64 << 56) - 1;
 pub const DISABLE_GLOBAL_SEQUENCE_NUMBER: u64 = u64::MAX;
 
 pub trait KeyComparator: Send + Sync {
+    fn name(&self) -> &str;
     fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> Ordering;
     fn less_than(&self, lhs: &[u8], rhs: &[u8]) -> bool {
         self.compare_key(lhs, rhs) == Ordering::Less
@@ -48,6 +51,10 @@ pub trait KeyComparator: Send + Sync {
 pub struct DefaultUserComparator {}
 
 impl KeyComparator for DefaultUserComparator {
+    fn name(&self) -> &str {
+        "leveldb.BytewiseComparator"
+    }
+
     fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> Ordering {
         lhs.cmp(rhs)
     }
@@ -89,6 +96,7 @@ impl KeyComparator for DefaultUserComparator {
 #[derive(Clone)]
 pub struct InternalKeyComparator {
     user_comparator: Arc<dyn KeyComparator>,
+    name: String,
 }
 
 impl Default for InternalKeyComparator {
@@ -99,7 +107,12 @@ impl Default for InternalKeyComparator {
 
 impl InternalKeyComparator {
     pub fn new(user_comparator: Arc<dyn KeyComparator>) -> InternalKeyComparator {
-        InternalKeyComparator { user_comparator }
+        let mut name = "rocksdb.InternalKeyComparator:".to_string();
+        name.push_str(user_comparator.name());
+        InternalKeyComparator {
+            user_comparator,
+            name,
+        }
     }
 
     pub fn get_user_comparator(&self) -> &Arc<dyn KeyComparator> {
@@ -108,6 +121,10 @@ impl InternalKeyComparator {
 }
 
 impl KeyComparator for InternalKeyComparator {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
     #[inline]
     fn compare_key(&self, lhs: &[u8], rhs: &[u8]) -> Ordering {
         let mut ret = self

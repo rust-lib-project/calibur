@@ -38,12 +38,34 @@ impl ColumnFamily {
         false
     }
 
+    pub fn install_version(&self, mems: Vec<u64>, new_version: Version) -> ColumnFamily {
+        let imms = self.imms.remove(mems);
+        self.super_version_number.fetch_add(1, Ordering::Release);
+        let super_version_number = self.super_version_number.load(Ordering::Relaxed);
+        let version = Arc::new(new_version);
+        let super_version = Arc::new(SuperVersion::new(
+            self.mem.clone(),
+            imms.clone(),
+            version.clone(),
+            super_version_number,
+        ));
+        ColumnFamily {
+            mem: self.mem.clone(),
+            imms,
+            version,
+            super_version_number: self.super_version_number.clone(),
+            super_version,
+            id: self.id,
+            valid: AtomicBool::new(true),
+        }
+    }
+
     pub fn switch_memtable(&self, mem: Arc<Memtable>) -> ColumnFamily {
         let imms = self.imms.add(self.mem.clone());
         self.super_version_number.fetch_add(1, Ordering::Release);
         let super_version_number = self.super_version_number.load(Ordering::Relaxed);
         let super_version = Arc::new(SuperVersion::new(
-            self.mem.clone(),
+            mem.clone(),
             self.imms.clone(),
             self.version.clone(),
             super_version_number,
@@ -60,6 +82,6 @@ impl ColumnFamily {
     }
 
     pub fn create_memtable(&self) -> Memtable {
-        Memtable::new()
+        Memtable::new(0)
     }
 }
