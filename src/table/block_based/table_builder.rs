@@ -279,18 +279,13 @@ impl TableBuilder for BlockBasedTableBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::format::{pack_sequence_and_type, ValueType};
-    use crate::common::options::ReadOptions;
     use crate::common::{
-        DefaultUserComparator, FileSystem, InMemFileSystem, InternalKeyComparator, KeyComparator,
-        DISABLE_GLOBAL_SEQUENCE_NUMBER,
+        FileSystem, InMemFileSystem,
     };
-    use crate::table::block_based::block::Block;
     use crate::table::block_based::table_reader::BlockBasedTable;
-    use crate::table::{InternalIterator, TableReader, TableReaderOptions};
-    use crate::util::{get_next_key, next_key};
+    use crate::table::{TableReader, TableReaderOptions};
+    use crate::util::next_key;
     use std::path::PathBuf;
-    use std::sync::Arc;
     use tokio::runtime::Runtime;
 
     #[test]

@@ -190,7 +190,7 @@ mod tests {
             .open_writable_file(PathBuf::default(), "index_block".to_string())
             .unwrap();
         let r = Runtime::new().unwrap();
-        r.block_on(f.append(&data)).await.unwrap();
+        r.block_on(f.append(&data)).unwrap();
         let trailer: [u8; 5] = [0; 5];
         r.block_on(f.append(&trailer)).unwrap();
         r.block_on(f.sync()).unwrap();

@@ -1,4 +1,5 @@
 pub mod hash;
+mod btree;
 
 pub fn decode_fixed_uint32(key: &[u8]) -> u32 {
     unsafe { u32::from_le_bytes(*(key as *const _ as *const [u8; 4])) }

@@ -40,7 +40,7 @@ pub trait WritableFile: Send {
     }
 }
 
-pub trait FileSystem {
+pub trait FileSystem: Send + Sync {
     fn open_writable_file(
         &self,
         path: PathBuf,
