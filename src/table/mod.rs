@@ -1,5 +1,6 @@
 mod block_based;
 mod format;
+mod merge_iterator;
 mod table_properties;
 
 use crate::common::format::ValueType;

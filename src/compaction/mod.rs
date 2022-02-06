@@ -41,6 +41,7 @@ async fn run_flush_memtable_job<Engine: CompactionEngine>(
             mems[(*cf) as usize].push(mem.clone());
         }
     }
+    let mut edits = vec![];
     for i in 0..mems.len() {
         if !mems[i].is_empty() {
             let file_number = versions.new_file_number();
@@ -51,7 +52,8 @@ async fn run_flush_memtable_job<Engine: CompactionEngine>(
                 i as u32,
                 file_number,
             );
-            job.run().await?;
+            let meta = job.run().await?;
+            let mut edit = VersionEdit::default();
         }
     }
     Ok(())

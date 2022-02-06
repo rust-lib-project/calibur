@@ -30,7 +30,9 @@ pub trait KeyComparator: Send + Sync {
     fn less_than(&self, lhs: &[u8], rhs: &[u8]) -> bool {
         self.compare_key(lhs, rhs) == Ordering::Less
     }
-    fn same_key(&self, lhs: &[u8], rhs: &[u8]) -> bool;
+    fn same_key(&self, lhs: &[u8], rhs: &[u8]) -> bool {
+        self.compare_key(lhs, rhs) == Ordering::Equal
+    }
     fn find_shortest_separator(&self, start: &mut Vec<u8>, limit: &[u8]);
     fn find_short_successor(&self, key: &mut Vec<u8>) {
         // Find first character that can be incremented
@@ -142,14 +144,6 @@ impl KeyComparator for InternalKeyComparator {
             }
         }
         ret
-    }
-
-    #[inline]
-    fn same_key(&self, lhs: &[u8], rhs: &[u8]) -> bool {
-        let ret = self
-            .user_comparator
-            .compare_key(extract_user_key(lhs), extract_user_key(rhs));
-        ret == Ordering::Equal
     }
 
     fn find_shortest_separator(&self, start: &mut Vec<u8>, limit: &[u8]) {

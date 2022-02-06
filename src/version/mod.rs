@@ -5,7 +5,6 @@ mod version;
 mod version_set;
 pub mod version_storage_info;
 
-use crate::common::RandomAccessFile;
 use crate::table::TableReader;
 use crate::util::{
     encode_var_uint32, put_length_prefixed_slice, put_var_uint32, put_var_uint64,
@@ -201,5 +200,16 @@ impl VersionEdit {
         }
         // TODO: support atomic group
         true
+    }
+
+    pub fn add_file(
+        level: u32,
+        file_number: u64,
+        file_size: u64,
+        smallest: &[u8],
+        largest: &[u8],
+        smallest_seqno: u64,
+        largest_seqno: u64,
+    ) {
     }
 }

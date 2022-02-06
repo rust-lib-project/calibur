@@ -1,6 +1,8 @@
 use crate::common::DISABLE_GLOBAL_SEQUENCE_NUMBER;
 use crate::util::{decode_fixed_uint64, extract_user_key};
 
+#[repr(u8)]
+#[derive(Eq, PartialEq, Clone, Copy)]
 pub enum ValueType {
     TypeDeletion = 0x0,
     TypeValue = 0x1,
@@ -15,6 +17,12 @@ pub enum ValueType {
     TypeColumnFamilyBlobIndex = 0x10,    // Blob DB only
     TypeBlobIndex = 0x11,                // Blob DB only
     MaxValue = 0x7F,                     // Not used for storing records.
+}
+
+impl From<u8> for ValueType {
+    fn from(x: u8) -> Self {
+        unsafe { std::mem::transmute(x) }
+    }
 }
 
 #[derive(Default, Clone)]
@@ -100,6 +108,12 @@ impl GlobalSeqnoAppliedKey {
         self.internal_key.extend_from_slice(&num.to_le_bytes());
     }
 
+    pub fn update_internal_key(&mut self, seq: u64, tp: ValueType) {
+        let newval = (seq << 8) | ((tp as u8) as u64);
+        let l = self.internal_key.len() - 8;
+        self.internal_key[l..].copy_from_slice(&newval.to_le_bytes());
+    }
+
     pub fn trim_append(&mut self, key: &[u8], shared: usize) {
         if self.global_seqno == DISABLE_GLOBAL_SEQUENCE_NUMBER {
             self.internal_key.resize(shared, 0);
@@ -123,5 +137,48 @@ impl GlobalSeqnoAppliedKey {
                 .extend_from_slice(&self.buf[..tail_offset]);
             self.internal_key.extend_from_slice(&num.to_le_bytes());
         }
+    }
+}
+
+pub struct ParsedInternalKey<'a> {
+    key: &'a [u8],
+    pub tp: ValueType,
+    pub sequence: u64,
+    user_key: Slice,
+}
+
+impl<'a> ParsedInternalKey<'a> {
+    pub fn new(key: &'a [u8]) -> Self {
+        let l = key.len();
+        if l < 8 {
+            Self {
+                key,
+                tp: ValueType::MaxValue,
+                sequence: 0,
+                user_key: Slice::default(),
+            }
+        } else {
+            let offset = l - 8;
+            let x = decode_fixed_uint64(&key[offset..]);
+            let c = (x & 0xff) as u8;
+            let sequence = x >> 8;
+            Self {
+                key,
+                tp: c.into(),
+                sequence,
+                user_key: Slice {
+                    offset: 0,
+                    limit: offset,
+                },
+            }
+        }
+    }
+
+    pub fn valid(&self) -> bool {
+        self.user_key.limit > 0
+    }
+
+    pub fn user_key(&self) -> &[u8] {
+        &self.key[..self.user_key.limit]
     }
 }

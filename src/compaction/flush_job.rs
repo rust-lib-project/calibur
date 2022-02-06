@@ -1,5 +1,6 @@
 use crate::common::options::CompressionType;
 use crate::common::{make_table_file_name, Result};
+use crate::compaction::compaction_iter::CompactionIter;
 use crate::compaction::CompactionEngine;
 use crate::memtable::Memtable;
 use crate::options::ImmutableDBOptions;
@@ -51,7 +52,20 @@ impl<E: CompactionEngine> FlushJob<E> {
         build_opts.target_file_size = 0;
         build_opts.internal_comparator = self.engine.get_comparator(self.cf_id);
         let mut builder = self.options.factory.new_builder(&build_opts, file)?;
-        let mut iter = self.engine.new_merging_iterator(&self.mems);
+        let iter = self.engine.new_merging_iterator(&self.mems);
+        let comparator = self.engine.get_comparator(self.cf_id);
+        let mut compact_iter = CompactionIter::new(iter, Arc::new(comparator), vec![], false);
+        compact_iter.seek_to_first().await;
+        while compact_iter.valid() {
+            let key = compact_iter.key();
+            let value = compact_iter.value();
+            if builder.should_flush() {
+                builder.flush().await?;
+            }
+            builder.add(key, value)?;
+            compact_iter.next().await;
+        }
+        builder.finish().await?;
         Ok(self.meta.clone())
     }
 }

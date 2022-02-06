@@ -1,5 +1,8 @@
-use crate::common::Result;
-use crate::version::{ColumnFamily, VersionSet};
+use crate::common::{InternalKeyComparator, Result};
+use crate::memtable::Memtable;
+use crate::options::ImmutableDBOptions;
+use crate::table::InternalIterator;
+use crate::version::{ColumnFamily, VersionEdit, VersionSet, VersionSetKernal};
 use crate::write_batch::WriteBatch;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
@@ -26,10 +29,11 @@ impl Core {
     }
 }
 
+#[derive(Clone)]
 pub struct Engine {
     core: Arc<Mutex<Core>>,
     cf_cache: Vec<Arc<ColumnFamily>>,
-    last_sequence: Arc<AtomicU64>,
+    kernal: Arc<VersionSetKernal>,
 }
 
 impl Engine {
@@ -37,3 +41,18 @@ impl Engine {
         Ok(())
     }
 }
+
+// impl CompactionEngine for Engine {
+//     async fn apply(&self, version: Vec<VersionEdit>) {
+//     }
+//
+//     fn get_options(&self) -> Arc<ImmutableDBOptions> {
+//         todo!()
+//     }
+//
+//     fn new_merging_iterator(&self, mems: &[Arc<Memtable>]) -> Box<dyn InternalIterator> {
+//     }
+//
+//     fn get_comparator(&self, cf: u32) -> InternalKeyComparator {
+//     }
+// }
