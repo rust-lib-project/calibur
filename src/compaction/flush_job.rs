@@ -1,5 +1,5 @@
 use crate::common::options::CompressionType;
-use crate::common::{make_table_file_name, Result};
+use crate::common::{make_table_file_name, InternalKeyComparator, Result};
 use crate::compaction::compaction_iter::CompactionIter;
 use crate::compaction::CompactionEngine;
 use crate::memtable::Memtable;
@@ -15,6 +15,7 @@ pub struct FlushJob<E: CompactionEngine> {
     version_edit: VersionEdit,
     mems: Vec<Arc<Memtable>>,
     meta: FileMetaData,
+    comparator: InternalKeyComparator,
     cf_id: u32,
 }
 
@@ -23,6 +24,7 @@ impl<E: CompactionEngine> FlushJob<E> {
         engine: E,
         options: Arc<ImmutableDBOptions>,
         mems: Vec<Arc<Memtable>>,
+        comparator: InternalKeyComparator,
         cf_id: u32,
         file_number: u64,
     ) -> Self {
@@ -39,6 +41,7 @@ impl<E: CompactionEngine> FlushJob<E> {
             mems,
             cf_id,
             meta,
+            comparator,
         }
     }
 
@@ -50,11 +53,16 @@ impl<E: CompactionEngine> FlushJob<E> {
         build_opts.column_family_id = self.cf_id;
         build_opts.compression_type = CompressionType::NoCompression;
         build_opts.target_file_size = 0;
-        build_opts.internal_comparator = self.engine.get_comparator(self.cf_id);
+        build_opts.internal_comparator = self.comparator.clone();
         let mut builder = self.options.factory.new_builder(&build_opts, file)?;
-        let iter = self.engine.new_merging_iterator(&self.mems);
-        let comparator = self.engine.get_comparator(self.cf_id);
-        let mut compact_iter = CompactionIter::new(iter, Arc::new(comparator), vec![], false);
+        let mut iter = self.engine.new_merging_iterator(&self.mems);
+        iter.seek_to_first();
+        let mut compact_iter = CompactionIter::new(
+            iter,
+            self.comparator.get_user_comparator().clone(),
+            vec![],
+            false,
+        );
         compact_iter.seek_to_first().await;
         while compact_iter.valid() {
             let key = compact_iter.key();
@@ -63,9 +71,12 @@ impl<E: CompactionEngine> FlushJob<E> {
                 builder.flush().await?;
             }
             builder.add(key, value)?;
+            self.meta
+                .update_boundary(key, compact_iter.current_sequence());
             compact_iter.next().await;
         }
         builder.finish().await?;
+        self.meta.fd.file_size = builder.file_size();
         Ok(self.meta.clone())
     }
 }

@@ -227,9 +227,8 @@ impl TableBuilder for BlockBasedTableBuilder {
     }
 
     async fn finish(&mut self) -> crate::common::Result<()> {
-        let empty_data_block = self.data_block_builder.is_empty();
         self.flush().await?;
-        if !empty_data_block {
+        if self.after_flush {
             self.index_builder.add_index_entry(
                 &mut self.rep.last_key,
                 &[],
@@ -291,9 +290,7 @@ mod tests {
         let mut opts = BlockBasedTableOptions::default();
         opts.block_size = 128;
         let fs = InMemFileSystem::default();
-        let w = fs
-            .open_writable_file(PathBuf::new(), "sst0".to_string())
-            .unwrap();
+        let w = fs.open_writable_file(PathBuf::from("sst0")).unwrap();
         let tbl_opts = TableBuilderOptions::default();
         let mut builder = BlockBasedTableBuilder::new(&tbl_opts, opts.clone(), w);
         let mut key = b"abcdef".to_vec();
@@ -315,6 +312,7 @@ mod tests {
             }
         }
         runtime.block_on(builder.finish()).unwrap();
+        assert_eq!(builder.num_entries(), 2000);
         let r = fs
             .open_random_access_file(PathBuf::new(), "sst0".to_string())
             .unwrap();

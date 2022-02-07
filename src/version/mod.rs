@@ -5,15 +5,13 @@ mod version;
 mod version_set;
 pub mod version_storage_info;
 
-use crate::table::TableReader;
+use crate::common::MAX_SEQUENCE_NUMBER;
 use crate::util::{
-    encode_var_uint32, put_length_prefixed_slice, put_var_uint32, put_var_uint64,
-    put_varint32varint32, put_varint32varint32varint64, put_varint32varint64, put_varint64varint64,
-    BtreeComparable,
+    put_length_prefixed_slice, put_var_uint32, put_var_uint64, put_varint32varint32,
+    put_varint32varint32varint64, put_varint32varint64, put_varint64varint64, BtreeComparable,
 };
 use bytes::Bytes;
 pub use column_family::ColumnFamily;
-use std::sync::Arc;
 pub use version::*;
 pub use version_set::{VersionSet, VersionSetKernal};
 
@@ -36,7 +34,7 @@ impl FileDescriptor {
         Self {
             file_size: 0,
             packed_number_and_path_id: pack_file_number_and_path_id(id, path_id as u64),
-            smallest_seqno: 0,
+            smallest_seqno: MAX_SEQUENCE_NUMBER,
             largest_seqno: 0,
         }
     }
@@ -70,6 +68,15 @@ impl FileMetaData {
             being_compact: false,
             marked_for_compaction: false,
         }
+    }
+
+    pub fn update_boundary(&mut self, key: &[u8], seqno: u64) {
+        if self.smallest.is_empty() {
+            self.smallest = key.to_vec().into();
+        }
+        self.largest = Bytes::from(key.to_vec());
+        self.fd.smallest_seqno = std::cmp::min(self.fd.smallest_seqno, seqno);
+        self.fd.largest_seqno = std::cmp::max(self.fd.largest_seqno, seqno);
     }
 }
 
@@ -203,6 +210,7 @@ impl VersionEdit {
     }
 
     pub fn add_file(
+        &mut self,
         level: u32,
         file_number: u64,
         file_size: u64,

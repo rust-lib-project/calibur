@@ -1,3 +1,4 @@
+use crate::common::InternalKeyComparator;
 use crate::memtable::Memtable;
 use crate::version::{MemtableList, SuperVersion, Version};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,6 +15,7 @@ pub struct ColumnFamily {
     super_version_number: Arc<AtomicU64>,
     version: Arc<Version>,
     valid: AtomicBool,
+    comparator: InternalKeyComparator,
     id: usize,
 }
 
@@ -56,6 +58,7 @@ impl ColumnFamily {
             super_version_number: self.super_version_number.clone(),
             super_version,
             id: self.id,
+            comparator: self.comparator.clone(),
             valid: AtomicBool::new(true),
         }
     }
@@ -78,10 +81,11 @@ impl ColumnFamily {
             super_version,
             id: self.id,
             valid: AtomicBool::new(true),
+            comparator: self.comparator.clone(),
         }
     }
 
     pub fn create_memtable(&self) -> Memtable {
-        Memtable::new(0)
+        Memtable::new(0, self.comparator.clone())
     }
 }

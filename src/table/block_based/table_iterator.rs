@@ -45,6 +45,7 @@ impl BlockBasedTableIterator {
             }
         }
     }
+
     async fn find_block_forward(&mut self) {
         while self.data_iter.as_ref().map_or(false, |iter| !iter.valid()) {
             self.data_iter.take();

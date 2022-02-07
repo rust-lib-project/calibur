@@ -53,6 +53,23 @@ pub struct MergingIterator {
 }
 
 impl MergingIterator {
+    pub fn new(iters: Vec<Box<dyn InternalIterator>>, cmp: InternalKeyComparator) -> Self {
+        let comparator = Rc::new(cmp);
+        let other: Vec<IteratorWrapper> = iters
+            .into_iter()
+            .map(|iter| IteratorWrapper {
+                inner: iter,
+                comparator: comparator.clone(),
+            })
+            .collect();
+        Self {
+            children: BinaryHeap::with_capacity(other.len()),
+            other,
+        }
+    }
+}
+
+impl MergingIterator {
     fn current_forward(&mut self) {
         while let Some(x) = self.children.peek() {
             if !x.inner.valid() {

@@ -2,7 +2,7 @@ use crate::common::DISABLE_GLOBAL_SEQUENCE_NUMBER;
 use crate::util::{decode_fixed_uint64, extract_user_key};
 
 #[repr(u8)]
-#[derive(Eq, PartialEq, Clone, Copy)]
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum ValueType {
     TypeDeletion = 0x0,
     TypeValue = 0x1,

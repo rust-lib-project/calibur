@@ -11,10 +11,8 @@ use std::sync::Arc;
 
 #[async_trait::async_trait]
 pub trait CompactionEngine: Clone + Sync + Send {
-    async fn apply(&self, version: Vec<VersionEdit>);
-    fn get_options(&self) -> Arc<ImmutableDBOptions>;
+    async fn apply(&mut self, edits: Vec<VersionEdit>) -> Result<()>;
     fn new_merging_iterator(&self, mems: &[Arc<Memtable>]) -> Box<dyn InternalIterator>;
-    fn get_comparator(&self, cf: u32) -> InternalKeyComparator;
 }
 
 pub enum CompactionRequest {
@@ -27,12 +25,13 @@ pub struct FlushRequest {
 }
 
 async fn run_flush_memtable_job<Engine: CompactionEngine>(
-    engine: Engine,
+    mut engine: Engine,
     reqs: Vec<FlushRequest>,
     versions: Arc<VersionSetKernal>,
+    options: Arc<ImmutableDBOptions>,
+    comparator: InternalKeyComparator,
 ) -> Result<()> {
     let mut mems = vec![];
-    let options = engine.get_options();
     for req in &reqs {
         for (cf, mem) in &req.mems {
             while *cf >= mems.len() as u32 {
@@ -49,12 +48,23 @@ async fn run_flush_memtable_job<Engine: CompactionEngine>(
                 engine.clone(),
                 options.clone(),
                 mems[i].clone(),
+                comparator.clone(),
                 i as u32,
                 file_number,
             );
             let meta = job.run().await?;
             let mut edit = VersionEdit::default();
+            edit.add_file(
+                0,
+                file_number,
+                meta.fd.file_size,
+                meta.smallest.as_ref(),
+                meta.largest.as_ref(),
+                meta.fd.smallest_seqno,
+                meta.fd.largest_seqno,
+            );
+            edits.push(edit);
         }
     }
-    Ok(())
+    engine.apply(edits).await
 }

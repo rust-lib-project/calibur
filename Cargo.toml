@@ -13,3 +13,6 @@ nix = "0.22"
 async-trait = "0.1"
 crc32c = "0.6"
 tokio = { version = "1", features = ["full"] }
+futures = { version = "0.3", features = ["thread-pool", "compat"] }
+futures-executor = "0.3.1"
+futures-timer = "3.0"

@@ -30,6 +30,8 @@ pub enum Error {
     TableRead(String),
     #[error("Database Closed")]
     DBClosed,
+    #[error("Task Cancel because of: {0}")]
+    Cancel(String),
     #[error("Error when reading from log: {0}")]
     LogRead(String),
     #[error("Invalid VP: {0:?}")]

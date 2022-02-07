@@ -10,6 +10,8 @@ use crate::common::{
     SliceTransform, WritableFileWriter,
 };
 use async_trait::async_trait;
+pub use block_based::{BlockBasedTableFactory, BlockBasedTableOptions, FullFilterBlockFactory};
+pub use merge_iterator::MergingIterator;
 use std::collections::HashMap;
 use std::sync::Arc;
 
