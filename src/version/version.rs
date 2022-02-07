@@ -1,6 +1,6 @@
 use crate::memtable::Memtable;
 use crate::version::version_storage_info::VersionStorageInfo;
-use crate::version::VersionEdit;
+use crate::version::{FileMetaData, VersionEdit};
 use std::sync::Arc;
 
 #[derive(Default, Clone)]
@@ -37,9 +37,23 @@ pub struct Version {
 }
 
 impl Version {
+    pub fn new(edits: Vec<VersionEdit>) -> Self {
+        Version {
+            storage: VersionStorageInfo::new(edits),
+        }
+    }
+
     pub fn apply(&self, edits: Vec<VersionEdit>) -> Self {
         let info = self.storage.apply(edits);
         Version { storage: info }
+    }
+
+    pub fn get_level_num(&self) -> usize {
+        self.storage.size()
+    }
+
+    pub fn scan<F: FnMut(&FileMetaData)>(&self, f: F, level: usize) {
+        self.storage.scan(f, level);
     }
 }
 

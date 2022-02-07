@@ -6,7 +6,7 @@ use crate::compaction::flush_job::FlushJob;
 use crate::memtable::Memtable;
 use crate::options::ImmutableDBOptions;
 use crate::table::InternalIterator;
-use crate::version::{VersionEdit, VersionSetKernal};
+use crate::version::{VersionEdit, VersionSetKernel};
 use std::sync::Arc;
 
 #[async_trait::async_trait]
@@ -27,7 +27,7 @@ pub struct FlushRequest {
 async fn run_flush_memtable_job<Engine: CompactionEngine>(
     mut engine: Engine,
     reqs: Vec<FlushRequest>,
-    versions: Arc<VersionSetKernal>,
+    versions: Arc<VersionSetKernel>,
     options: Arc<ImmutableDBOptions>,
     comparator: InternalKeyComparator,
 ) -> Result<()> {
@@ -44,6 +44,7 @@ async fn run_flush_memtable_job<Engine: CompactionEngine>(
     for i in 0..mems.len() {
         if !mems[i].is_empty() {
             let file_number = versions.new_file_number();
+            let memids = mems[i].iter().map(|mem| mem.get_id()).collect();
             let mut job = FlushJob::new(
                 engine.clone(),
                 options.clone(),
@@ -54,6 +55,8 @@ async fn run_flush_memtable_job<Engine: CompactionEngine>(
             );
             let meta = job.run().await?;
             let mut edit = VersionEdit::default();
+            edit.prev_log_number = 0;
+            edit.log_number = mems[i].last().unwrap().get_next_log_number();
             edit.add_file(
                 0,
                 file_number,
@@ -63,6 +66,8 @@ async fn run_flush_memtable_job<Engine: CompactionEngine>(
                 meta.fd.smallest_seqno,
                 meta.fd.largest_seqno,
             );
+            edit.mems_deleted = memids;
+            edit.column_family = i as u32;
             edits.push(edit);
         }
     }

@@ -3,7 +3,6 @@ use crate::table::InternalIterator;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::rc::Rc;
-use std::sync::Arc;
 
 pub struct IteratorWrapper {
     inner: Box<dyn InternalIterator>,

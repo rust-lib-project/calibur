@@ -1,7 +1,7 @@
 mod btree;
 pub mod hash;
 pub use btree::{
-    ComparableRecord as BtreeComparable, ThreeLevelBTree as BTree,
+    ComparableRecord as BtreeComparable, PageIterator, ThreeLevelBTree as BTree,
     ThreeLevelBTreeIterator as BTreeIter,
 };
 

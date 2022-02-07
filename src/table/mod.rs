@@ -50,7 +50,7 @@ pub trait TableReader: 'static + Sync + Send {
 }
 
 #[async_trait]
-pub trait TableFactory {
+pub trait TableFactory: Send + Sync {
     fn name(&self) -> &'static str;
     async fn open_reader(
         &self,

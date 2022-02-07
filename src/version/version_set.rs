@@ -1,15 +1,17 @@
+use crate::common::{Error, InternalKeyComparator, KeyComparator, Result};
+use crate::memtable::Memtable;
 use crate::version::column_family::ColumnFamily;
-use crate::version::Version;
+use crate::version::{Version, VersionEdit};
 use std::sync::atomic::Ordering;
 use std::sync::{atomic, Arc};
 
-pub struct VersionSetKernal {
+pub struct VersionSetKernel {
     next_file_number: atomic::AtomicU64,
     next_mem_number: atomic::AtomicU64,
     last_sequence: atomic::AtomicU64,
 }
 
-impl VersionSetKernal {
+impl VersionSetKernel {
     pub fn current_next_file_number(&self) -> u64 {
         self.next_file_number.load(atomic::Ordering::Acquire)
     }
@@ -51,8 +53,9 @@ impl VersionSetKernal {
 }
 
 pub struct VersionSet {
-    kernal: Arc<VersionSetKernal>,
+    kernal: Arc<VersionSetKernel>,
     column_family_set: Vec<Option<Arc<ColumnFamily>>>,
+    comparator: InternalKeyComparator,
 }
 
 impl VersionSet {
@@ -95,12 +98,46 @@ impl VersionSet {
         cfs
     }
 
-    pub fn install_version(&mut self, cf_id: u32, mems: Vec<u64>, version: Version) {
-        if cf_id as usize > self.column_family_set.len() {
-            // TODO: create column faimly
+    pub fn get_comparator_name(&self) -> &str {
+        self.comparator.name()
+    }
+
+    pub fn create_column_family(&mut self, edit: VersionEdit) -> Result<Arc<Version>> {
+        let id = edit.column_family as usize;
+        let name = edit.column_family_name.clone();
+        let m = Memtable::new(self.kernal.new_memtable_number(), self.comparator.clone());
+        let log_number = edit.log_number;
+        let new_version = Arc::new(Version::new(vec![edit]));
+        let mut cf = ColumnFamily::new(id, name, m, self.comparator.clone(), new_version.clone());
+        cf.set_log_number(log_number);
+        while self.column_family_set.len() <= id {
+            self.column_family_set.push(None);
+        }
+        self.column_family_set[id] = Some(Arc::new(cf));
+        Ok(new_version)
+    }
+
+    pub fn install_version(
+        &mut self,
+        cf_id: u32,
+        mems: Vec<u64>,
+        version: Version,
+    ) -> Result<Arc<Version>> {
+        let pos = cf_id as usize;
+        if pos > self.column_family_set.len() {
+            Err(Error::CompactionError(format!(
+                "column faimly has not been created"
+            )))
         } else {
             if let Some(cf) = self.column_family_set[cf_id as usize].take() {
-                cf.install_version(mems, version);
+                let new_cf = cf.install_version(mems, version);
+                let version = new_cf.get_version();
+                self.column_family_set[cf_id as usize] = Some(Arc::new(new_cf));
+                Ok(version)
+            } else {
+                Err(Error::CompactionError(format!(
+                    "column faimly has been dropped"
+                )))
             }
         }
     }

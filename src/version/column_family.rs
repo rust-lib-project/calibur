@@ -17,9 +17,38 @@ pub struct ColumnFamily {
     valid: AtomicBool,
     comparator: InternalKeyComparator,
     id: usize,
+    log_number: u64,
+    name: String,
 }
 
 impl ColumnFamily {
+    pub fn new(
+        id: usize,
+        name: String,
+        m: Memtable,
+        comparator: InternalKeyComparator,
+        version: Arc<Version>,
+    ) -> Self {
+        let mem = Arc::new(m);
+        Self {
+            log_number: 0,
+            mem: mem.clone(),
+            imms: Default::default(),
+            super_version: Arc::new(SuperVersion {
+                mem,
+                imms: Default::default(),
+                current: version.clone(),
+                version_number: 0,
+            }),
+            super_version_number: Arc::new(AtomicU64::new(0)),
+            version,
+            id,
+            comparator,
+            valid: AtomicBool::new(true),
+            name,
+        }
+    }
+
     pub fn valid(&self) -> bool {
         self.valid.load(Ordering::Acquire)
     }
@@ -32,8 +61,24 @@ impl ColumnFamily {
         self.mem.clone()
     }
 
+    pub fn get_version(&self) -> Arc<Version> {
+        self.version.clone()
+    }
+
     pub fn get_id(&self) -> usize {
         self.id
+    }
+
+    pub fn get_log_number(&self) -> u64 {
+        self.log_number
+    }
+
+    pub fn set_log_number(&mut self, log_number: u64) {
+        self.log_number = log_number;
+    }
+
+    pub fn get_name(&self) -> &str {
+        &self.name
     }
 
     pub fn should_flush(&self) -> bool {
@@ -52,7 +97,9 @@ impl ColumnFamily {
             super_version_number,
         ));
         ColumnFamily {
+            name: self.name.clone(),
             mem: self.mem.clone(),
+            log_number: self.log_number,
             imms,
             version,
             super_version_number: self.super_version_number.clone(),
@@ -74,7 +121,9 @@ impl ColumnFamily {
             super_version_number,
         ));
         ColumnFamily {
+            log_number: self.log_number,
             mem,
+            name: self.name.clone(),
             imms,
             version: self.version.clone(),
             super_version_number: self.super_version_number.clone(),
@@ -85,7 +134,7 @@ impl ColumnFamily {
         }
     }
 
-    pub fn create_memtable(&self) -> Memtable {
-        Memtable::new(0, self.comparator.clone())
+    pub fn create_memtable(&self, id: u64) -> Memtable {
+        Memtable::new(id, self.comparator.clone())
     }
 }

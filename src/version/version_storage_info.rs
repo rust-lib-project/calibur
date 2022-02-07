@@ -1,14 +1,45 @@
-use crate::util::{BTree, BtreeComparable};
+use crate::util::{BTree, BtreeComparable, PageIterator};
 use crate::version::{FileMetaData, VersionEdit};
 
-#[derive(Clone)]
+const MAX_BTREE_PAGE_SIZE: usize = 128;
+
+#[derive(Clone, Default)]
 pub struct VersionStorageInfo {
     level0: Vec<FileMetaData>,
     base_level: Vec<BTree<FileMetaData>>,
-    max_page_size: usize,
 }
 
 impl VersionStorageInfo {
+    pub fn new(edits: Vec<VersionEdit>) -> Self {
+        let info = VersionStorageInfo {
+            level0: vec![],
+            base_level: vec![],
+        };
+        info.apply(edits)
+    }
+
+    pub fn size(&self) -> usize {
+        self.base_level.len()
+    }
+
+    pub fn scan<F: FnMut(&FileMetaData)>(&self, mut consumer: F, level: usize) {
+        if level == 0 {
+            for f in &self.level0 {
+                consumer(f);
+            }
+        } else {
+            if level >= self.base_level.len() + 1 {
+                return;
+            }
+            let mut iter = self.base_level[level - 1].new_iterator();
+            iter.seek_to_first();
+            while iter.valid() {
+                let r = iter.record().unwrap();
+                consumer(&r);
+            }
+        }
+    }
+
     pub fn apply(&self, mut edits: Vec<VersionEdit>) -> Self {
         let mut to_deletes = vec![vec![]; self.base_level.len() + 1];
         let mut to_add = vec![vec![]; self.base_level.len() + 1];
@@ -58,7 +89,7 @@ impl VersionStorageInfo {
         }
         let l = std::cmp::max(to_add.len(), to_deletes.len()) - 1;
         for i in self.base_level.len()..l {
-            let mut tree = BTree::new(self.max_page_size);
+            let mut tree = BTree::new(MAX_BTREE_PAGE_SIZE);
             let add = if i + 1 < to_add.len() && !to_add[i + 1].is_empty() {
                 std::mem::take(&mut to_add[i + 1])
             } else {
@@ -73,10 +104,6 @@ impl VersionStorageInfo {
             base_level.push(tree);
         }
 
-        Self {
-            level0,
-            base_level,
-            max_page_size: self.max_page_size,
-        }
+        Self { level0, base_level }
     }
 }

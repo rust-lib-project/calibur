@@ -1,5 +1,4 @@
 mod column_family;
-pub mod manifest;
 pub mod snapshot;
 mod version;
 mod version_set;
@@ -13,7 +12,7 @@ use crate::util::{
 use bytes::Bytes;
 pub use column_family::ColumnFamily;
 pub use version::*;
-pub use version_set::{VersionSet, VersionSetKernal};
+pub use version_set::{VersionSet, VersionSetKernel};
 
 const FILE_NUMBER_MASK: u64 = 0x3FFFFFFFFFFFFFFF;
 
@@ -219,5 +218,10 @@ impl VersionEdit {
         smallest_seqno: u64,
         largest_seqno: u64,
     ) {
+        let mut f = FileMetaData::new(file_number, level, smallest.to_vec(), largest.to_vec());
+        f.fd.file_size = file_size;
+        f.fd.smallest_seqno = smallest_seqno;
+        f.fd.largest_seqno = largest_seqno;
+        self.add_files.push(f);
     }
 }

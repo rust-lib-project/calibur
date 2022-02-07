@@ -1,14 +1,7 @@
+use std::io;
 use std::result;
-use std::{io, ops::Range};
 
 use thiserror::Error;
-
-#[derive(Debug)]
-pub struct InvalidValuePointerError {
-    pub vptr: Vec<u8>,
-    pub kvlen: usize,
-    pub range: Range<u32>,
-}
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -34,14 +27,12 @@ pub enum Error {
     Cancel(String),
     #[error("Error when reading from log: {0}")]
     LogRead(String),
-    #[error("Invalid VP: {0:?}")]
-    InvalidValuePointer(Box<InvalidValuePointerError>),
     #[error("Invalid Log Offset: {0} > {1}")]
     InvalidLogOffset(u32, u32),
-    #[error("VLog Not Found: id={0}")]
-    VlogNotFound(u32),
     #[error("Error when compaction: {0}")]
     CompactionError(String),
+    #[error("Other Error: {0}")]
+    Other(String),
 }
 
 impl From<io::Error> for Error {
@@ -51,10 +42,24 @@ impl From<io::Error> for Error {
     }
 }
 
-impl From<InvalidValuePointerError> for Error {
-    #[inline]
-    fn from(e: InvalidValuePointerError) -> Error {
-        Error::InvalidValuePointer(Box::new(e))
+impl Clone for Error {
+    fn clone(&self) -> Self {
+        match self {
+            Error::Config(e) => Error::Config(e.clone()),
+            Error::Io(e) => Error::Other(format!("IO Error: {:?}", e)),
+            Error::EmptyKey => Error::EmptyKey,
+            Error::TooLong(s) => Error::TooLong(s.clone()),
+            Error::InvalidChecksum(s) => Error::InvalidChecksum(s.clone()),
+            Error::InvalidFilename(s) => Error::InvalidFilename(s.clone()),
+            Error::VarDecode(x) => Error::VarDecode(*x),
+            Error::TableRead(x) => Error::TableRead(x.clone()),
+            Error::DBClosed => Error::DBClosed,
+            Error::Cancel(e) => Error::Cancel(e.clone()),
+            Error::LogRead(x) => Error::LogRead(x.clone()),
+            Error::InvalidLogOffset(x, y) => Error::InvalidLogOffset(*x, *y),
+            Error::Other(x) => Error::Other(x.clone()),
+            Error::CompactionError(s) => Error::CompactionError(s.clone()),
+        }
     }
 }
 

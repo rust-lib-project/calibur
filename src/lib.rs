@@ -5,7 +5,7 @@ mod common;
 mod compaction;
 mod db;
 mod log;
-mod manifest_engine;
+mod manifest;
 mod memtable;
 mod options;
 mod table;

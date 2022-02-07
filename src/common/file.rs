@@ -11,3 +11,8 @@ pub fn make_file_name(path: &str, number: u64, suffix: &str) -> PathBuf {
     let p = format!("{}/{:06}.{}", path, number, suffix);
     PathBuf::from(p)
 }
+
+pub fn make_descriptor_file_name(path: &str, number: u64) -> PathBuf {
+    let p = format!("{}/MANIFEST-{:06}", path, number);
+    PathBuf::from(p)
+}
