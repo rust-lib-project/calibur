@@ -198,9 +198,9 @@ pub fn get_next_key(key: &[u8]) -> Vec<u8> {
 const MASK_DELTA: u32 = 0xa282ead8u32;
 
 pub fn crc_mask(crc: u32) -> u32 {
-    ((crc >> 15) | (crc << 17)) + MASK_DELTA
+    ((crc >> 15) | crc.wrapping_shl(17)).wrapping_add(MASK_DELTA)
 }
 pub fn crc_unmask(masked_crc: u32) -> u32 {
-    let rot = masked_crc - MASK_DELTA;
-    (rot >> 17) | (rot << 15)
+    let rot = masked_crc.wrapping_sub(MASK_DELTA);
+    (rot >> 17) | rot.wrapping_shl(15)
 }

@@ -340,7 +340,7 @@ pub struct SyncPoxisFileSystem {}
 impl FileSystem for SyncPoxisFileSystem {
     fn open_writable_file(&self, path: PathBuf) -> Result<Box<WritableFileWriter>> {
         let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
-        let f = PosixWritableFile::open(&path).map_err(|e| Error::Io(Box::new(e)))?;
+        let f = PosixWritableFile::create(&path).map_err(|e| Error::Io(Box::new(e)))?;
         let writer = WritableFileWriter::new(Box::new(f), file_name, 65536);
         Ok(Box::new(writer))
     }
@@ -368,5 +368,41 @@ impl FileSystem for SyncPoxisFileSystem {
     fn file_exist(&self, path: PathBuf, file_name: String) -> Result<bool> {
         let p = path.join(&file_name);
         Ok(p.exists())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::runtime::Runtime;
+
+    #[test]
+    fn test_write_file() {
+        let dir = tempfile::Builder::new()
+            .prefix("test_write_file")
+            .tempdir()
+            .unwrap();
+        let fs = SyncPoxisFileSystem {};
+        let mut f = fs.open_writable_file(dir.path().join("sst")).unwrap();
+        let r = Runtime::new().unwrap();
+        r.block_on(async move {
+            f.append("abcd".as_bytes()).await.unwrap();
+            f.append("efgh".as_bytes()).await.unwrap();
+            f.append("ijkl".as_bytes()).await.unwrap();
+            f.sync().await.unwrap();
+        });
+
+        let mut f = fs.open_sequencial_file(dir.path().join("sst")).unwrap();
+        r.block_on(async move {
+            let mut v = vec![0; 7];
+            let x = f.read(&mut v).await.unwrap();
+            assert_eq!(x, 7);
+            let s = String::from_utf8(v.clone()).unwrap();
+            assert_eq!(s.as_str(), "abcdefg");
+            let x = f.read(&mut v).await.unwrap();
+            assert_eq!(x, 5);
+            let s = String::from_utf8((&v[..5]).to_vec()).unwrap();
+            assert_eq!(s.as_str(), "hijkl");
+        });
     }
 }

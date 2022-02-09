@@ -9,10 +9,21 @@ pub struct LogReader {
     data: Slice,
     end_of_buffer_offset: usize,
     eof: bool,
-    last_record_offset: usize,
+    // last_record_offset: usize,
 }
 
 impl LogReader {
+    pub fn new(reader: Box<SequentialFileReader>) -> Self {
+        Self {
+            reader,
+            buffer: vec![],
+            data: Slice::default(),
+            end_of_buffer_offset: 0,
+            eof: false,
+            // last_record_offset: 0,
+        }
+    }
+
     pub async fn read_record(&mut self, record: &mut Vec<u8>) -> Result<bool> {
         let mut prospective_record_offset = 0;
         let mut in_fragmented_record = false;
@@ -27,7 +38,7 @@ impl LogReader {
                     RecordType::FullType => {
                         record.extend_from_slice(&self.buffer[fragment.offset..fragment.limit]);
                         prospective_record_offset = physical_record_offset;
-                        self.last_record_offset = prospective_record_offset;
+                        // self.last_record_offset = prospective_record_offset;
                         return Ok(true);
                     }
                     RecordType::FirstType => {
@@ -52,7 +63,7 @@ impl LogReader {
                                 fragment.len()
                             )));
                         }
-                        self.last_record_offset = prospective_record_offset;
+                        // self.last_record_offset = prospective_record_offset;
                         record.extend_from_slice(&self.buffer[fragment.offset..fragment.limit]);
                         return Ok(true);
                     }
@@ -86,9 +97,9 @@ impl LogReader {
         }
     }
 
-    pub fn last_record_offset(&self) -> usize {
-        self.last_record_offset
-    }
+    // pub fn last_record_offset(&self) -> usize {
+    //     self.last_record_offset
+    // }
 
     async fn read_physical_record(&mut self) -> Result<(Slice, u8)> {
         loop {
@@ -153,5 +164,62 @@ impl LogReader {
                 false
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{LogReader, LogWriter, BLOCK_SIZE};
+    use crate::common::{FileSystem, SyncPoxisFileSystem};
+    use rand::{thread_rng, Rng};
+    use tokio::runtime::Runtime;
+
+    fn inner_test_log_read_and_write(record_size: usize) {
+        let dir = tempfile::Builder::new()
+            .prefix("test_log_read_and_write")
+            .tempdir()
+            .unwrap();
+        println!("block_size: {}, record_size: {}", BLOCK_SIZE, record_size);
+        let fs = SyncPoxisFileSystem {};
+        let writer = fs.open_writable_file(dir.path().join("sst")).unwrap();
+        let mut writer = LogWriter::new(writer, 0);
+        let mut rng = thread_rng();
+        let mut data: [u8; 100000] = [0u8; 100000];
+        rng.fill(&mut data[..]);
+        let r = Runtime::new().unwrap();
+        r.block_on(async move {
+            let mut left = 100000;
+            let mut offset = 0;
+            while left > 0 {
+                let cur = std::cmp::min(left, record_size);
+                writer
+                    .add_record(&data[offset..(offset + cur)])
+                    .await
+                    .unwrap();
+                writer.fsync().await.unwrap();
+                offset += cur;
+                left -= cur;
+            }
+        });
+        let reader = fs.open_sequencial_file(dir.path().join("sst")).unwrap();
+        let mut reader = LogReader::new(reader);
+        r.block_on(async move {
+            let mut record = vec![];
+            let mut left = 100000;
+            let mut offset = 0;
+            while reader.read_record(&mut record).await.unwrap() {
+                let cur = std::cmp::min(left, record_size);
+                assert_eq!(record.as_slice(), &data[offset..(offset + cur)]);
+                offset += cur;
+                left -= cur;
+            }
+        });
+    }
+
+    #[test]
+    fn test_log_read_and_write() {
+        inner_test_log_read_and_write(100);
+        inner_test_log_read_and_write(BLOCK_SIZE);
+        inner_test_log_read_and_write(10000);
     }
 }

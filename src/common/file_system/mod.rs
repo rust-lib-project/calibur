@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::common::Error;
 use async_trait::async_trait;
-pub use posix_file::PosixWritableFile;
+pub use posix_file::SyncPoxisFileSystem;
 pub use reader::RandomAccessFileReader;
 pub use reader::SequentialFileReader;
 pub use writer::WritableFileWriter;

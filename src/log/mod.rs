@@ -3,6 +3,10 @@ mod writer;
 
 pub const HEADER_SIZE: usize = 4 + 2 + 1;
 pub const RECYCLABLE_HEADER_SIZE: usize = 4 + 2 + 1 + 4;
+
+#[cfg(test)]
+pub const BLOCK_SIZE: usize = 4096;
+#[cfg(not(test))]
 pub const BLOCK_SIZE: usize = 32768;
 pub const LOG_PADDING: &[u8] = b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
 

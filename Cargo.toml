@@ -17,3 +17,6 @@ tokio = { version = "1", features = ["full"] }
 nix = "0.22"
 rand = "0.7"
 yatp = { git = "https://github.com/tikv/yatp.git", branch = "master" }
+
+[dev-dependencies]
+tempfile = "3.1"
