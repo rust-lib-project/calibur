@@ -75,6 +75,7 @@ impl Manifest {
             for e in &mut edits {
                 mems.append(&mut e.mems_deleted)
             }
+            // Do not apply version edits with holding a mutex.
             let new_version = version.apply(edits);
             let mut version_set = self.version_set.lock().unwrap();
             let version = version_set.install_version(cf, mems, new_version)?;
@@ -131,8 +132,8 @@ impl Manifest {
             }
             edit.encode_to(&mut record);
             writer.add_record(&record).await?;
-            writer.fsync().await?;
         }
+        writer.fsync().await?;
         Ok(())
     }
 }

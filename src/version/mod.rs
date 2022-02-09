@@ -19,7 +19,7 @@ pub fn pack_file_number_and_path_id(number: u64, path_id: u64) -> u64 {
     number | (path_id * (FILE_NUMBER_MASK + 1))
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FileDescriptor {
     pub file_size: u64,
     pub packed_number_and_path_id: u64,
@@ -46,7 +46,7 @@ impl FileDescriptor {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileMetaData {
     pub fd: FileDescriptor,
     pub level: u32,

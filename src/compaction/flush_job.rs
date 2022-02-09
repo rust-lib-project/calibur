@@ -32,7 +32,7 @@ impl<E: CompactionEngine> FlushJob<E> {
         version_edit.column_family = cf_id;
         version_edit.mems_deleted = mems.iter().map(|m| m.get_id()).collect();
         version_edit.prev_log_number = 0;
-        version_edit.log_number = mems.last().unwrap().get_next_log_number();
+        version_edit.set_log_number(mems.last().unwrap().get_next_log_number());
         let meta = FileMetaData::new(file_number, 0, vec![], vec![]);
         Self {
             engine,

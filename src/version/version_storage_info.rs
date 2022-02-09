@@ -1,5 +1,7 @@
 use crate::util::{BTree, BtreeComparable, PageIterator};
 use crate::version::{FileMetaData, VersionEdit};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 const MAX_BTREE_PAGE_SIZE: usize = 128;
 
@@ -7,6 +9,9 @@ const MAX_BTREE_PAGE_SIZE: usize = 128;
 pub struct VersionStorageInfo {
     level0: Vec<FileMetaData>,
     base_level: Vec<BTree<FileMetaData>>,
+
+    // only used for delete
+    files_by_id: Arc<Mutex<HashMap<u64, FileMetaData>>>,
 }
 
 impl VersionStorageInfo {
@@ -14,6 +19,7 @@ impl VersionStorageInfo {
         let info = VersionStorageInfo {
             level0: vec![],
             base_level: vec![],
+            files_by_id: Arc::new(Mutex::new(HashMap::default())),
         };
         info.apply(edits)
     }
@@ -43,18 +49,22 @@ impl VersionStorageInfo {
     pub fn apply(&self, mut edits: Vec<VersionEdit>) -> Self {
         let mut to_deletes = vec![vec![]; self.base_level.len() + 1];
         let mut to_add = vec![vec![]; self.base_level.len() + 1];
+        let mut files_index = self.files_by_id.lock().unwrap();
         for e in &mut edits {
-            for f in e.deleted_files.drain(..) {
-                while to_deletes.len() <= f.level as usize {
-                    to_deletes.push(vec![]);
-                }
-                to_deletes[f.level as usize].push(f);
-            }
             for f in e.add_files.drain(..) {
                 while to_add.len() <= f.level as usize {
                     to_add.push(vec![]);
                 }
+                files_index.insert(f.id(), f.clone());
                 to_add[f.level as usize].push(f);
+            }
+            for f in e.deleted_files.drain(..) {
+                while to_deletes.len() <= f.level as usize {
+                    to_deletes.push(vec![]);
+                }
+                if let Some(old_f) = files_index.remove(&f.id()) {
+                    to_deletes[f.level as usize].push(old_f);
+                }
             }
         }
         let mut level0 = vec![];
@@ -104,6 +114,10 @@ impl VersionStorageInfo {
             base_level.push(tree);
         }
 
-        Self { level0, base_level }
+        Self {
+            level0,
+            base_level,
+            files_by_id: self.files_by_id.clone(),
+        }
     }
 }

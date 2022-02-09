@@ -238,7 +238,6 @@ mod tests {
     use crate::common::format::pack_sequence_and_type;
     use crate::common::InternalKeyComparator;
     use crate::memtable::Memtable;
-    use crate::util::extract_user_key;
     use tokio::runtime::Runtime;
 
     fn test_compaction_with_snapshot(

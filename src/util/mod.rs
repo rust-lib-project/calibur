@@ -121,6 +121,9 @@ pub fn put_length_prefixed_slice(buf: &mut Vec<u8>, data: &[u8]) {
 }
 
 pub fn get_var_uint32(data: &[u8], offset: &mut usize) -> Option<u32> {
+    if data.is_empty() {
+        return None;
+    }
     const B: u8 = 128;
     const MASK: u32 = 127;
     if (data[0] & B) == 0 {

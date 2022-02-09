@@ -6,7 +6,7 @@ use crate::util::{
     put_varint32varint64, put_varint64varint64, BtreeComparable,
 };
 
-#[derive(Default, Clone)]
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
 pub struct VersionEdit {
     pub add_files: Vec<FileMetaData>,
     pub deleted_files: Vec<FileMetaData>,
@@ -131,6 +131,15 @@ impl VersionEdit {
         }
         // TODO: support atomic group
         true
+    }
+
+    pub fn set_log_number(&mut self, log_number: u64) {
+        self.log_number = log_number;
+        self.has_log_number = true;
+    }
+
+    pub fn get_log_number(&self) -> u64 {
+        self.log_number
     }
 
     pub fn decode_from(&mut self, src: &[u8]) -> Result<()> {
@@ -292,5 +301,37 @@ impl VersionEdit {
         f.fd.smallest_seqno = smallest_seqno;
         f.fd.largest_seqno = largest_seqno;
         self.add_files.push(f);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FileMetaData, VersionEdit};
+
+    #[test]
+    fn test_manifest_decode_encode() {
+        let mut edit = VersionEdit::default();
+        edit.column_family = 1;
+        edit.log_number = 15;
+        edit.has_log_number = true;
+
+        for i in 0..5u64 {
+            let mut smallest = b"abcd".to_vec();
+            let mut largest = b"abcd".to_vec();
+            smallest.extend_from_slice(&(i * 2).to_le_bytes());
+            largest.extend_from_slice(&(i * 2 + 1).to_le_bytes());
+            let mut f = FileMetaData::new(i + 1, 0, smallest, largest);
+            f.fd.smallest_seqno = i * 100;
+            f.fd.largest_seqno = i * 100 + 50;
+            edit.add_files.push(f);
+        }
+        let f = FileMetaData::new(0, 0, vec![], vec![]);
+        edit.deleted_files.push(f);
+        let mut record = vec![];
+        edit.encode_to(&mut record);
+        println!("record: {}", record.len());
+        let mut new_edit = VersionEdit::default();
+        new_edit.decode_from(&record).unwrap();
+        assert_eq!(edit, new_edit);
     }
 }
