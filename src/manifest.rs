@@ -5,7 +5,7 @@ use futures::channel::mpsc::UnboundedSender;
 use futures::channel::oneshot::{channel as once_channel, Sender as OnceSender};
 
 use crate::compaction::CompactionEngine;
-use crate::log::LogWriter;
+use crate::log::{LogReader, LogWriter};
 use crate::options::ImmutableDBOptions;
 use crate::util::BtreeComparable;
 use crate::version::{Version, VersionEdit, VersionSet, VersionSetKernel};
@@ -23,6 +23,16 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    pub async fn recover(mut reader: Box<LogReader>) -> Result<HashMap<u32, Arc<Version>>> {
+        let mut record = vec![];
+        let versions = HashMap::default();
+        while reader.read_record(&mut record).await? {
+            let mut edit = VersionEdit::default();
+            edit.decode_from(&record)?;
+        }
+        Ok(versions)
+    }
+
     pub async fn process_manifest_writes(&mut self, edits: Vec<VersionEdit>) -> Result<()> {
         if self.log.get_file_size() > self.options.max_manifest_file_size {
             // TODO: Switch manifest log writer

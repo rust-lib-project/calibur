@@ -120,11 +120,12 @@ pub fn put_length_prefixed_slice(buf: &mut Vec<u8>, data: &[u8]) {
     buf.extend_from_slice(data);
 }
 
-pub fn get_var_uint32(data: &[u8]) -> Option<(usize, u32)> {
+pub fn get_var_uint32(data: &[u8], offset: &mut usize) -> Option<u32> {
     const B: u8 = 128;
     const MASK: u32 = 127;
     if (data[0] & B) == 0 {
-        return Some((1, data[0] as u32));
+        *offset += 1;
+        return Some(data[0] as u32);
     }
     let mut ret: u32 = 0;
     for i in 0..5 {
@@ -135,13 +136,14 @@ pub fn get_var_uint32(data: &[u8]) -> Option<(usize, u32)> {
             ret |= (data[i] as u32 & MASK) << (i as u32 * 7);
         } else {
             ret |= (data[i] as u32) << (i as u32 * 7);
-            return Some((i + 1, ret));
+            *offset += i + 1;
+            return Some(ret);
         }
     }
     return None;
 }
 
-pub fn get_var_uint64(data: &[u8]) -> Option<(usize, u64)> {
+pub fn get_var_uint64(data: &[u8], next_offset: &mut usize) -> Option<u64> {
     const B: u8 = 128;
     const MASK: u64 = 127;
 
@@ -153,12 +155,23 @@ pub fn get_var_uint64(data: &[u8]) -> Option<(usize, u64)> {
             ret |= (data[offset] as u64 & MASK) << shift;
         } else {
             ret |= (data[offset] as u64) << shift;
-            return Some((offset + 1, ret));
+            *next_offset += offset + 1;
+            return Some(ret);
         }
         shift += 7;
         offset += 1;
     }
+    *next_offset += offset + 1;
     return None;
+}
+
+pub fn get_length_prefixed_slice<'a>(buf: &'a [u8], offset: &mut usize) -> Option<&'a [u8]> {
+    let mut l = 0;
+    get_var_uint32(buf, &mut l).map(|val| {
+        let limit = l + val as usize;
+        *offset += limit;
+        &buf[l..limit]
+    })
 }
 
 pub fn next_key(key: &mut Vec<u8>) {

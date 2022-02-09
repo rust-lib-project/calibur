@@ -23,18 +23,18 @@ impl BlockHandle {
     }
 
     pub fn decode_from(&mut self, data: &[u8]) -> Result<usize> {
-        let offset = match get_var_uint64(data) {
+        let mut offset = 0;
+        match get_var_uint64(data, &mut offset) {
             None => return Err(Error::VarDecode("BlockHandle")),
-            Some((val_len, val)) => {
+            Some(val) => {
                 self.offset = val;
-                val_len
             }
         };
-        match get_var_uint64(&data[offset..]) {
+        match get_var_uint64(&data[offset..], &mut offset) {
             None => Err(Error::VarDecode("BlockHandle")),
-            Some((val_len, val)) => {
+            Some(val) => {
                 self.size = val;
-                Ok(offset + val_len)
+                Ok(offset)
             }
         }
     }
@@ -169,11 +169,10 @@ impl Footer {
         } else {
             self.version = decode_fixed_uint32(&data[(magic_offset - 4)..]);
             let mut offset = data.len() - NEW_VERSIONS_ENCODED_LENGTH;
-            match get_var_uint32(&data[offset..]) {
+            match get_var_uint32(&data[offset..], &mut offset) {
                 None => return Err(Error::VarDecode("BlockBasedTable Footer")),
-                Some((val_len, val)) => {
+                Some(val) => {
                     self.checksum = val as u8;
-                    offset += val_len;
                 }
             }
             offset

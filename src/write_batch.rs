@@ -138,24 +138,24 @@ impl<'a> WriteBatchIter<'a> {
         if tag == ValueType::TypeColumnFamilyValue as u8
             || tag == ValueType::TypeColumnFamilyDeletion as u8
         {
-            if let Some((l, cf_id)) = get_var_uint32(&self.batch.data[self.offset..]) {
-                self.offset += l;
+            if let Some(cf_id) = get_var_uint32(&self.batch.data[self.offset..], &mut self.offset) {
                 cf = cf_id;
             } else {
                 return None;
             }
         }
         if tag == ValueType::TypeValue as u8 || tag == ValueType::TypeColumnFamilyValue as u8 {
-            if let Some((l, key_len)) = get_var_uint32(&self.batch.data[self.offset..]) {
-                self.offset += l;
+            if let Some(key_len) = get_var_uint32(&self.batch.data[self.offset..], &mut self.offset)
+            {
                 let key_pos = self.offset;
                 self.offset += key_len as usize;
                 if self.offset > self.batch.data.len() {
                     return None;
                 }
                 let key = &self.batch.data[key_pos..self.offset];
-                if let Some((l, value_len)) = get_var_uint32(&self.batch.data[self.offset..]) {
-                    self.offset += l;
+                if let Some(value_len) =
+                    get_var_uint32(&self.batch.data[self.offset..], &mut self.offset)
+                {
                     let v_pos = self.offset;
                     self.offset += value_len as usize;
                     if self.offset > self.batch.data.len() {
@@ -172,8 +172,8 @@ impl<'a> WriteBatchIter<'a> {
         } else if tag == ValueType::TypeDeletion as u8
             || tag == ValueType::TypeColumnFamilyDeletion as u8
         {
-            if let Some((l, key_len)) = get_var_uint32(&self.batch.data[self.offset..]) {
-                self.offset += l;
+            if let Some(key_len) = get_var_uint32(&self.batch.data[self.offset..], &mut self.offset)
+            {
                 let key_pos = self.offset;
                 self.offset += key_len as usize;
                 if self.offset > self.batch.data.len() {

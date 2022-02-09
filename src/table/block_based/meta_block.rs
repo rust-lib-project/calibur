@@ -197,23 +197,24 @@ pub async fn read_properties(
         }
         iter.next();
     }
+    let mut x = 0;
     tmp_properties.get(PROPERTIES_DATA_SIZE).map(|v| {
-        if let Some((_, v)) = get_var_uint64(v) {
+        if let Some(v) = get_var_uint64(v, &mut x) {
             properties.data_size = v;
         }
     });
     tmp_properties.get(PROPERTIES_INDEX_SIZE).map(|v| {
-        if let Some((_, v)) = get_var_uint64(v) {
+        if let Some(v) = get_var_uint64(v, &mut x) {
             properties.index_size = v;
         }
     });
     tmp_properties.get(PROPERTIES_NUM_ENTRIES).map(|v| {
-        if let Some((_, v)) = get_var_uint64(v) {
+        if let Some(v) = get_var_uint64(v, &mut x) {
             properties.num_entries = v;
         }
     });
     tmp_properties.get(PROPERTIES_DELETED_KEYS).map(|v| {
-        if let Some((_, v)) = get_var_uint64(v) {
+        if let Some(v) = get_var_uint64(v, &mut x) {
             properties.num_deletions = v;
         }
     });

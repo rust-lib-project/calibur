@@ -384,19 +384,20 @@ pub fn decode_entry(key: &[u8]) -> (usize, u32, u32, u32) {
     if (key[0] | key[1] | key[2]) < 128 {
         return (3, key[0] as u32, key[1] as u32, key[2] as u32);
     }
-    let (next_offset, shared) = match get_var_uint32(key) {
-        Some((offset, val)) => (offset, val),
+    let mut offset = 0;
+    let shared = match get_var_uint32(key, &mut offset) {
+        Some(val) => val,
         None => return (0, 0, 0, 0),
     };
-    let (next_offset, non_shared) = match get_var_uint32(&key[next_offset..]) {
-        Some((offset, val)) => (next_offset + offset, val),
+    let non_shared = match get_var_uint32(&key[offset..], &mut offset) {
+        Some(val) => val,
         None => return (0, 0, 0, 0),
     };
-    let (next_offset, val_len) = match get_var_uint32(&key[next_offset..]) {
-        Some((offset, val)) => (next_offset + offset, val),
+    let val_len = match get_var_uint32(&key[offset..], &mut offset) {
+        Some(val) => val,
         None => return (0, 0, 0, 0),
     };
-    (next_offset, shared, non_shared, val_len)
+    (offset, shared, non_shared, val_len)
 }
 
 pub async fn read_block_from_file(

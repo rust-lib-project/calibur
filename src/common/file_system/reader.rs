@@ -1,3 +1,4 @@
+use crate::common::file_system::SequentialFile;
 use crate::common::RandomAccessFile;
 use crate::common::Result;
 
@@ -28,5 +29,35 @@ impl RandomAccessFileReader {
 
     pub fn file_size(&self) -> usize {
         self.file.file_size()
+    }
+}
+
+pub struct SequentialFileReader {
+    file: Box<dyn SequentialFile>,
+    filename: String,
+}
+
+impl SequentialFileReader {
+    pub fn new(file: Box<dyn SequentialFile>, filename: String) -> Self {
+        Self { file, filename }
+    }
+    pub async fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize> {
+        self.file.position_read(offset, buf).await
+    }
+
+    pub async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        self.file.read_sequencial(buf).await
+    }
+
+    pub fn name(&self) -> &str {
+        self.filename.as_str()
+    }
+
+    pub fn use_direct_io(&self) -> bool {
+        false
+    }
+
+    pub fn file_size(&self) -> usize {
+        self.file.get_file_size()
     }
 }

@@ -31,6 +31,16 @@ pub struct Slice {
     pub limit: usize,
 }
 
+impl Slice {
+    pub fn len(&self) -> usize {
+        if self.offset > self.limit {
+            0
+        } else {
+            self.limit - self.offset
+        }
+    }
+}
+
 pub const VALUE_TYPE_FOR_SEEK: u8 = ValueType::TypeBlobIndex as u8;
 
 pub fn pack_sequence_and_type(seq: u64, t: u8) -> u64 {

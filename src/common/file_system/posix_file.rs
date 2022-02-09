@@ -5,7 +5,8 @@ use std::os::unix::io::RawFd;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::common::file_system::WritableFile;
+use crate::common::file_system::{SequentialFile, WritableFile};
+use async_trait::async_trait;
 use nix::errno::Errno;
 use nix::fcntl::{self, OFlag};
 use nix::sys::stat::Mode;
@@ -13,6 +14,7 @@ use nix::sys::uio::{pread, pwrite};
 use nix::unistd::{close, ftruncate, lseek, Whence};
 use nix::NixPath;
 
+use crate::common::file_system::reader::SequentialFileReader;
 use crate::common::{
     Error, FileSystem, RandomAccessFile, RandomAccessFileReader, Result, WritableFileWriter,
 };
@@ -34,6 +36,15 @@ pub fn from_nix_error(e: nix::Error, custom: &'static str) -> std::io::Error {
 impl RawFile {
     pub fn open<P: ?Sized + NixPath>(path: &P) -> IoResult<Self> {
         let flags = OFlag::O_RDWR;
+        // Permission 644
+        let mode = Mode::S_IRUSR | Mode::S_IWUSR | Mode::S_IRGRP | Mode::S_IROTH;
+        Ok(RawFile(
+            fcntl::open(path, flags, mode).map_err(|e| from_nix_error(e, "open"))?,
+        ))
+    }
+
+    pub fn open_for_read<P: ?Sized + NixPath>(path: &P) -> IoResult<Self> {
+        let flags = OFlag::O_RDONLY;
         // Permission 644
         let mode = Mode::S_IRUSR | Mode::S_IWUSR | Mode::S_IRGRP | Mode::S_IROTH;
         Ok(RawFile(
@@ -190,7 +201,7 @@ impl PosixWritableFile {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl WritableFile for PosixWritableFile {
     async fn append(&mut self, data: &[u8]) -> Result<()> {
         self.write_all(data).map_err(|e| Error::Io(Box::new(e)))
@@ -253,7 +264,7 @@ pub struct PosixReadableFile {
 
 impl PosixReadableFile {
     pub fn open<P: ?Sized + NixPath>(path: &P) -> IoResult<Self> {
-        let fd = RawFile::open(path)?;
+        let fd = RawFile::open_for_read(path)?;
         let file_size = fd.file_size()?;
         Ok(Self {
             inner: Arc::new(fd),
@@ -262,7 +273,7 @@ impl PosixReadableFile {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl RandomAccessFile for PosixReadableFile {
     async fn read(&self, offset: usize, data: &mut [u8]) -> Result<usize> {
         self.inner
@@ -280,14 +291,57 @@ impl RandomAccessFile for PosixReadableFile {
         self.inner.file_size().unwrap()
     }
 }
+pub struct PosixSequentialFile {
+    inner: Arc<RawFile>,
+    file_size: usize,
+    offset: usize,
+}
+
+impl PosixSequentialFile {
+    pub fn open<P: ?Sized + NixPath>(path: &P) -> IoResult<Self> {
+        let fd = RawFile::open_for_read(path)?;
+        let file_size = fd.file_size()?;
+        Ok(Self {
+            inner: Arc::new(fd),
+            file_size,
+            offset: 0,
+        })
+    }
+}
+
+#[async_trait]
+impl SequentialFile for PosixSequentialFile {
+    async fn read_sequencial(&mut self, data: &mut [u8]) -> Result<usize> {
+        if self.offset >= self.file_size {
+            return Ok(0);
+        }
+        let rest = std::cmp::min(data.len(), self.file_size - self.offset);
+        let x = self
+            .inner
+            .read(self.offset, &mut data[..rest])
+            .map_err(|e| Error::Io(Box::new(e)))?;
+        self.offset += x;
+        Ok(x)
+    }
+
+    async fn position_read(&self, offset: usize, data: &mut [u8]) -> Result<usize> {
+        self.inner
+            .read(offset, data)
+            .map_err(|e| Error::Io(Box::new(e)))
+    }
+
+    fn get_file_size(&self) -> usize {
+        self.file_size
+    }
+}
 
 pub struct SyncPoxisFileSystem {}
 
 impl FileSystem for SyncPoxisFileSystem {
-    fn open_writable_file(&self, file_name: PathBuf) -> Result<Box<WritableFileWriter>> {
-        let f = PosixWritableFile::open(&file_name).map_err(|e| Error::Io(Box::new(e)))?;
-        let writer =
-            WritableFileWriter::new(Box::new(f), file_name.to_str().unwrap().to_string(), 65536);
+    fn open_writable_file(&self, path: PathBuf) -> Result<Box<WritableFileWriter>> {
+        let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
+        let f = PosixWritableFile::open(&path).map_err(|e| Error::Io(Box::new(e)))?;
+        let writer = WritableFileWriter::new(Box::new(f), file_name, 65536);
         Ok(Box::new(writer))
     }
 
@@ -299,6 +353,15 @@ impl FileSystem for SyncPoxisFileSystem {
         let p = path.join(&file_name);
         let f = PosixReadableFile::open(&p).map_err(|e| Error::Io(Box::new(e)))?;
         let reader = RandomAccessFileReader::new(Box::new(f), file_name);
+        Ok(Box::new(reader))
+    }
+
+    fn open_sequencial_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>> {
+        let f = PosixSequentialFile::open(&path).map_err(|e| Error::Io(Box::new(e)))?;
+        let reader = SequentialFileReader::new(
+            Box::new(f),
+            path.file_name().unwrap().to_str().unwrap().to_string(),
+        );
         Ok(Box::new(reader))
     }
 

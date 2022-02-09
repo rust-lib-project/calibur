@@ -12,8 +12,8 @@ pub use slice_transform::{InternalKeySliceTransform, SliceTransform};
 
 pub use error::Error;
 pub use file_system::{
-    FileSystem, InMemFileSystem, RandomAccessFile, RandomAccessFileReader, WritableFile,
-    WritableFileWriter,
+    FileSystem, InMemFileSystem, RandomAccessFile, RandomAccessFileReader, SequentialFile,
+    SequentialFileReader, WritableFile, WritableFileWriter,
 };
 pub type Result<T> = std::result::Result<T, Error>;
 

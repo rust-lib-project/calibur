@@ -11,6 +11,7 @@ use crate::common::Error;
 use async_trait::async_trait;
 pub use posix_file::PosixWritableFile;
 pub use reader::RandomAccessFileReader;
+pub use reader::SequentialFileReader;
 pub use writer::WritableFileWriter;
 
 #[async_trait]
@@ -23,6 +24,13 @@ pub trait RandomAccessFile: 'static + Send + Sync {
     fn use_direct_io(&self) -> bool {
         false
     }
+}
+
+#[async_trait]
+pub trait SequentialFile: 'static + Send + Sync {
+    async fn read_sequencial(&mut self, data: &mut [u8]) -> Result<usize>;
+    async fn position_read(&self, offset: usize, data: &mut [u8]) -> Result<usize>;
+    fn get_file_size(&self) -> usize;
 }
 
 #[async_trait]
@@ -57,6 +65,9 @@ pub trait FileSystem: Send + Sync {
         path: PathBuf,
         file_name: String,
     ) -> Result<Box<RandomAccessFileReader>>;
+
+    fn open_sequencial_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>>;
+
     fn file_exist(&self, path: PathBuf, file_name: String) -> Result<bool>;
 }
 
@@ -75,6 +86,7 @@ pub struct InMemFile {
     pub buf: Vec<u8>,
     fs: Arc<Mutex<InMemFileSystemRep>>,
     filename: String,
+    offset: usize,
 }
 
 #[async_trait]
@@ -136,12 +148,30 @@ impl RandomAccessFile for InMemFile {
     }
 }
 
+#[async_trait]
+impl SequentialFile for InMemFile {
+    async fn read_sequencial(&mut self, data: &mut [u8]) -> Result<usize> {
+        let x = self.read(self.offset, data).await?;
+        self.offset += x;
+        Ok(x)
+    }
+
+    async fn position_read(&self, offset: usize, data: &mut [u8]) -> Result<usize> {
+        self.read(offset, data).await
+    }
+
+    fn get_file_size(&self) -> usize {
+        self.buf.len()
+    }
+}
+
 impl FileSystem for InMemFileSystem {
     fn open_writable_file(&self, filename: PathBuf) -> Result<Box<WritableFileWriter>> {
         let f = InMemFile {
             fs: self.inner.clone(),
             buf: vec![],
             filename: filename.to_str().unwrap().to_string(),
+            offset: 0,
         };
         Ok(Box::new(WritableFileWriter::new(
             Box::new(f),
@@ -168,8 +198,34 @@ impl FileSystem for InMemFileSystem {
                     fs: self.inner.clone(),
                     buf: buf.clone(),
                     filename: filename.clone(),
+                    offset: 0,
                 };
                 Ok(Box::new(RandomAccessFileReader::new(Box::new(f), filename)))
+            }
+        }
+    }
+
+    fn open_sequencial_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>> {
+        let fs = self.inner.lock().unwrap();
+        let filename = path.to_str().unwrap();
+        match fs.files.get(filename) {
+            None => {
+                return Err(Error::InvalidFilename(format!(
+                    "file: {} not exists",
+                    filename
+                )))
+            }
+            Some(buf) => {
+                let f = InMemFile {
+                    fs: self.inner.clone(),
+                    buf: buf.clone(),
+                    filename: filename.to_string(),
+                    offset: 0,
+                };
+                Ok(Box::new(SequentialFileReader::new(
+                    Box::new(f),
+                    filename.to_string(),
+                )))
             }
         }
     }

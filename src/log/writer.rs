@@ -1,28 +1,8 @@
+use super::{RecordType, BLOCK_SIZE, HEADER_SIZE, LOG_PADDING, RECYCLABLE_HEADER_SIZE};
 use crate::common::{Result, WritableFileWriter};
 use crate::util;
 use crc32c::crc32c;
 use crc32c::crc32c_append;
-
-pub const HEADER_SIZE: usize = 4 + 2 + 1;
-pub const RECYCLABLE_HEADER_SIZE: usize = 4 + 2 + 1 + 4;
-pub const BLOCK_SIZE: usize = 32768;
-pub const LOG_PADDING: &[u8] = b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
-
-pub enum RecordType {
-    // Zero is reserved for preallocated files
-    ZeroType = 0,
-    FullType = 1,
-
-    // For fragments
-    FirstType = 2,
-    MiddleType = 3,
-    LastType = 4,
-    // For recycled log files
-    // RecyclableFullType = 5,
-    // RecyclableFirstType = 6,
-    // RecyclableMiddleType = 7,
-    // RecyclableLastType = 8,
-}
 
 pub struct LogWriter {
     writer: Box<WritableFileWriter>,
