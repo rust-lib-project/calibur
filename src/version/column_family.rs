@@ -14,7 +14,6 @@ pub struct ColumnFamily {
     // changes.
     super_version_number: Arc<AtomicU64>,
     version: Arc<Version>,
-    valid: AtomicBool,
     comparator: InternalKeyComparator,
     id: usize,
     log_number: u64,
@@ -39,22 +38,14 @@ impl ColumnFamily {
                 imms: Default::default(),
                 current: version.clone(),
                 version_number: 0,
+                valid: AtomicBool::new(true),
             }),
             super_version_number: Arc::new(AtomicU64::new(0)),
             version,
             id,
             comparator,
-            valid: AtomicBool::new(true),
             name,
         }
-    }
-
-    pub fn valid(&self) -> bool {
-        self.valid.load(Ordering::Acquire)
-    }
-
-    pub fn invalid_column_family(&self) {
-        self.valid.store(false, Ordering::Release);
     }
 
     pub fn get_memtable(&self) -> Arc<Memtable> {
@@ -85,7 +76,11 @@ impl ColumnFamily {
         false
     }
 
-    pub fn install_version(&self, mems: Vec<u64>, new_version: Version) -> ColumnFamily {
+    pub fn get_super_version(&self) -> Arc<SuperVersion> {
+        self.super_version.clone()
+    }
+
+    pub fn install_version(&mut self, mems: Vec<u64>, new_version: Version) -> Arc<Version> {
         let imms = self.imms.remove(mems);
         self.super_version_number.fetch_add(1, Ordering::Release);
         let super_version_number = self.super_version_number.load(Ordering::Relaxed);
@@ -96,42 +91,27 @@ impl ColumnFamily {
             version.clone(),
             super_version_number,
         ));
-        ColumnFamily {
-            name: self.name.clone(),
-            mem: self.mem.clone(),
-            log_number: self.log_number,
-            imms,
-            version,
-            super_version_number: self.super_version_number.clone(),
-            super_version,
-            id: self.id,
-            comparator: self.comparator.clone(),
-            valid: AtomicBool::new(true),
-        }
+        self.super_version.valid.store(false, Ordering::Release);
+        self.super_version = super_version;
+        self.version = version.clone();
+        self.imms = imms;
+        version
     }
 
-    pub fn switch_memtable(&self, mem: Arc<Memtable>) -> ColumnFamily {
+    pub fn switch_memtable(&mut self, mem: Arc<Memtable>) {
         let imms = self.imms.add(self.mem.clone());
         self.super_version_number.fetch_add(1, Ordering::Release);
         let super_version_number = self.super_version_number.load(Ordering::Relaxed);
         let super_version = Arc::new(SuperVersion::new(
             mem.clone(),
-            self.imms.clone(),
+            imms.clone(),
             self.version.clone(),
             super_version_number,
         ));
-        ColumnFamily {
-            log_number: self.log_number,
-            mem,
-            name: self.name.clone(),
-            imms,
-            version: self.version.clone(),
-            super_version_number: self.super_version_number.clone(),
-            super_version,
-            id: self.id,
-            valid: AtomicBool::new(true),
-            comparator: self.comparator.clone(),
-        }
+        self.super_version.valid.store(false, Ordering::Release);
+        self.super_version = super_version;
+        self.imms = imms;
+        self.mem = mem;
     }
 
     pub fn create_memtable(&self, id: u64) -> Memtable {

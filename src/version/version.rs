@@ -1,6 +1,7 @@
 use crate::memtable::Memtable;
 use crate::version::version_storage_info::VersionStorageInfo;
 use crate::version::{FileMetaData, VersionEdit};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 #[derive(Default, Clone)]
@@ -33,19 +34,50 @@ impl MemtableList {
 }
 
 pub struct Version {
+    cf_id: u32,
+    log_number: u64,
+    cf_name: String,
     storage: VersionStorageInfo,
 }
 
 impl Version {
-    pub fn new(edits: Vec<VersionEdit>) -> Self {
+    pub fn new(cf_id: u32, cf_name: String, edits: Vec<VersionEdit>) -> Self {
+        let mut log_number = 0;
+        for e in &edits {
+            log_number = std::cmp::max(log_number, e.log_number);
+        }
         Version {
             storage: VersionStorageInfo::new(edits),
+            cf_id,
+            cf_name,
+            log_number,
         }
     }
 
     pub fn apply(&self, edits: Vec<VersionEdit>) -> Self {
+        let mut log_number =  self.log_number;
+        for e in &edits {
+            log_number = std::cmp::max(log_number, e.log_number);
+        }
         let info = self.storage.apply(edits);
-        Version { storage: info }
+        Version {
+            storage: info,
+            cf_id: self.cf_id,
+            cf_name: self.cf_name.clone(),
+            log_number,
+        }
+    }
+
+    pub fn get_log_number(&self) -> u64 {
+        self.log_number
+    }
+
+    pub fn get_cf_id(&self) -> u32 {
+        self.cf_id
+    }
+
+    pub fn get_cf_name(&self) -> &str {
+        &self.cf_name
     }
 
     pub fn get_level_num(&self) -> usize {
@@ -62,6 +94,7 @@ pub struct SuperVersion {
     pub imms: MemtableList,
     pub current: Arc<Version>,
     pub version_number: u64,
+    pub valid: AtomicBool,
 }
 
 impl SuperVersion {
@@ -76,6 +109,7 @@ impl SuperVersion {
             imms,
             current,
             version_number,
+            valid: AtomicBool::new(true),
         }
     }
 }

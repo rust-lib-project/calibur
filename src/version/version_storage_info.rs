@@ -21,7 +21,11 @@ impl VersionStorageInfo {
             base_level: vec![],
             files_by_id: Arc::new(Mutex::new(HashMap::default())),
         };
-        info.apply(edits)
+        if edits.is_empty() {
+            info
+        } else {
+            info.apply(edits)
+        }
     }
 
     pub fn size(&self) -> usize {

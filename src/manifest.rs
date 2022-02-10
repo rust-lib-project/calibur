@@ -5,7 +5,7 @@ use futures::channel::mpsc::UnboundedSender;
 use futures::channel::oneshot::{channel as once_channel, Sender as OnceSender};
 
 use crate::compaction::CompactionEngine;
-use crate::log::{LogReader, LogWriter};
+use crate::log::LogWriter;
 use crate::options::ImmutableDBOptions;
 use crate::util::BtreeComparable;
 use crate::version::{Version, VersionEdit, VersionSet, VersionSetKernel};
@@ -23,16 +23,6 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    pub async fn recover(mut reader: Box<LogReader>) -> Result<HashMap<u32, Arc<Version>>> {
-        let mut record = vec![];
-        let versions = HashMap::default();
-        while reader.read_record(&mut record).await? {
-            let mut edit = VersionEdit::default();
-            edit.decode_from(&record)?;
-        }
-        Ok(versions)
-    }
-
     pub async fn process_manifest_writes(&mut self, edits: Vec<VersionEdit>) -> Result<()> {
         if self.log.get_file_size() > self.options.max_manifest_file_size {
             // TODO: Switch manifest log writer
@@ -86,19 +76,19 @@ impl Manifest {
     }
 
     async fn write_snapshot(&mut self, writer: &mut LogWriter) -> Result<()> {
-        let (cfs, comparator) = {
+        let (versions, comparator) = {
             let version_set = self.version_set.lock().unwrap();
             (
-                version_set.get_column_familys(),
+                version_set.get_column_family_versions(),
                 version_set.get_comparator_name().to_string(),
             )
         };
-        for cf in cfs {
+        for version in versions {
             let mut record = Vec::new();
             {
                 let mut edit = VersionEdit::default();
-                edit.column_family_name = cf.get_name().to_string();
-                edit.column_family = cf.get_id() as u32;
+                edit.column_family_name = version.get_cf_name().to_string();
+                edit.column_family = version.get_cf_id() as u32;
                 edit.is_column_family_add = true;
                 edit.comparator = comparator.clone();
                 if !edit.encode_to(&mut record) {
@@ -110,9 +100,8 @@ impl Manifest {
                 record.clear();
             }
             let mut edit = VersionEdit::default();
-            edit.column_family = cf.get_id() as u32;
-            edit.log_number = cf.get_log_number();
-            let version = cf.get_version();
+            edit.column_family = version.get_cf_id() as u32;
+            edit.log_number = version.get_log_number();
             let levels = version.get_level_num();
             for i in 0..=levels {
                 version.scan(

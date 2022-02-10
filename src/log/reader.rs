@@ -25,11 +25,11 @@ impl LogReader {
     }
 
     pub async fn read_record(&mut self, record: &mut Vec<u8>) -> Result<bool> {
-        let mut prospective_record_offset = 0;
+        // let mut prospective_record_offset = 0;
         let mut in_fragmented_record = false;
         record.clear();
         loop {
-            let physical_record_offset = self.end_of_buffer_offset - self.data.len();
+            // let physical_record_offset = self.end_of_buffer_offset - self.data.len();
             let (fragment, record_type) = self.read_physical_record().await?;
             if record_type < RecordType::RecyclableLastType as u8 {
                 let fragment_type = record_type.into();
@@ -37,12 +37,12 @@ impl LogReader {
                     RecordType::ZeroType => {}
                     RecordType::FullType => {
                         record.extend_from_slice(&self.buffer[fragment.offset..fragment.limit]);
-                        prospective_record_offset = physical_record_offset;
+                        // prospective_record_offset = physical_record_offset;
                         // self.last_record_offset = prospective_record_offset;
                         return Ok(true);
                     }
                     RecordType::FirstType => {
-                        prospective_record_offset = physical_record_offset;
+                        // prospective_record_offset = physical_record_offset;
                         in_fragmented_record = true;
                         record.clear();
                         record.extend_from_slice(&self.buffer[fragment.offset..fragment.limit]);

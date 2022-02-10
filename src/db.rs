@@ -50,10 +50,9 @@ impl Engine {
         let (tx, mut rx) = unbounded();
         let mut manifest = {
             let version_set = version_set_with_lock.lock().unwrap();
-            let cfs = version_set.get_column_familys();
             let mut versions = HashMap::default();
-            for cf in cfs {
-                versions.insert(cf.get_id() as u32, cf.get_version());
+            for v in version_set.get_column_family_versions() {
+                versions.insert(v.get_cf_id(), v);
             }
             ManifestWriter::new(
                 versions,
@@ -65,6 +64,10 @@ impl Engine {
         pool.spawn(async move {
             while let Some(x) = rx.next().await {
                 manifest.batch(x);
+                while let Some(x) = rx.try_next().unwrap() {
+                    manifest.batch(x);
+                }
+                manifest.apply().await;
             }
         });
         let engine = ManifestEngine::new(tx, comparator);
