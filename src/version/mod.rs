@@ -11,7 +11,7 @@ use crate::util::BtreeComparable;
 use bytes::Bytes;
 pub use column_family::ColumnFamily;
 pub use version::*;
-pub use version_set::{VersionSet, VersionSetKernel};
+pub use version_set::{KernelNumberContext, VersionSet};
 
 const FILE_NUMBER_MASK: u64 = 0x3FFFFFFFFFFFFFFF;
 

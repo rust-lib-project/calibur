@@ -1,5 +1,6 @@
 // Copyright (c) 2017-present, PingCAP, Inc. Licensed under Apache-2.0.
 
+use std::fs::read_dir;
 use std::io::{Result as IoResult, Write};
 use std::os::unix::io::RawFd;
 use std::path::PathBuf;
@@ -363,6 +364,14 @@ impl FileSystem for SyncPoxisFileSystem {
             path.file_name().unwrap().to_str().unwrap().to_string(),
         );
         Ok(Box::new(reader))
+    }
+
+    fn list_files(&self, path: PathBuf) -> Result<Vec<PathBuf>> {
+        let mut files = vec![];
+        for f in read_dir(path).map_err(|e| Error::Io(Box::new(e)))? {
+            files.push(f?.path());
+        }
+        Ok(files)
     }
 
     fn file_exist(&self, path: PathBuf, file_name: String) -> Result<bool> {

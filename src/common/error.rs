@@ -16,7 +16,7 @@ pub enum Error {
     #[error("Invalid checksum")]
     InvalidChecksum(String),
     #[error("Invalid filename")]
-    InvalidFilename(String),
+    InvalidFile(String),
     #[error("Invalid data: {0}")]
     VarDecode(&'static str),
     #[error("Error when reading table: {0}")]
@@ -50,7 +50,7 @@ impl Clone for Error {
             Error::EmptyKey => Error::EmptyKey,
             Error::TooLong(s) => Error::TooLong(s.clone()),
             Error::InvalidChecksum(s) => Error::InvalidChecksum(s.clone()),
-            Error::InvalidFilename(s) => Error::InvalidFilename(s.clone()),
+            Error::InvalidFile(s) => Error::InvalidFile(s.clone()),
             Error::VarDecode(x) => Error::VarDecode(*x),
             Error::TableRead(x) => Error::TableRead(x.clone()),
             Error::DBClosed => Error::DBClosed,

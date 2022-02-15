@@ -55,9 +55,11 @@ impl Version {
     }
 
     pub fn apply(&self, edits: Vec<VersionEdit>) -> Self {
-        let mut log_number =  self.log_number;
+        let mut log_number = self.log_number;
         for e in &edits {
-            log_number = std::cmp::max(log_number, e.log_number);
+            if e.has_log_number {
+                log_number = std::cmp::max(log_number, e.log_number);
+            }
         }
         let info = self.storage.apply(edits);
         Version {

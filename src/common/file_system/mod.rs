@@ -48,6 +48,7 @@ pub trait WritableFile: Send {
     }
 }
 
+#[async_trait]
 pub trait FileSystem: Send + Sync {
     fn open_writable_file_in(
         &self,
@@ -67,6 +68,28 @@ pub trait FileSystem: Send + Sync {
     ) -> Result<Box<RandomAccessFileReader>>;
 
     fn open_sequencial_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>>;
+
+    async fn read_file_content(&self, path: PathBuf) -> Result<Vec<u8>> {
+        let mut reader = self.open_sequencial_file(path)?;
+        let sz = reader.file_size();
+        let mut data = vec![0u8; sz];
+        const BUFFER_SIZE: usize = 8192;
+        let mut offset = 0;
+        while offset < data.len() {
+            let block_size = std::cmp::min(data.len() - offset, BUFFER_SIZE);
+            let read_size = reader
+                .read(&mut data[offset..(offset + block_size)])
+                .await?;
+            offset += read_size;
+            if read_size < block_size {
+                data.resize(offset, 0);
+                break;
+            }
+        }
+        Ok(data)
+    }
+
+    fn list_files(&self, path: PathBuf) -> Result<Vec<PathBuf>>;
 
     fn file_exist(&self, path: PathBuf, file_name: String) -> Result<bool>;
 }
@@ -187,12 +210,7 @@ impl FileSystem for InMemFileSystem {
     ) -> Result<Box<RandomAccessFileReader>> {
         let fs = self.inner.lock().unwrap();
         match fs.files.get(&filename) {
-            None => {
-                return Err(Error::InvalidFilename(format!(
-                    "file: {} not exists",
-                    filename
-                )))
-            }
+            None => return Err(Error::InvalidFile(format!("file: {} not exists", filename))),
             Some(buf) => {
                 let f = InMemFile {
                     fs: self.inner.clone(),
@@ -209,12 +227,7 @@ impl FileSystem for InMemFileSystem {
         let fs = self.inner.lock().unwrap();
         let filename = path.to_str().unwrap();
         match fs.files.get(filename) {
-            None => {
-                return Err(Error::InvalidFilename(format!(
-                    "file: {} not exists",
-                    filename
-                )))
-            }
+            None => return Err(Error::InvalidFile(format!("file: {} not exists", filename))),
             Some(buf) => {
                 let f = InMemFile {
                     fs: self.inner.clone(),
@@ -228,6 +241,16 @@ impl FileSystem for InMemFileSystem {
                 )))
             }
         }
+    }
+
+    fn list_files(&self, _: PathBuf) -> Result<Vec<PathBuf>> {
+        let fs = self.inner.lock().unwrap();
+        let files = fs
+            .files
+            .iter()
+            .map(|(k, _)| PathBuf::from(k.clone()))
+            .collect();
+        Ok(files)
     }
 
     fn file_exist(&self, _path: PathBuf, filename: String) -> Result<bool> {

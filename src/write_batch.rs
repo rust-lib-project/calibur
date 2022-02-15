@@ -1,5 +1,6 @@
 use crate::common::format::*;
-use crate::util::{encode_var_uint32, get_var_uint32};
+use crate::common::{Error, Result};
+use crate::util::{decode_fixed_uint32, decode_fixed_uint64, encode_var_uint32, get_var_uint32};
 
 const WRITE_BATCH_HEADER: usize = 12;
 
@@ -9,7 +10,7 @@ pub struct WriteBatch {
     flag: u32,
 }
 
-pub struct WriteBatchForDB {
+pub struct ReadOnlyWriteBatch {
     data: Vec<u8>,
     flag: u32,
     sequence: u64,
@@ -89,10 +90,10 @@ impl WriteBatch {
         self.data[8..].copy_from_slice(&c);
     }
 
-    pub fn to_raw(&mut self) -> WriteBatchForDB {
+    pub fn to_raw(&mut self) -> ReadOnlyWriteBatch {
         self.set_count(self.count);
         let data = std::mem::take(&mut self.data);
-        WriteBatchForDB {
+        ReadOnlyWriteBatch {
             data,
             flag: self.flag,
             sequence: 0,
@@ -100,18 +101,33 @@ impl WriteBatch {
         }
     }
 
-    pub fn recycle(&mut self, batch: WriteBatchForDB) {
+    pub fn recycle(&mut self, batch: ReadOnlyWriteBatch) {
         self.data = batch.data;
     }
 }
 
 pub struct WriteBatchIter<'a> {
-    batch: &'a WriteBatchForDB,
+    batch: &'a ReadOnlyWriteBatch,
     sequence: u64,
     offset: usize,
 }
 
-impl WriteBatchForDB {
+impl ReadOnlyWriteBatch {
+    pub fn try_from(data: Vec<u8>) -> Result<Self> {
+        if data.len() < WRITE_BATCH_HEADER {
+            return Err(Error::VarDecode("can not decode write batch"));
+        }
+        let count = decode_fixed_uint32(&data[8..]);
+        let sequence = decode_fixed_uint64(&data);
+        let wb = ReadOnlyWriteBatch {
+            data,
+            flag: 0,
+            sequence,
+            count,
+        };
+        Ok(wb)
+    }
+
     pub fn iter(&self) -> WriteBatchIter<'_> {
         WriteBatchIter {
             batch: self,
@@ -123,6 +139,10 @@ impl WriteBatchForDB {
     pub fn set_sequence(&mut self, sequence: u64) {
         self.data[..8].copy_from_slice(&sequence.to_le_bytes());
         self.sequence = sequence;
+    }
+
+    pub fn get_sequence(&self) -> u64 {
+        self.sequence
     }
 
     pub fn count(&self) -> u32 {

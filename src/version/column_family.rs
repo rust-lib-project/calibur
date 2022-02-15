@@ -1,5 +1,6 @@
 use crate::common::InternalKeyComparator;
 use crate::memtable::Memtable;
+use crate::options::ColumnFamilyOptions;
 use crate::version::{MemtableList, SuperVersion, Version};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{atomic::AtomicU64, Arc};
@@ -18,6 +19,7 @@ pub struct ColumnFamily {
     id: usize,
     log_number: u64,
     name: String,
+    options: ColumnFamilyOptions,
 }
 
 impl ColumnFamily {
@@ -27,6 +29,7 @@ impl ColumnFamily {
         m: Memtable,
         comparator: InternalKeyComparator,
         version: Arc<Version>,
+        options: ColumnFamilyOptions,
     ) -> Self {
         let mem = Arc::new(m);
         Self {
@@ -45,6 +48,7 @@ impl ColumnFamily {
             id,
             comparator,
             name,
+            options,
         }
     }
 

@@ -1,4 +1,5 @@
 use super::list::{IterRef, Skiplist};
+use crate::common::format::{pack_sequence_and_type, ValueType};
 use crate::common::InternalKeyComparator;
 use crate::table::InternalIterator;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -26,6 +27,23 @@ impl Memtable {
         let iter = self.list.iter();
         Box::new(MemIterator { inner: iter })
     }
+
+    pub fn add(&self, key: &[u8], value: &[u8], sequence: u64, tp: ValueType) {
+        let mut ukey = Vec::with_capacity(key.len() + 8);
+        ukey.extend_from_slice(key);
+        ukey.extend_from_slice(&pack_sequence_and_type(sequence, tp as u8).to_le_bytes());
+        self.insert_to(ukey.into(), value.into());
+    }
+
+    pub fn delete(&self, key: &[u8], sequence: u64) {
+        let mut ukey = Vec::with_capacity(key.len() + 8);
+        ukey.extend_from_slice(key);
+        ukey.extend_from_slice(
+            &pack_sequence_and_type(sequence, ValueType::TypeDeletion as u8).to_le_bytes(),
+        );
+        self.insert_to(ukey.into(), vec![]);
+    }
+
     pub fn insert(&self, key: &[u8], value: &[u8]) {
         self.insert_to(key.into(), value.into());
     }

@@ -8,10 +8,13 @@ pub struct ImmutableDBOptions {
     pub db_path: String,
     pub fs: Arc<dyn FileSystem>,
     pub factory: Arc<dyn TableFactory>,
+    pub max_background_jobs: usize,
 }
 
+#[derive(Default, Clone)]
 pub struct ColumnFamilyOptions {}
 
+#[derive(Default, Clone)]
 pub struct DBOptions {}
 
 pub struct ColumnFamilyDescriptor {

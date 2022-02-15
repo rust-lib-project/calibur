@@ -6,7 +6,7 @@ use crate::compaction::flush_job::FlushJob;
 use crate::memtable::Memtable;
 use crate::options::ImmutableDBOptions;
 use crate::table::InternalIterator;
-use crate::version::{VersionEdit, VersionSetKernel};
+use crate::version::{KernelNumberContext, VersionEdit};
 use std::sync::Arc;
 
 #[async_trait::async_trait]
@@ -27,7 +27,7 @@ pub struct FlushRequest {
 async fn run_flush_memtable_job<Engine: CompactionEngine>(
     mut engine: Engine,
     reqs: Vec<FlushRequest>,
-    versions: Arc<VersionSetKernel>,
+    versions: Arc<KernelNumberContext>,
     options: Arc<ImmutableDBOptions>,
     comparator: InternalKeyComparator,
 ) -> Result<()> {

@@ -1,43 +1,80 @@
-use crate::common::{make_descriptor_file_name, Error, InternalKeyComparator, Result};
+use crate::common::{
+    make_current_file, make_descriptor_file_name, parse_file_name, DBFileType, Error, FileSystem,
+    InternalKeyComparator, Result,
+};
 use crate::memtable::Memtable;
 use crate::table::{InternalIterator, MergingIterator};
 use futures::channel::mpsc::UnboundedSender;
 use futures::channel::oneshot::{channel as once_channel, Sender as OnceSender};
 
 use crate::compaction::CompactionEngine;
-use crate::log::LogWriter;
-use crate::options::ImmutableDBOptions;
+use crate::log::{LogReader, LogWriter};
+use crate::options::{ColumnFamilyDescriptor, ImmutableDBOptions};
 use crate::util::BtreeComparable;
-use crate::version::{Version, VersionEdit, VersionSet, VersionSetKernel};
+use crate::version::{KernelNumberContext, Version, VersionEdit, VersionSet};
 use futures::SinkExt;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 pub struct Manifest {
-    log: Box<LogWriter>,
+    log: Option<Box<LogWriter>>,
     versions: HashMap<u32, Arc<Version>>,
     version_set: Arc<Mutex<VersionSet>>,
-    kernal: Arc<VersionSetKernel>,
+    kernel: Arc<KernelNumberContext>,
     options: Arc<ImmutableDBOptions>,
     manifest_file_number: u64,
 }
 
 impl Manifest {
+    pub async fn recover(
+        cfs: &[ColumnFamilyDescriptor],
+        db_options: &Arc<ImmutableDBOptions>,
+    ) -> Result<Self> {
+        let (manifest_path, manifest_file_number) =
+            get_current_manifest_path(&db_options.db_path, db_options.fs.clone()).await?;
+        let reader = db_options
+            .fs
+            .open_sequencial_file(PathBuf::from(manifest_path))?;
+        let log_reader = LogReader::new(reader);
+        let version_set = VersionSet::read_recover(cfs, Box::new(log_reader), db_options).await?;
+        let cf_versions = version_set.get_column_family_versions();
+        let mut versions = HashMap::default();
+        let kernal = version_set.get_kernel();
+        for v in cf_versions {
+            versions.insert(v.get_cf_id(), v);
+        }
+        Ok(Self {
+            log: None,
+            version_set: Arc::new(Mutex::new(version_set)),
+            manifest_file_number,
+            versions,
+            kernel: kernal,
+            options: db_options.clone(),
+        })
+    }
+
+    pub fn get_version_set(&self) -> Arc<Mutex<VersionSet>> {
+        self.version_set.clone()
+    }
+
     pub async fn process_manifest_writes(&mut self, edits: Vec<VersionEdit>) -> Result<()> {
-        if self.log.get_file_size() > self.options.max_manifest_file_size {
+        if self.log.as_ref().map_or(true, |f| {
+            f.get_file_size() > self.options.max_manifest_file_size
+        }) {
             // TODO: Switch manifest log writer
-            let file_number = self.kernal.new_file_number();
+            let file_number = self.kernel.new_file_number();
             let descrip_file_name = make_descriptor_file_name(&self.options.db_path, file_number);
             let writer = self.options.fs.open_writable_file(descrip_file_name)?;
             let mut writer = LogWriter::new(writer, 0);
             self.write_snapshot(&mut writer).await?;
-            self.log = Box::new(writer);
+            self.log = Some(Box::new(writer));
             self.manifest_file_number = file_number;
         }
         let mut data = vec![];
         for e in &edits {
             e.encode_to(&mut data);
-            self.log.add_record(&data).await?;
+            self.log.as_mut().unwrap().add_record(&data).await?;
             data.clear();
         }
         let mut versions = HashMap::<u32, Vec<VersionEdit>>::new();
@@ -71,7 +108,7 @@ impl Manifest {
             let version = version_set.install_version(cf, mems, new_version)?;
             self.versions.insert(cf, version);
         }
-        self.log.fsync().await?;
+        self.log.as_mut().unwrap().fsync().await?;
         Ok(())
     }
 
@@ -134,23 +171,7 @@ pub struct ManifestWriter {
 }
 
 impl ManifestWriter {
-    pub fn new(
-        versions: HashMap<u32, Arc<Version>>,
-        version_set: Arc<Mutex<VersionSet>>,
-        kernel: Arc<VersionSetKernel>,
-        options: Arc<ImmutableDBOptions>,
-    ) -> Self {
-        let manifest_file_number = kernel.new_file_number();
-        let descrip_file_name = make_descriptor_file_name(&options.db_path, manifest_file_number);
-        let writer = options.fs.open_writable_file(descrip_file_name).unwrap();
-        let manifest = Box::new(Manifest {
-            log: Box::new(LogWriter::new(writer, 0)),
-            versions,
-            version_set,
-            kernal: kernel,
-            options,
-            manifest_file_number,
-        });
+    pub fn new(manifest: Box<Manifest>) -> Self {
         Self {
             manifest,
             cbs: vec![],
@@ -225,4 +246,33 @@ impl CompactionEngine for ManifestEngine {
             Box::new(iter)
         }
     }
+}
+
+pub async fn get_current_manifest_path(
+    dbname: &String,
+    fs: Arc<dyn FileSystem>,
+) -> Result<(String, u64)> {
+    let mut data = fs
+        .read_file_content(make_current_file(dbname.as_str()))
+        .await?;
+    if data.is_empty() || *data.last().unwrap() != b'\n' {
+        return Err(Error::InvalidFile(format!("CURRENT file corrupted")));
+    }
+    data.pop();
+    let fname = String::from_utf8(data).map_err(|e| {
+        Error::InvalidFile(format!(
+            "can not trans current file to manifest name, Error: {:?}",
+            e
+        ))
+    })?;
+    let (tp, manifest_file_number) = parse_file_name(&fname)?;
+    if tp != DBFileType::DescriptorFile {
+        return Err(Error::InvalidFile(format!("CURRENT file corrupted")));
+    }
+    let mut manifest_path = dbname.clone();
+    if !manifest_path.ends_with("/") {
+        manifest_path.push('/');
+    }
+    manifest_path.push_str(&fname);
+    Ok((manifest_path, manifest_file_number))
 }
