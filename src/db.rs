@@ -1,18 +1,17 @@
-use crate::common::{
-    make_log_file, parse_file_name, DBFileType, Error, InternalKeyComparator, Result,
-};
+use crate::common::{make_log_file, parse_file_name, DBFileType, Error, Result};
 use crate::options::{ColumnFamilyDescriptor, DBOptions, ImmutableDBOptions};
 use crate::version::{KernelNumberContext, SuperVersion, VersionSet};
-use futures::channel::mpsc::unbounded;
+use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 use std::path::PathBuf;
 
 use crate::common::format::ValueType;
 use crate::log::LogReader;
 use crate::manifest::{Manifest, ManifestScheduler, ManifestWriter};
 use crate::memtable::Memtable;
+use crate::wal::{WALScheduler, WALTask, WALWriter};
 use crate::write_batch::{ReadOnlyWriteBatch, WriteBatchItem};
 use futures::StreamExt;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use yatp::{task::future::TaskCell, Builder as PoolBuilder, ThreadPool};
 
@@ -45,6 +44,8 @@ pub struct Engine {
     options: Arc<ImmutableDBOptions>,
     version_cache: Vec<Option<Arc<SuperVersion>>>,
     manifest_scheduler: ManifestScheduler,
+    wal_scheduler: WALScheduler,
+    stopped: Arc<AtomicBool>,
 }
 
 impl Engine {
@@ -53,15 +54,15 @@ impl Engine {
         cfs: Vec<ColumnFamilyDescriptor>,
         other_pool: Option<Arc<ThreadPool<TaskCell>>>,
     ) -> Result<Self> {
-        Self::recover(db_options, cfs, other_pool).await
+        let immutable_options = Arc::new(db_options.into());
+        Self::recover(immutable_options, cfs, other_pool).await
     }
 
     async fn recover(
-        db_options: DBOptions,
+        immutable_options: Arc<ImmutableDBOptions>,
         cfs: Vec<ColumnFamilyDescriptor>,
         other_pool: Option<Arc<ThreadPool<TaskCell>>>,
     ) -> Result<Self> {
-        let immutable_options = Arc::new(db_options.into());
         let manifest = Manifest::recover(&cfs, &immutable_options).await?;
         let version_set = manifest.get_version_set();
         let files = immutable_options
@@ -90,8 +91,9 @@ impl Engine {
                 .build_multilevel_future_pool();
             Arc::new(pool)
         });
-        let manifest_scheduler =
-            Self::run_manifest_job(&pool, version_set.clone(), Box::new(manifest))?;
+        let manifest_scheduler = Self::start_manifest_job(&pool, Box::new(manifest))?;
+        let (tx, rx) = unbounded();
+        let wal_scheduler = WALScheduler::new(tx);
         let mut engine = Engine {
             version_set,
             kernel,
@@ -99,8 +101,11 @@ impl Engine {
             options: immutable_options,
             version_cache: vec![],
             manifest_scheduler,
+            wal_scheduler,
+            stopped: Arc::new(AtomicBool::new(false)),
         };
         engine.recover_log(logs).await?;
+        engine.run_wal_job(rx)?;
         Ok(engine)
     }
 
@@ -142,12 +147,16 @@ impl Engine {
             let reader = self.options.fs.open_sequencial_file(fname)?;
             let mut log_reader = LogReader::new(reader);
             let mut buf = vec![];
+            let mut next_seq = self.kernel.last_sequence();
             while log_reader.read_record(&mut buf).await? {
                 let wb = ReadOnlyWriteBatch::try_from(buf.clone())?;
+                let count = wb.count() as u64;
                 let sequence = wb.get_sequence();
                 self.write_memtable(&wb, sequence)?;
-                self.kernel.set_last_sequence(sequence);
+                next_seq = sequence + count - 1;
+                // TODO: flush if the memtable is full
             }
+            self.kernel.set_last_sequence(next_seq);
         }
         Ok(())
     }
@@ -192,9 +201,8 @@ impl Engine {
         Ok(())
     }
 
-    fn run_manifest_job(
+    fn start_manifest_job(
         pool: &ThreadPool<TaskCell>,
-        versions: Arc<Mutex<VersionSet>>,
         manifest: Box<Manifest>,
     ) -> Result<ManifestScheduler> {
         let (tx, mut rx) = unbounded();
@@ -210,7 +218,97 @@ impl Engine {
                 writer.apply().await;
             }
         });
-        let engine = ManifestScheduler::new(tx, versions);
+        let engine = ManifestScheduler::new(tx);
         Ok(engine)
+    }
+
+    fn run_wal_job(&self, mut rx: UnboundedReceiver<WALTask>) -> Result<()> {
+        let mut writer = WALWriter::new(
+            self.kernel.clone(),
+            self.version_set.clone(),
+            self.options.clone(),
+        )?;
+        let f = async move {
+            let mut wbs = vec![];
+            while let Some(x) = rx.next().await {
+                let mut need_sync = false;
+                match x {
+                    WALTask::Write {
+                        wb,
+                        cb,
+                        sync,
+                        disable_wal,
+                    } => {
+                        wbs.push((wb, cb, disable_wal));
+                        if sync {
+                            need_sync = true;
+                        }
+                    }
+                    WALTask::Ingest { .. } => {
+                        unimplemented!();
+                    }
+                }
+                while let Some(x) = rx.try_next().unwrap() {
+                    match x {
+                        WALTask::Write {
+                            mut wb,
+                            cb,
+                            sync,
+                            disable_wal,
+                        } => {
+                            if wbs.len() == 1 {
+                                let disable_wal = wbs[0].2;
+                                writer.batch(&mut wbs[0].0, disable_wal);
+                            }
+                            let need_flush = writer.batch(&mut wb, disable_wal);
+                            if sync {
+                                need_sync = true;
+                            }
+                            wbs.push((wb, cb, disable_wal));
+                            if need_flush {
+                                break;
+                            }
+                        }
+                        WALTask::Ingest { .. } => {
+                            unimplemented!();
+                        }
+                    }
+                }
+                let mut r = if wbs.len() == 1 {
+                    let disable_wal = wbs[0].2;
+                    writer.write(&mut wbs[0].0, disable_wal).await
+                } else {
+                    writer.flush().await
+                };
+                if need_sync && r.is_ok() {
+                    r = writer.fsync().await;
+                }
+                match r {
+                    Ok(()) => {
+                        for (wb, cb, _) in wbs.drain(..) {
+                            let _ = cb.send(Ok(wb));
+                        }
+                    }
+                    Err(e) => {
+                        for (_, cb, _) in wbs.drain(..) {
+                            let _ = cb.send(Err(e.clone()));
+                        }
+                        return Err(e);
+                    }
+                }
+            }
+            Ok(())
+        };
+        let version_set = self.version_set.clone();
+        let stopped = self.stopped.clone();
+        self.pool.spawn(async move {
+            if let Err(e) = f.await {
+                if !stopped.load(Ordering::Acquire) {
+                    let mut v = version_set.lock().unwrap();
+                    v.record_error(e);
+                }
+            }
+        });
+        Ok(())
     }
 }

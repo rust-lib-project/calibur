@@ -19,7 +19,7 @@ pub struct ColumnFamily {
     id: usize,
     log_number: u64,
     name: String,
-    options: ColumnFamilyOptions,
+    options: Arc<ColumnFamilyOptions>,
 }
 
 impl ColumnFamily {
@@ -48,7 +48,7 @@ impl ColumnFamily {
             id,
             comparator,
             name,
-            options,
+            options: Arc::new(options),
         }
     }
 

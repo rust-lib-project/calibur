@@ -213,18 +213,11 @@ pub struct ManifestTask {
 #[derive(Clone)]
 pub struct ManifestScheduler {
     sender: UnboundedSender<ManifestTask>,
-    version_sets: Arc<Mutex<VersionSet>>,
 }
 
 impl ManifestScheduler {
-    pub fn new(
-        sender: UnboundedSender<ManifestTask>,
-        version_sets: Arc<Mutex<VersionSet>>,
-    ) -> Self {
-        Self {
-            sender,
-            version_sets,
-        }
+    pub fn new(sender: UnboundedSender<ManifestTask>) -> Self {
+        Self { sender }
     }
 }
 

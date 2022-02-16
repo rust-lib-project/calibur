@@ -145,6 +145,21 @@ impl ReadOnlyWriteBatch {
         self.sequence
     }
 
+    pub fn get_data(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub fn append_to(&self, buf: &mut Vec<u8>) {
+        if buf.is_empty() {
+            buf.extend_from_slice(&self.data);
+        } else {
+            buf.extend_from_slice(&self.data[WRITE_BATCH_HEADER..]);
+            let count = decode_fixed_uint32(&buf[8..]) + self.count;
+            let c = count.to_le_bytes();
+            buf[8..].copy_from_slice(&c);
+        }
+    }
+
     pub fn count(&self) -> u32 {
         self.count
     }

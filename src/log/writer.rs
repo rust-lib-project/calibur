@@ -28,6 +28,10 @@ impl LogWriter {
         }
     }
 
+    pub fn get_log_number(&self) -> u64 {
+        self.log_number
+    }
+
     pub fn get_file_mut(&mut self) -> &mut WritableFileWriter {
         self.writer.as_mut()
     }

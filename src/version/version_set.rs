@@ -243,4 +243,7 @@ impl VersionSet {
             }
         }
     }
+
+    // TODO: record error
+    pub fn record_error(&mut self, _: Error) {}
 }
