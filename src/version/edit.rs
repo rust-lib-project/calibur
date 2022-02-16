@@ -5,6 +5,19 @@ use crate::util::{
     put_var_uint32, put_var_uint64, put_varint32varint32, put_varint32varint32varint64,
     put_varint32varint64, put_varint64varint64, BtreeComparable,
 };
+use crate::ColumnFamilyOptions;
+use std::fmt::{Debug, Formatter};
+
+#[derive(Clone, Default, Eq, PartialEq)]
+pub struct ColumnFamilyOptionsWrapper {
+    pub options: Option<ColumnFamilyOptions>,
+}
+
+impl Debug for ColumnFamilyOptionsWrapper {
+    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
+        Ok(())
+    }
+}
 
 #[derive(Clone, Default, Debug, Eq, PartialEq)]
 pub struct VersionEdit {
@@ -14,8 +27,11 @@ pub struct VersionEdit {
     // memtable to be deleted does not need to be persisted in manifest
     pub mems_deleted: Vec<u64>,
 
+    // only for create column family in manual
+    pub cf_options: ColumnFamilyOptionsWrapper,
+
     pub max_level: u32,
-    pub comparator: String,
+    pub comparator_name: String,
     pub log_number: u64,
     pub prev_log_number: u64,
     pub next_file_number: u64,
@@ -79,7 +95,7 @@ impl VersionEdit {
     pub fn encode_to(&self, buf: &mut Vec<u8>) -> bool {
         if self.has_comparator {
             put_var_uint32(buf, Tag::Comparator as u32);
-            put_length_prefixed_slice(buf, self.comparator.as_bytes());
+            put_length_prefixed_slice(buf, self.comparator_name.as_bytes());
         }
         if self.has_log_number {
             put_varint32varint64(buf, Tag::LogNumber as u32, self.log_number);
@@ -150,7 +166,7 @@ impl VersionEdit {
             match tag {
                 Tag::Comparator => match get_length_prefixed_slice(&src[offset..], &mut offset) {
                     Some(data) => {
-                        self.comparator = String::from_utf8(data.to_vec())
+                        self.comparator_name = String::from_utf8(data.to_vec())
                             .map_err(|_| Error::VarDecode("decode comparator error"))?;
                     }
                     None => {

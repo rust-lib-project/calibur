@@ -37,11 +37,12 @@ pub struct Version {
     cf_id: u32,
     log_number: u64,
     cf_name: String,
+    comparator: String,
     storage: VersionStorageInfo,
 }
 
 impl Version {
-    pub fn new(cf_id: u32, cf_name: String, edits: Vec<VersionEdit>) -> Self {
+    pub fn new(cf_id: u32, cf_name: String, comparator: String, edits: Vec<VersionEdit>) -> Self {
         let mut log_number = 0;
         for e in &edits {
             log_number = std::cmp::max(log_number, e.log_number);
@@ -51,6 +52,7 @@ impl Version {
             cf_id,
             cf_name,
             log_number,
+            comparator,
         }
     }
 
@@ -67,6 +69,7 @@ impl Version {
             cf_id: self.cf_id,
             cf_name: self.cf_name.clone(),
             log_number,
+            comparator: self.comparator.clone(),
         }
     }
 
@@ -80,6 +83,10 @@ impl Version {
 
     pub fn get_cf_name(&self) -> &str {
         &self.cf_name
+    }
+
+    pub fn get_comparator_name(&self) -> &str {
+        &self.comparator
     }
 
     pub fn get_level_num(&self) -> usize {

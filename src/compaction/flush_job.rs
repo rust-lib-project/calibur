@@ -3,8 +3,8 @@ use crate::common::{make_table_file_name, InternalKeyComparator, Result};
 use crate::compaction::compaction_iter::CompactionIter;
 use crate::compaction::CompactionEngine;
 use crate::memtable::Memtable;
-use crate::options::ImmutableDBOptions;
-use crate::table::TableBuilderOptions;
+use crate::options::{ColumnFamilyOptions, ImmutableDBOptions};
+use crate::table::{InternalIterator, MergingIterator, TableBuilderOptions};
 use crate::util::BtreeComparable;
 use crate::version::{FileMetaData, VersionEdit};
 use std::sync::Arc;
@@ -12,6 +12,7 @@ use std::sync::Arc;
 pub struct FlushJob<E: CompactionEngine> {
     engine: E,
     options: Arc<ImmutableDBOptions>,
+    cf_options: Arc<ColumnFamilyOptions>,
     version_edit: VersionEdit,
     mems: Vec<Arc<Memtable>>,
     meta: FileMetaData,
@@ -23,6 +24,7 @@ impl<E: CompactionEngine> FlushJob<E> {
     pub fn new(
         engine: E,
         options: Arc<ImmutableDBOptions>,
+        cf_options: Arc<ColumnFamilyOptions>,
         mems: Vec<Arc<Memtable>>,
         comparator: InternalKeyComparator,
         cf_id: u32,
@@ -42,6 +44,17 @@ impl<E: CompactionEngine> FlushJob<E> {
             cf_id,
             meta,
             comparator,
+            cf_options,
+        }
+    }
+
+    fn new_merging_iterator(&self, mems: &[Arc<Memtable>]) -> Box<dyn InternalIterator> {
+        if mems.len() == 1 {
+            return mems[0].new_iterator();
+        } else {
+            let iters = mems.iter().map(|mem| mem.new_iterator()).collect();
+            let iter = MergingIterator::new(iters, mems[0].get_comparator());
+            Box::new(iter)
         }
     }
 
@@ -54,8 +67,8 @@ impl<E: CompactionEngine> FlushJob<E> {
         build_opts.compression_type = CompressionType::NoCompression;
         build_opts.target_file_size = 0;
         build_opts.internal_comparator = self.comparator.clone();
-        let mut builder = self.options.factory.new_builder(&build_opts, file)?;
-        let mut iter = self.engine.new_merging_iterator(&self.mems);
+        let mut builder = self.cf_options.factory.new_builder(&build_opts, file)?;
+        let mut iter = self.new_merging_iterator(&self.mems);
         iter.seek_to_first();
         let mut compact_iter = CompactionIter::new(
             iter,

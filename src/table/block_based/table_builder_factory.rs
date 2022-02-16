@@ -8,8 +8,15 @@ use crate::table::{
 use async_trait::async_trait;
 use std::sync::Arc;
 
+#[derive(Default)]
 pub struct BlockBasedTableFactory {
     opts: BlockBasedTableOptions,
+}
+
+impl BlockBasedTableFactory {
+    pub fn new(opts: BlockBasedTableOptions) -> Self {
+        Self { opts }
+    }
 }
 
 #[async_trait]

@@ -1,9 +1,7 @@
 use crate::common::{
     make_current_file, make_descriptor_file_name, parse_file_name, DBFileType, Error, FileSystem,
-    InternalKeyComparator, Result,
+    Result,
 };
-use crate::memtable::Memtable;
-use crate::table::{InternalIterator, MergingIterator};
 use futures::channel::mpsc::UnboundedSender;
 use futures::channel::oneshot::{channel as once_channel, Sender as OnceSender};
 
@@ -16,6 +14,8 @@ use futures::SinkExt;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+const MAX_BATCH_SIZE: usize = 128;
 
 pub struct Manifest {
     log: Option<Box<LogWriter>>,
@@ -113,12 +113,9 @@ impl Manifest {
     }
 
     async fn write_snapshot(&mut self, writer: &mut LogWriter) -> Result<()> {
-        let (versions, comparator) = {
+        let versions = {
             let version_set = self.version_set.lock().unwrap();
-            (
-                version_set.get_column_family_versions(),
-                version_set.get_comparator_name().to_string(),
-            )
+            version_set.get_column_family_versions()
         };
         for version in versions {
             let mut record = Vec::new();
@@ -127,7 +124,7 @@ impl Manifest {
                 edit.column_family_name = version.get_cf_name().to_string();
                 edit.column_family = version.get_cf_id() as u32;
                 edit.is_column_family_add = true;
-                edit.comparator = comparator.clone();
+                edit.comparator_name = version.get_comparator_name().to_string();
                 if !edit.encode_to(&mut record) {
                     return Err(Error::CompactionError(format!(
                         "write snapshot failed because encode failed"
@@ -179,9 +176,16 @@ impl ManifestWriter {
         }
     }
 
-    pub fn batch(&mut self, mut task: ManifestTask) {
+    pub fn batch(&mut self, mut task: ManifestTask) -> bool {
+        let mut need_apply = self.edits.len() > MAX_BATCH_SIZE;
+        if task.edits.len() == 1
+            && (task.edits[0].is_column_family_add || task.edits[0].is_column_family_drop)
+        {
+            need_apply = true;
+        }
         self.edits.append(&mut task.edits);
         self.cbs.push(task.cb);
+        need_apply
     }
 
     pub async fn apply(&mut self) {
@@ -202,24 +206,30 @@ impl ManifestWriter {
 }
 
 pub struct ManifestTask {
-    edits: Vec<VersionEdit>,
-    cb: OnceSender<Result<()>>,
+    pub edits: Vec<VersionEdit>,
+    pub cb: OnceSender<Result<()>>,
 }
 
 #[derive(Clone)]
-pub struct ManifestEngine {
+pub struct ManifestScheduler {
     sender: UnboundedSender<ManifestTask>,
-    comparator: InternalKeyComparator,
+    version_sets: Arc<Mutex<VersionSet>>,
 }
 
-impl ManifestEngine {
-    pub fn new(sender: UnboundedSender<ManifestTask>, comparator: InternalKeyComparator) -> Self {
-        Self { sender, comparator }
+impl ManifestScheduler {
+    pub fn new(
+        sender: UnboundedSender<ManifestTask>,
+        version_sets: Arc<Mutex<VersionSet>>,
+    ) -> Self {
+        Self {
+            sender,
+            version_sets,
+        }
     }
 }
 
 #[async_trait::async_trait]
-impl CompactionEngine for ManifestEngine {
+impl CompactionEngine for ManifestScheduler {
     async fn apply(&mut self, edits: Vec<VersionEdit>) -> Result<()> {
         let (cb, rx) = once_channel();
         let task = ManifestTask { edits, cb };
@@ -235,16 +245,6 @@ impl CompactionEngine for ManifestEngine {
             ))
         })?;
         x
-    }
-
-    fn new_merging_iterator(&self, mems: &[Arc<Memtable>]) -> Box<dyn InternalIterator> {
-        if mems.len() == 1 {
-            return mems[0].new_iterator();
-        } else {
-            let iters = mems.iter().map(|mem| mem.new_iterator()).collect();
-            let iter = MergingIterator::new(iters, self.comparator.clone());
-            Box::new(iter)
-        }
     }
 }
 

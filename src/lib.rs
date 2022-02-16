@@ -11,9 +11,18 @@ mod options;
 mod table;
 mod util;
 mod version;
+mod wal;
 mod write_batch;
 
+pub use common::{
+    Error, FileSystem, InternalKeyComparator, KeyComparator, Result, SliceTransform,
+    SyncPoxisFileSystem,
+};
 pub use db::*;
+pub use options::*;
+pub use table::{
+    BlockBasedTableFactory, BlockBasedTableOptions, FilterBlockFactory, FullFilterBlockFactory,
+};
 
 #[cfg(test)]
 mod tests {

@@ -1,14 +1,14 @@
 use crate::common::{
     make_log_file, parse_file_name, DBFileType, Error, InternalKeyComparator, Result,
 };
-use crate::options::{ColumnFamilyDescriptor, ImmutableDBOptions};
+use crate::options::{ColumnFamilyDescriptor, DBOptions, ImmutableDBOptions};
 use crate::version::{KernelNumberContext, SuperVersion, VersionSet};
 use futures::channel::mpsc::unbounded;
 use std::path::PathBuf;
 
 use crate::common::format::ValueType;
 use crate::log::LogReader;
-use crate::manifest::{Manifest, ManifestEngine, ManifestWriter};
+use crate::manifest::{Manifest, ManifestScheduler, ManifestWriter};
 use crate::memtable::Memtable;
 use crate::write_batch::{ReadOnlyWriteBatch, WriteBatchItem};
 use futures::StreamExt;
@@ -44,19 +44,29 @@ pub struct Engine {
     pool: Arc<ThreadPool<TaskCell>>,
     options: Arc<ImmutableDBOptions>,
     version_cache: Vec<Option<Arc<SuperVersion>>>,
+    manifest_scheduler: ManifestScheduler,
 }
 
 impl Engine {
-    async fn recover(
-        other_pool: Option<Arc<ThreadPool<TaskCell>>>,
+    pub async fn open(
+        db_options: DBOptions,
         cfs: Vec<ColumnFamilyDescriptor>,
-        db_options: Arc<ImmutableDBOptions>,
+        other_pool: Option<Arc<ThreadPool<TaskCell>>>,
     ) -> Result<Self> {
-        let manifest = Manifest::recover(&cfs, &db_options).await?;
+        Self::recover(db_options, cfs, other_pool).await
+    }
+
+    async fn recover(
+        db_options: DBOptions,
+        cfs: Vec<ColumnFamilyDescriptor>,
+        other_pool: Option<Arc<ThreadPool<TaskCell>>>,
+    ) -> Result<Self> {
+        let immutable_options = Arc::new(db_options.into());
+        let manifest = Manifest::recover(&cfs, &immutable_options).await?;
         let version_set = manifest.get_version_set();
-        let files = db_options
+        let files = immutable_options
             .fs
-            .list_files(PathBuf::from(db_options.db_path.clone()))?;
+            .list_files(PathBuf::from(immutable_options.db_path.clone()))?;
         let mut logs = vec![];
         for f in files {
             let fname = f
@@ -76,22 +86,25 @@ impl Engine {
         let pool = other_pool.unwrap_or_else(|| {
             let mut builder = PoolBuilder::new("rocksdb");
             let pool = builder
-                .max_thread_count(db_options.max_background_jobs)
+                .max_thread_count(immutable_options.max_background_jobs)
                 .build_multilevel_future_pool();
             Arc::new(pool)
         });
+        let manifest_scheduler =
+            Self::run_manifest_job(&pool, version_set.clone(), Box::new(manifest))?;
         let mut engine = Engine {
             version_set,
             kernel,
             pool,
-            options: db_options,
+            options: immutable_options,
             version_cache: vec![],
+            manifest_scheduler,
         };
         engine.recover_log(logs).await?;
         Ok(engine)
     }
 
-    pub fn get_super_version(&mut self, cf: u32) -> Result<Arc<SuperVersion>> {
+    fn get_super_version(&mut self, cf: u32) -> Result<Arc<SuperVersion>> {
         let idx = cf as usize;
         while idx >= self.version_cache.len() {
             self.version_cache.push(None);
@@ -181,21 +194,23 @@ impl Engine {
 
     fn run_manifest_job(
         pool: &ThreadPool<TaskCell>,
-        comparator: InternalKeyComparator,
+        versions: Arc<Mutex<VersionSet>>,
         manifest: Box<Manifest>,
-    ) -> Result<ManifestEngine> {
+    ) -> Result<ManifestScheduler> {
         let (tx, mut rx) = unbounded();
         let mut writer = ManifestWriter::new(manifest);
         pool.spawn(async move {
             while let Some(x) = rx.next().await {
                 writer.batch(x);
                 while let Some(x) = rx.try_next().unwrap() {
-                    writer.batch(x);
+                    if writer.batch(x) {
+                        break;
+                    }
                 }
                 writer.apply().await;
             }
         });
-        let engine = ManifestEngine::new(tx, comparator);
+        let engine = ManifestScheduler::new(tx, versions);
         Ok(engine)
     }
 }

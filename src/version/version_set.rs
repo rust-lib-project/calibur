@@ -1,4 +1,4 @@
-use crate::common::{Error, FileSystem, InternalKeyComparator, KeyComparator, Result};
+use crate::common::{Error, FileSystem, KeyComparator, Result};
 use crate::log::LogReader;
 use crate::memtable::Memtable;
 use crate::options::{ColumnFamilyDescriptor, ColumnFamilyOptions, ImmutableDBOptions};
@@ -59,7 +59,6 @@ impl KernelNumberContext {
 pub struct VersionSet {
     kernel: Arc<KernelNumberContext>,
     column_family_set: Vec<Option<ColumnFamily>>,
-    comparator: InternalKeyComparator,
     fs: Arc<dyn FileSystem>,
 }
 
@@ -92,10 +91,11 @@ impl VersionSet {
                     ColumnFamily::new(
                         edit.column_family as usize,
                         edit.column_family_name.clone(),
-                        Memtable::new(kernel.new_memtable_number(), options.comparator.clone()),
-                        options.comparator.clone(),
+                        Memtable::new(kernel.new_memtable_number(), cf_opt.comparator.clone()),
+                        cf_opt.comparator.clone(),
                         Arc::new(Version::new(
                             edit.column_family,
+                            cf_opt.comparator.name().to_string(),
                             edit.column_family_name.clone(),
                             vec![],
                         )),
@@ -155,7 +155,6 @@ impl VersionSet {
         Ok(VersionSet {
             kernel,
             column_family_set,
-            comparator: options.comparator.clone(),
             fs: options.fs.clone(),
         })
     }
@@ -195,23 +194,25 @@ impl VersionSet {
         None
     }
 
-    pub fn get_comparator_name(&self) -> &str {
-        self.comparator.name()
-    }
-
-    pub fn create_column_family(&mut self, edit: VersionEdit) -> Result<Arc<Version>> {
+    pub fn create_column_family(&mut self, mut edit: VersionEdit) -> Result<Arc<Version>> {
+        let cf_opt = edit.cf_options.options.take().unwrap();
         let id = edit.column_family as usize;
         let name = edit.column_family_name.clone();
-        let m = Memtable::new(self.kernel.new_memtable_number(), self.comparator.clone());
+        let m = Memtable::new(self.kernel.new_memtable_number(), cf_opt.comparator.clone());
         let log_number = edit.log_number;
-        let new_version = Arc::new(Version::new(edit.column_family, name.clone(), vec![edit]));
+        let new_version = Arc::new(Version::new(
+            edit.column_family,
+            name.clone(),
+            cf_opt.comparator.name().to_string(),
+            vec![edit],
+        ));
         let mut cf = ColumnFamily::new(
             id,
             name,
             m,
-            self.comparator.clone(),
+            cf_opt.comparator.clone(),
             new_version.clone(),
-            ColumnFamilyOptions::default(),
+            cf_opt,
         );
         cf.set_log_number(log_number);
         while self.column_family_set.len() <= id {

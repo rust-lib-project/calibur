@@ -8,6 +8,7 @@ pub struct Memtable {
     list: Skiplist,
     mem_next_logfile_number: AtomicU64,
     id: u64,
+    comparator: InternalKeyComparator,
 }
 
 pub struct MemIterator {
@@ -17,7 +18,8 @@ pub struct MemIterator {
 impl Memtable {
     pub fn new(id: u64, comparator: InternalKeyComparator) -> Self {
         Self {
-            list: Skiplist::with_capacity(comparator, 4 * 1024 * 1024),
+            list: Skiplist::with_capacity(comparator.clone(), 4 * 1024 * 1024),
+            comparator,
             mem_next_logfile_number: AtomicU64::new(0),
             id,
         }
@@ -26,6 +28,10 @@ impl Memtable {
     pub fn new_iterator(&self) -> Box<dyn InternalIterator> {
         let iter = self.list.iter();
         Box::new(MemIterator { inner: iter })
+    }
+
+    pub fn get_comparator(&self) -> InternalKeyComparator {
+        self.comparator.clone()
     }
 
     pub fn add(&self, key: &[u8], value: &[u8], sequence: u64, tp: ValueType) {
