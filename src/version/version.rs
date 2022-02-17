@@ -1,6 +1,6 @@
 use crate::memtable::Memtable;
 use crate::version::version_storage_info::VersionStorageInfo;
-use crate::version::{FileMetaData, VersionEdit};
+use crate::version::{FileMetaData, TableFile};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -42,33 +42,33 @@ pub struct Version {
 }
 
 impl Version {
-    pub fn new(cf_id: u32, cf_name: String, comparator: String, edits: Vec<VersionEdit>) -> Self {
-        let mut log_number = 0;
-        for e in &edits {
-            log_number = std::cmp::max(log_number, e.log_number);
-        }
+    pub fn new(
+        cf_id: u32,
+        cf_name: String,
+        comparator: String,
+        tables: Vec<Arc<TableFile>>,
+    ) -> Self {
         Version {
-            storage: VersionStorageInfo::new(edits),
+            storage: VersionStorageInfo::new(tables),
             cf_id,
             cf_name,
-            log_number,
+            log_number: 0,
             comparator,
         }
     }
 
-    pub fn apply(&self, edits: Vec<VersionEdit>) -> Self {
-        let mut log_number = self.log_number;
-        for e in &edits {
-            if e.has_log_number {
-                log_number = std::cmp::max(log_number, e.log_number);
-            }
-        }
-        let info = self.storage.apply(edits);
+    pub fn apply(
+        &self,
+        to_add: Vec<Arc<TableFile>>,
+        to_delete: Vec<Arc<TableFile>>,
+        log_number: u64,
+    ) -> Self {
+        let storage = self.storage.apply(to_add, to_delete);
         Version {
-            storage: info,
+            storage,
             cf_id: self.cf_id,
             cf_name: self.cf_name.clone(),
-            log_number,
+            log_number: std::cmp::max(self.log_number, log_number),
             comparator: self.comparator.clone(),
         }
     }

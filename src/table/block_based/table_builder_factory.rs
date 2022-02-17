@@ -6,7 +6,6 @@ use crate::table::{
     TableBuilder, TableBuilderOptions, TableFactory, TableReader, TableReaderOptions,
 };
 use async_trait::async_trait;
-use std::sync::Arc;
 
 #[derive(Default)]
 pub struct BlockBasedTableFactory {
@@ -29,9 +28,9 @@ impl TableFactory for BlockBasedTableFactory {
         &self,
         opts: &TableReaderOptions,
         reader: Box<RandomAccessFileReader>,
-    ) -> crate::common::Result<Arc<dyn TableReader>> {
+    ) -> crate::common::Result<Box<dyn TableReader>> {
         let reader = BlockBasedTable::open(opts, self.opts.clone(), reader).await?;
-        Ok(Arc::new(reader))
+        Ok(Box::new(reader))
     }
 
     fn new_builder(

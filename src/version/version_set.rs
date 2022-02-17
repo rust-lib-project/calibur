@@ -1,9 +1,10 @@
-use crate::common::{Error, FileSystem, KeyComparator, Result};
+use crate::common::{make_table_file_name, Error, FileSystem, KeyComparator, Result};
 use crate::log::LogReader;
 use crate::memtable::Memtable;
 use crate::options::{ColumnFamilyDescriptor, ColumnFamilyOptions, ImmutableDBOptions};
+use crate::table::TableReaderOptions;
 use crate::version::column_family::ColumnFamily;
-use crate::version::{SuperVersion, Version, VersionEdit};
+use crate::version::{FileMetaData, SuperVersion, TableFile, Version, VersionEdit};
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::{atomic, Arc};
@@ -89,7 +90,7 @@ impl VersionSet {
                 cfs.insert(
                     edit.column_family,
                     ColumnFamily::new(
-                        edit.column_family as usize,
+                        edit.column_family,
                         edit.column_family_name.clone(),
                         Memtable::new(kernel.new_memtable_number(), cf_opt.comparator.clone()),
                         cf_opt.comparator.clone(),
@@ -121,7 +122,9 @@ impl VersionSet {
         for (cf_id, edit) in edits {
             if let Some(mut cf) = cfs.remove(&cf_id) {
                 let version = cf.get_version();
-                for e in &edit {
+                let mut files_by_id: HashMap<u64, FileMetaData> = HashMap::new();
+                let mut max_log_number = 0;
+                for e in edit {
                     if e.has_prev_log_number {
                         has_prev_log_number = true;
                         prev_log_number = e.prev_log_number;
@@ -134,8 +137,31 @@ impl VersionSet {
                         has_last_sequence = true;
                         last_sequence = e.last_sequence;
                     }
+                    max_log_number = std::cmp::max(max_log_number, e.log_number);
+                    for m in e.deleted_files {
+                        files_by_id.remove(&m.id());
+                    }
+                    for m in e.add_files {
+                        files_by_id.insert(m.id(), m);
+                    }
                 }
-                let new_version = version.apply(edit);
+                let mut tables = vec![];
+                for (_, m) in files_by_id {
+                    let fname = make_table_file_name(&options.db_path, m.id());
+                    let file = options.fs.open_random_access_file(fname.clone())?;
+                    let mut read_opts = TableReaderOptions::default();
+                    read_opts.file_size = m.fd.file_size as usize;
+                    read_opts.level = m.level;
+                    read_opts.largest_seqno = m.fd.largest_seqno;
+                    let cf_opts = cf.get_options();
+                    read_opts.internal_comparator = cf_opts.comparator.clone();
+                    read_opts.prefix_extractor = cf_opts.prefix_extractor.clone();
+                    let table_reader = cf_opts.factory.open_reader(&read_opts, file).await?;
+                    let table =
+                        Arc::new(TableFile::new(m, table_reader, options.fs.clone(), fname));
+                    tables.push(table);
+                }
+                let new_version = version.apply(tables, vec![], max_log_number);
                 cf.install_version(vec![], new_version);
                 while cf_id as usize >= column_family_set.len() {
                     column_family_set.push(None);
@@ -185,6 +211,7 @@ impl VersionSet {
         }
         versions
     }
+
     pub fn get_superversion(&self, cf_id: usize) -> Option<Arc<SuperVersion>> {
         if cf_id < self.column_family_set.len() {
             if let Some(cf) = self.column_family_set[cf_id].as_ref() {
@@ -194,9 +221,19 @@ impl VersionSet {
         None
     }
 
+    pub fn get_column_family_options(&self) -> Vec<(u32, Arc<ColumnFamilyOptions>)> {
+        let mut options = vec![];
+        for c in self.column_family_set.iter() {
+            if let Some(cf) = c {
+                options.push((cf.get_id(), cf.get_options()));
+            }
+        }
+        options
+    }
+
     pub fn create_column_family(&mut self, mut edit: VersionEdit) -> Result<Arc<Version>> {
         let cf_opt = edit.cf_options.options.take().unwrap();
-        let id = edit.column_family as usize;
+        let id = edit.column_family;
         let name = edit.column_family_name.clone();
         let m = Memtable::new(self.kernel.new_memtable_number(), cf_opt.comparator.clone());
         let log_number = edit.log_number;
@@ -204,7 +241,7 @@ impl VersionSet {
             edit.column_family,
             name.clone(),
             cf_opt.comparator.name().to_string(),
-            vec![edit],
+            vec![],
         ));
         let mut cf = ColumnFamily::new(
             id,
@@ -215,10 +252,10 @@ impl VersionSet {
             cf_opt,
         );
         cf.set_log_number(log_number);
-        while self.column_family_set.len() <= id {
+        while self.column_family_set.len() <= id as usize {
             self.column_family_set.push(None);
         }
-        self.column_family_set[id] = Some(cf);
+        self.column_family_set[id as usize] = Some(cf);
         Ok(new_version)
     }
 

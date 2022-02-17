@@ -5,7 +5,6 @@ use crate::compaction::CompactionEngine;
 use crate::memtable::Memtable;
 use crate::options::{ColumnFamilyOptions, ImmutableDBOptions};
 use crate::table::{InternalIterator, MergingIterator, TableBuilderOptions};
-use crate::util::BtreeComparable;
 use crate::version::{FileMetaData, VersionEdit};
 use std::sync::Arc;
 

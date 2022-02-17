@@ -1,30 +1,25 @@
 use crate::util::{BTree, BtreeComparable, PageIterator};
-use crate::version::{FileMetaData, VersionEdit};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use crate::version::{FileMetaData, TableFile};
+use std::sync::Arc;
 
 const MAX_BTREE_PAGE_SIZE: usize = 128;
 
 #[derive(Clone, Default)]
 pub struct VersionStorageInfo {
-    level0: Vec<FileMetaData>,
-    base_level: Vec<BTree<FileMetaData>>,
-
-    // only used for delete
-    files_by_id: Arc<Mutex<HashMap<u64, FileMetaData>>>,
+    level0: Vec<Arc<TableFile>>,
+    base_level: Vec<BTree<Arc<TableFile>>>,
 }
 
 impl VersionStorageInfo {
-    pub fn new(edits: Vec<VersionEdit>) -> Self {
+    pub fn new(to_add: Vec<Arc<TableFile>>) -> Self {
         let info = VersionStorageInfo {
             level0: vec![],
             base_level: vec![],
-            files_by_id: Arc::new(Mutex::new(HashMap::default())),
         };
-        if edits.is_empty() {
+        if to_add.is_empty() {
             info
         } else {
-            info.apply(edits)
+            info.apply(to_add, vec![])
         }
     }
 
@@ -35,7 +30,7 @@ impl VersionStorageInfo {
     pub fn scan<F: FnMut(&FileMetaData)>(&self, mut consumer: F, level: usize) {
         if level == 0 {
             for f in &self.level0 {
-                consumer(f);
+                consumer(&f.meta);
             }
         } else {
             if level >= self.base_level.len() + 1 {
@@ -45,38 +40,30 @@ impl VersionStorageInfo {
             iter.seek_to_first();
             while iter.valid() {
                 let r = iter.record().unwrap();
-                consumer(&r);
+                consumer(&r.meta);
             }
         }
     }
 
-    pub fn apply(&self, mut edits: Vec<VersionEdit>) -> Self {
-        let mut to_deletes = vec![vec![]; self.base_level.len() + 1];
-        let mut to_add = vec![vec![]; self.base_level.len() + 1];
-        let mut files_index = self.files_by_id.lock().unwrap();
-        for e in &mut edits {
-            for f in e.add_files.drain(..) {
-                while to_add.len() <= f.level as usize {
-                    to_add.push(vec![]);
+    pub fn apply(&self, to_add: Vec<Arc<TableFile>>, to_delete: Vec<Arc<TableFile>>) -> Self {
+        let mut to_delete_level = vec![vec![]; self.base_level.len()];
+        let mut to_add_level = vec![vec![]; self.base_level.len()];
+        let mut level0 = vec![];
+        let mut level0_delete = vec![];
+        for f in to_delete {
+            if f.meta.level == 0 {
+                level0_delete.push(f);
+            } else {
+                let idx = f.meta.level as usize - 1;
+                while to_delete_level.len() <= idx {
+                    to_delete_level.push(vec![]);
                 }
-                files_index.insert(f.id(), f.clone());
-                to_add[f.level as usize].push(f);
-            }
-            for f in e.deleted_files.drain(..) {
-                while to_deletes.len() <= f.level as usize {
-                    to_deletes.push(vec![]);
-                }
-                if let Some(old_f) = files_index.remove(&f.id()) {
-                    to_deletes[f.level as usize].push(old_f);
-                }
+                to_delete_level[idx].push(f);
             }
         }
-        let mut level0 = vec![];
-        let mut base_level = vec![];
-
         for f in &self.level0 {
             let mut need_keep = true;
-            for x in &to_deletes[0] {
+            for x in &level0_delete {
                 if x.id() == f.id() {
                     need_keep = false;
                     break;
@@ -86,42 +73,41 @@ impl VersionStorageInfo {
                 level0.push(f.clone());
             }
         }
-        for f in to_add[0].drain(..) {
-            level0.push(f);
-        }
-        level0.sort_by(|a, b| a.fd.smallest_seqno.cmp(&b.fd.smallest_seqno));
-
-        for i in 0..self.base_level.len() {
-            if to_add[i + 1].is_empty() && to_deletes[i + 1].is_empty() {
-                base_level.push(self.base_level[i].clone());
-                continue;
+        for f in to_add {
+            if f.meta.level == 0 {
+                level0.push(f);
+            } else {
+                let idx = f.meta.level as usize - 1;
+                while to_add_level.len() <= idx {
+                    to_add_level.push(vec![]);
+                }
+                to_add_level[idx].push(f);
             }
-            base_level.push(self.base_level[i].replace(
-                std::mem::take(&mut to_deletes[i + 1]),
-                std::mem::take(&mut to_add[i + 1]),
-            ));
-        }
-        let l = std::cmp::max(to_add.len(), to_deletes.len()) - 1;
-        for i in self.base_level.len()..l {
-            let mut tree = BTree::new(MAX_BTREE_PAGE_SIZE);
-            let add = if i + 1 < to_add.len() && !to_add[i + 1].is_empty() {
-                std::mem::take(&mut to_add[i + 1])
-            } else {
-                vec![]
-            };
-            let del = if i + 1 < to_deletes.len() && !to_deletes[i + 1].is_empty() {
-                std::mem::take(&mut to_deletes[i + 1])
-            } else {
-                vec![]
-            };
-            tree = tree.replace(del, add);
-            base_level.push(tree);
         }
 
-        Self {
-            level0,
-            base_level,
-            files_by_id: self.files_by_id.clone(),
+        let l = std::cmp::max(to_delete_level.len(), to_add_level.len());
+        let l = std::cmp::max(l, self.base_level.len());
+        let mut base_level = vec![];
+        for i in 0..l {
+            let add = if i < to_add_level.len() && !to_add_level[i].is_empty() {
+                std::mem::take(&mut to_add_level[i])
+            } else {
+                vec![]
+            };
+            let del = if i + 1 < to_delete_level.len() && !to_delete_level[i].is_empty() {
+                std::mem::take(&mut to_delete_level[i])
+            } else {
+                vec![]
+            };
+            if add.is_empty() && del.is_empty() && i < self.base_level.len() {
+                base_level.push(self.base_level[i].clone());
+            } else if i < self.base_level.len() {
+                base_level.push(self.base_level[i].replace(del, add));
+            } else {
+                base_level.push(BTree::new(MAX_BTREE_PAGE_SIZE));
+            }
         }
+
+        Self { level0, base_level }
     }
 }

@@ -16,7 +16,7 @@ pub struct ColumnFamily {
     super_version_number: Arc<AtomicU64>,
     version: Arc<Version>,
     comparator: InternalKeyComparator,
-    id: usize,
+    id: u32,
     log_number: u64,
     name: String,
     options: Arc<ColumnFamilyOptions>,
@@ -24,7 +24,7 @@ pub struct ColumnFamily {
 
 impl ColumnFamily {
     pub fn new(
-        id: usize,
+        id: u32,
         name: String,
         m: Memtable,
         comparator: InternalKeyComparator,
@@ -60,7 +60,11 @@ impl ColumnFamily {
         self.version.clone()
     }
 
-    pub fn get_id(&self) -> usize {
+    pub fn get_options(&self) -> Arc<ColumnFamilyOptions> {
+        self.options.clone()
+    }
+
+    pub fn get_id(&self) -> u32 {
         self.id
     }
 

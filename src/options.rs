@@ -1,6 +1,6 @@
-use crate::common::{FileSystem, InternalKeyComparator};
+use crate::common::{FileSystem, InternalKeyComparator, InternalKeySliceTransform};
 use crate::table::{BlockBasedTableFactory, TableFactory};
-use crate::{KeyComparator, SyncPoxisFileSystem};
+use crate::{KeyComparator, SliceTransform, SyncPoxisFileSystem};
 use std::sync::Arc;
 
 pub struct ImmutableDBOptions {
@@ -16,6 +16,7 @@ pub struct ColumnFamilyOptions {
     pub max_write_buffer_number: usize,
     pub factory: Arc<dyn TableFactory>,
     pub comparator: InternalKeyComparator,
+    pub prefix_extractor: Arc<dyn SliceTransform>,
 }
 
 impl PartialEq for ColumnFamilyOptions {
@@ -36,6 +37,7 @@ impl Default for ColumnFamilyOptions {
             max_write_buffer_number: 1,
             factory: Arc::new(BlockBasedTableFactory::default()),
             comparator: InternalKeyComparator::default(),
+            prefix_extractor: Arc::new(InternalKeySliceTransform::default()),
         }
     }
 }

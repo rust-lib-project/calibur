@@ -1,6 +1,6 @@
 use crate::common::{
-    make_current_file, make_descriptor_file_name, parse_file_name, DBFileType, Error, FileSystem,
-    Result,
+    make_current_file, make_descriptor_file_name, make_table_file_name, parse_file_name,
+    DBFileType, Error, FileSystem, Result,
 };
 use futures::channel::mpsc::UnboundedSender;
 use futures::channel::oneshot::{channel as once_channel, Sender as OnceSender};
@@ -8,8 +8,9 @@ use futures::channel::oneshot::{channel as once_channel, Sender as OnceSender};
 use crate::compaction::CompactionEngine;
 use crate::log::{LogReader, LogWriter};
 use crate::options::{ColumnFamilyDescriptor, ImmutableDBOptions};
-use crate::util::BtreeComparable;
-use crate::version::{KernelNumberContext, Version, VersionEdit, VersionSet};
+use crate::table::TableReaderOptions;
+use crate::version::{KernelNumberContext, TableFile, Version, VersionEdit, VersionSet};
+use crate::ColumnFamilyOptions;
 use futures::SinkExt;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -20,10 +21,13 @@ const MAX_BATCH_SIZE: usize = 128;
 pub struct Manifest {
     log: Option<Box<LogWriter>>,
     versions: HashMap<u32, Arc<Version>>,
+    cf_options: HashMap<u32, Arc<ColumnFamilyOptions>>,
     version_set: Arc<Mutex<VersionSet>>,
     kernel: Arc<KernelNumberContext>,
     options: Arc<ImmutableDBOptions>,
     manifest_file_number: u64,
+    // only used for delete
+    files_by_id: HashMap<u64, Arc<TableFile>>,
 }
 
 impl Manifest {
@@ -38,12 +42,20 @@ impl Manifest {
             .open_sequencial_file(PathBuf::from(manifest_path))?;
         let log_reader = LogReader::new(reader);
         let version_set = VersionSet::read_recover(cfs, Box::new(log_reader), db_options).await?;
+        let kernal = version_set.get_kernel();
+
         let cf_versions = version_set.get_column_family_versions();
         let mut versions = HashMap::default();
-        let kernal = version_set.get_kernel();
         for v in cf_versions {
             versions.insert(v.get_cf_id(), v);
         }
+
+        let mut cf_options = HashMap::default();
+        let opts = version_set.get_column_family_options();
+        for (cf, opt) in opts {
+            cf_options.insert(cf, opt);
+        }
+
         Ok(Self {
             log: None,
             version_set: Arc::new(Mutex::new(version_set)),
@@ -51,6 +63,8 @@ impl Manifest {
             versions,
             kernel: kernal,
             options: db_options.clone(),
+            cf_options,
+            files_by_id: Default::default(),
         })
     }
 
@@ -77,33 +91,64 @@ impl Manifest {
             self.log.as_mut().unwrap().add_record(&data).await?;
             data.clear();
         }
-        let mut versions = HashMap::<u32, Vec<VersionEdit>>::new();
+        let mut edits_by_cf = HashMap::<u32, Vec<VersionEdit>>::new();
         for e in edits {
-            match versions.get_mut(&e.column_family) {
+            match edits_by_cf.get_mut(&e.column_family) {
                 Some(v) => {
                     v.push(e);
                 }
                 None => {
                     let cf = e.column_family;
                     let v = vec![e];
-                    versions.insert(cf, v);
+                    edits_by_cf.insert(cf, v);
                 }
             }
         }
-        for (cf, mut edits) in versions {
+        for (cf, mut edits) in edits_by_cf {
             if edits.len() == 1 && edits[0].is_column_family_add {
                 let mut version_set = self.version_set.lock().unwrap();
                 let version = version_set.create_column_family(edits.pop().unwrap())?;
                 self.versions.insert(cf, version);
                 continue;
             }
+            // TODO: get options from version_set
+            let opts = self.cf_options.get(&cf).unwrap();
             let version = self.versions.get(&cf).unwrap();
             let mut mems = vec![];
-            for e in &mut edits {
-                mems.append(&mut e.mems_deleted)
-            }
+            let mut to_add = vec![];
+            let mut to_delete = vec![];
             // Do not apply version edits with holding a mutex.
-            let new_version = version.apply(edits);
+            let mut log_number = 0;
+            for mut e in edits {
+                if e.has_log_number {
+                    log_number = std::cmp::max(log_number, e.log_number);
+                }
+                mems.append(&mut e.mems_deleted);
+                for m in e.deleted_files {
+                    if let Some(f) = self.files_by_id.remove(&m.fd.get_number()) {
+                        to_delete.push(f);
+                    }
+                }
+                for m in e.add_files {
+                    let fname = make_table_file_name(&self.options.db_path, m.id());
+                    let file = self.options.fs.open_random_access_file(fname.clone())?;
+                    let mut read_opts = TableReaderOptions::default();
+                    read_opts.file_size = m.fd.file_size as usize;
+                    read_opts.level = m.level;
+                    read_opts.largest_seqno = m.fd.largest_seqno;
+                    read_opts.internal_comparator = opts.comparator.clone();
+                    read_opts.prefix_extractor = opts.prefix_extractor.clone();
+                    let table_reader = opts.factory.open_reader(&read_opts, file).await?;
+                    let table = Arc::new(TableFile::new(
+                        m,
+                        table_reader,
+                        self.options.fs.clone(),
+                        fname,
+                    ));
+                    to_add.push(table);
+                }
+            }
+            let new_version = version.apply(to_add, to_delete, log_number);
             let mut version_set = self.version_set.lock().unwrap();
             let version = version_set.install_version(cf, mems, new_version)?;
             self.versions.insert(cf, version);

@@ -346,14 +346,16 @@ impl FileSystem for SyncPoxisFileSystem {
         Ok(Box::new(writer))
     }
 
-    fn open_random_access_file(
-        &self,
-        path: PathBuf,
-        file_name: String,
-    ) -> Result<Box<RandomAccessFileReader>> {
-        let p = path.join(&file_name);
+    fn open_random_access_file(&self, p: PathBuf) -> Result<Box<RandomAccessFileReader>> {
         let f = PosixReadableFile::open(&p).map_err(|e| Error::Io(Box::new(e)))?;
-        let reader = RandomAccessFileReader::new(Box::new(f), file_name);
+        let filename = p
+            .file_name()
+            .ok_or(Error::InvalidFile(format!("path has no file name")))?
+            .to_str()
+            .ok_or(Error::InvalidFile(format!(
+                "filename is not encode by utf8"
+            )))?;
+        let reader = RandomAccessFileReader::new(Box::new(f), filename.to_string());
         Ok(Box::new(reader))
     }
 
@@ -364,6 +366,10 @@ impl FileSystem for SyncPoxisFileSystem {
             path.file_name().unwrap().to_str().unwrap().to_string(),
         );
         Ok(Box::new(reader))
+    }
+
+    fn remove(&self, path: PathBuf) -> Result<()> {
+        std::fs::remove_file(path).map_err(|e| Error::Io(Box::new(e)))
     }
 
     fn list_files(&self, path: PathBuf) -> Result<Vec<PathBuf>> {

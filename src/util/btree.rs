@@ -707,6 +707,16 @@ impl<T: ComparableRecord, P: Page<T>> BTree<T, P> {
         self.node.seek(key)
     }
 
+    pub fn add(&self, mut to_add: Vec<T>) -> Self {
+        let mut node = self.node.as_ref().clone();
+        to_add.sort_by(|a, b| a.smallest().cmp(b.smallest()));
+        node.insert(to_add);
+        Self {
+            node: Arc::new(node),
+            _phantom: PhantomData,
+        }
+    }
+
     pub fn replace(&self, mut to_del: Vec<T>, mut to_add: Vec<T>) -> Self {
         let mut node = self.node.as_ref().clone();
         if !to_del.is_empty() {

@@ -3,7 +3,7 @@ use crate::common::{Error, Result};
 use crate::util::{
     get_length_prefixed_slice, get_var_uint32, get_var_uint64, put_length_prefixed_slice,
     put_var_uint32, put_var_uint64, put_varint32varint32, put_varint32varint32varint64,
-    put_varint32varint64, put_varint64varint64, BtreeComparable,
+    put_varint32varint64, put_varint64varint64,
 };
 use crate::ColumnFamilyOptions;
 use std::fmt::{Debug, Formatter};

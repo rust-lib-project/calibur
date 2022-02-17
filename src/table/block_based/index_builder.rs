@@ -195,7 +195,7 @@ mod tests {
         r.block_on(f.append(&trailer)).unwrap();
         r.block_on(f.sync()).unwrap();
         let readfile = fs
-            .open_random_access_file(PathBuf::default(), "index_block".to_string())
+            .open_random_access_file("index_block".to_string())
             .unwrap();
         let handle = BlockHandle::new(0, data.len() as u64);
 

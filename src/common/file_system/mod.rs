@@ -61,11 +61,7 @@ pub trait FileSystem: Send + Sync {
 
     fn open_writable_file(&self, file_name: PathBuf) -> Result<Box<WritableFileWriter>>;
 
-    fn open_random_access_file(
-        &self,
-        path: PathBuf,
-        file_name: String,
-    ) -> Result<Box<RandomAccessFileReader>>;
+    fn open_random_access_file(&self, p: PathBuf) -> Result<Box<RandomAccessFileReader>>;
 
     fn open_sequencial_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>>;
 
@@ -88,6 +84,8 @@ pub trait FileSystem: Send + Sync {
         }
         Ok(data)
     }
+
+    fn remove(&self, path: PathBuf) -> Result<()>;
 
     fn list_files(&self, path: PathBuf) -> Result<Vec<PathBuf>>;
 
@@ -203,11 +201,8 @@ impl FileSystem for InMemFileSystem {
         )))
     }
 
-    fn open_random_access_file(
-        &self,
-        _: PathBuf,
-        filename: String,
-    ) -> Result<Box<RandomAccessFileReader>> {
+    fn open_random_access_file(&self, filename: PathBuf) -> Result<Box<RandomAccessFileReader>> {
+        let filename = filename.to_str().unwrap().to_string();
         let fs = self.inner.lock().unwrap();
         match fs.files.get(&filename) {
             None => return Err(Error::InvalidFile(format!("file: {} not exists", filename))),
@@ -251,6 +246,20 @@ impl FileSystem for InMemFileSystem {
             .map(|(k, _)| PathBuf::from(k.clone()))
             .collect();
         Ok(files)
+    }
+
+    fn remove(&self, f: PathBuf) -> Result<()> {
+        let filename = f
+            .file_name()
+            .ok_or(Error::InvalidFile(format!("can not convert to filename")))?
+            .to_str()
+            .ok_or(Error::InvalidFile(format!("can not convert to filename")))?;
+        let mut fs = self.inner.lock().unwrap();
+        fs.files.remove(filename).ok_or(Error::InvalidFile(format!(
+            "file [{}] not exists",
+            filename
+        )))?;
+        Ok(())
     }
 
     fn file_exist(&self, _path: PathBuf, filename: String) -> Result<bool> {

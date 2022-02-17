@@ -58,7 +58,7 @@ pub trait TableFactory: Send + Sync {
         &self,
         options: &TableReaderOptions,
         file: Box<RandomAccessFileReader>,
-    ) -> Result<Arc<dyn TableReader>>;
+    ) -> Result<Box<dyn TableReader>>;
 
     fn new_builder(
         &self,
@@ -123,12 +123,12 @@ impl Default for TableBuilderOptions {
 }
 
 pub struct TableReaderOptions {
-    prefix_extractor: Arc<dyn SliceTransform>,
-    internal_comparator: InternalKeyComparator,
-    skip_filters: bool,
-    level: u32,
-    file_size: usize,
-    largest_seqno: u64,
+    pub prefix_extractor: Arc<dyn SliceTransform>,
+    pub internal_comparator: InternalKeyComparator,
+    pub skip_filters: bool,
+    pub level: u32,
+    pub file_size: usize,
+    pub largest_seqno: u64,
 }
 
 impl Default for TableReaderOptions {
