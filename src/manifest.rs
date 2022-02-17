@@ -9,8 +9,10 @@ use crate::compaction::CompactionEngine;
 use crate::log::{LogReader, LogWriter};
 use crate::options::{ColumnFamilyDescriptor, ImmutableDBOptions};
 use crate::table::TableReaderOptions;
-use crate::version::{KernelNumberContext, TableFile, Version, VersionEdit, VersionSet};
-use crate::ColumnFamilyOptions;
+use crate::version::{
+    FileMetaData, KernelNumberContext, TableFile, Version, VersionEdit, VersionSet,
+};
+use crate::{ColumnFamilyOptions, KeyComparator};
 use futures::SinkExt;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -41,7 +43,8 @@ impl Manifest {
             .fs
             .open_sequencial_file(PathBuf::from(manifest_path))?;
         let log_reader = LogReader::new(reader);
-        let version_set = VersionSet::read_recover(cfs, Box::new(log_reader), db_options).await?;
+        let (files_by_id, version_set) =
+            Self::recover_version(cfs, Box::new(log_reader), db_options).await?;
         let kernal = version_set.get_kernel();
 
         let cf_versions = version_set.get_column_family_versions();
@@ -64,8 +67,111 @@ impl Manifest {
             kernel: kernal,
             options: db_options.clone(),
             cf_options,
-            files_by_id: Default::default(),
+            files_by_id,
         })
+    }
+
+    pub async fn recover_version(
+        cf_descriptor: &[ColumnFamilyDescriptor],
+        mut reader: Box<LogReader>,
+        options: &ImmutableDBOptions,
+    ) -> Result<(HashMap<u64, Arc<TableFile>>, VersionSet)> {
+        // let cf_options = cfs.iter().map(|d|d.options.clone()).collect();
+        let mut record = vec![];
+        let mut edits: HashMap<u32, Vec<VersionEdit>> = HashMap::default();
+        let kernel = Arc::new(KernelNumberContext::default());
+        let mut cf_options: HashMap<String, ColumnFamilyOptions> = HashMap::default();
+        for cf in cf_descriptor.iter() {
+            cf_options.insert(cf.name.clone(), cf.options.clone());
+        }
+        let mut cf_names: HashMap<u32, String> = HashMap::default();
+        while reader.read_record(&mut record).await? {
+            let mut edit = VersionEdit::default();
+            edit.decode_from(&record)?;
+            if edit.is_column_family_add {
+                edits.insert(edit.column_family, vec![]);
+                cf_names.insert(edit.column_family, edit.column_family_name);
+            } else if edit.is_column_family_drop {
+                edits.remove(&edit.column_family);
+                cf_names.remove(&edit.column_family);
+            } else {
+                if let Some(data) = edits.get_mut(&edit.column_family) {
+                    data.push(edit);
+                }
+            }
+        }
+        let mut versions = HashMap::default();
+        let mut has_prev_log_number = false;
+        let mut prev_log_number = 0;
+        let mut has_next_file_number = false;
+        let mut next_file_number = 0;
+        let mut has_last_sequence = false;
+        let mut last_sequence = 0;
+        let mut files = HashMap::default();
+        for (cf_id, edit) in edits {
+            let cf_name = cf_names.get(&cf_id).unwrap();
+            let cf_opts = cf_options
+                .remove(cf_name)
+                .unwrap_or(ColumnFamilyOptions::default());
+
+            let mut files_by_id: HashMap<u64, FileMetaData> = HashMap::new();
+            let mut max_log_number = 0;
+            for e in edit {
+                if e.has_prev_log_number {
+                    has_prev_log_number = true;
+                    prev_log_number = e.prev_log_number;
+                }
+                if e.has_next_file_number {
+                    has_next_file_number = true;
+                    next_file_number = e.next_file_number;
+                }
+                if e.has_last_sequence {
+                    has_last_sequence = true;
+                    last_sequence = e.last_sequence;
+                }
+                max_log_number = std::cmp::max(max_log_number, e.log_number);
+                for m in e.deleted_files {
+                    files_by_id.remove(&m.id());
+                }
+                for m in e.add_files {
+                    files_by_id.insert(m.id(), m);
+                }
+            }
+            let mut tables = vec![];
+            for (_, m) in files_by_id {
+                let fname = make_table_file_name(&options.db_path, m.id());
+                let file = options.fs.open_random_access_file(fname.clone())?;
+                let mut read_opts = TableReaderOptions::default();
+                read_opts.file_size = m.fd.file_size as usize;
+                read_opts.level = m.level;
+                read_opts.largest_seqno = m.fd.largest_seqno;
+                read_opts.internal_comparator = cf_opts.comparator.clone();
+                read_opts.prefix_extractor = cf_opts.prefix_extractor.clone();
+                let table_reader = cf_opts.factory.open_reader(&read_opts, file).await?;
+                let table = Arc::new(TableFile::new(m, table_reader, options.fs.clone(), fname));
+                files.insert(table.meta.id(), table.clone());
+                tables.push(table);
+            }
+            let version = Version::new(
+                cf_id,
+                cf_name.clone(),
+                cf_opts.comparator.name().to_string(),
+                tables,
+                max_log_number,
+            );
+            versions.insert(cf_id, Arc::new(version));
+        }
+        if has_prev_log_number {
+            kernel.mark_file_number_used(prev_log_number);
+        }
+        if has_next_file_number {
+            kernel.mark_file_number_used(next_file_number);
+        }
+        if has_last_sequence {
+            kernel.set_last_sequence(last_sequence);
+        }
+        let vs = VersionSet::new(cf_descriptor, kernel, options.fs.clone(), versions);
+        Ok((files, vs))
     }
 
     pub fn get_version_set(&self) -> Arc<Mutex<VersionSet>> {

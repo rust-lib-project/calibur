@@ -120,7 +120,7 @@ impl Engine {
             }
         }
         let vs = self.version_set.lock().unwrap();
-        if let Some(v) = vs.get_superversion(idx) {
+        if let Some(v) = vs.get_superversion(cf) {
             self.version_cache[idx] = Some(v.clone());
             Ok(v)
         } else {
