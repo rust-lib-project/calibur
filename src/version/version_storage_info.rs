@@ -51,6 +51,7 @@ impl VersionStorageInfo {
         let mut level0 = vec![];
         let mut level0_delete = vec![];
         for f in to_delete {
+            f.mark_removed();
             if f.meta.level == 0 {
                 level0_delete.push(f);
             } else {

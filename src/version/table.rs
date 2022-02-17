@@ -107,7 +107,8 @@ impl TableFile {
 impl Drop for TableFile {
     fn drop(&mut self) {
         if self.deleted.load(Ordering::Acquire) {
-            self.fs.remove(self.path.clone());
+            let _ = self.fs.remove(self.path.clone());
+            // TODO: log error here.
         }
     }
 }

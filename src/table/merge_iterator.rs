@@ -2,11 +2,10 @@ use crate::common::{InternalKeyComparator, KeyComparator};
 use crate::table::InternalIterator;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::rc::Rc;
 
 pub struct IteratorWrapper {
     inner: Box<dyn InternalIterator>,
-    comparator: Rc<InternalKeyComparator>,
+    comparator: InternalKeyComparator,
 }
 
 impl PartialEq<Self> for IteratorWrapper {
@@ -53,12 +52,11 @@ pub struct MergingIterator {
 
 impl MergingIterator {
     pub fn new(iters: Vec<Box<dyn InternalIterator>>, cmp: InternalKeyComparator) -> Self {
-        let comparator = Rc::new(cmp);
         let other: Vec<IteratorWrapper> = iters
             .into_iter()
             .map(|iter| IteratorWrapper {
                 inner: iter,
-                comparator: comparator.clone(),
+                comparator: cmp.clone(),
             })
             .collect();
         Self {

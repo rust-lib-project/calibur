@@ -2,13 +2,16 @@ use super::list::{IterRef, Skiplist};
 use crate::common::format::{pack_sequence_and_type, ValueType};
 use crate::common::InternalKeyComparator;
 use crate::table::InternalIterator;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub struct Memtable {
     list: Skiplist,
     mem_next_logfile_number: AtomicU64,
     id: u64,
     comparator: InternalKeyComparator,
+    pending_writes: AtomicU64,
+    pending_schedule: AtomicBool,
+    max_write_buffer_size: usize,
 }
 
 pub struct MemIterator {
@@ -16,12 +19,15 @@ pub struct MemIterator {
 }
 
 impl Memtable {
-    pub fn new(id: u64, comparator: InternalKeyComparator) -> Self {
+    pub fn new(id: u64, max_write_buffer_size: usize, comparator: InternalKeyComparator) -> Self {
         Self {
             list: Skiplist::with_capacity(comparator.clone(), 4 * 1024 * 1024),
             comparator,
+            pending_writes: AtomicU64::new(0),
             mem_next_logfile_number: AtomicU64::new(0),
             id,
+            pending_schedule: AtomicBool::new(false),
+            max_write_buffer_size,
         }
     }
 
@@ -68,6 +74,30 @@ impl Memtable {
 
     pub fn get_next_log_number(&self) -> u64 {
         self.mem_next_logfile_number.load(Ordering::Acquire)
+    }
+
+    // TODO: support write buffer manager
+    pub fn should_flush(&self) -> bool {
+        self.list.mem_size() as usize > self.max_write_buffer_size
+    }
+
+    // return true if this memtable can be scheduled flush at once
+    pub fn mark_schedule_flush(&self) -> bool {
+        self.pending_schedule.store(true, Ordering::Release);
+        self.pending_writes.load(Ordering::Acquire) == 0
+    }
+
+    pub fn mark_write_begin(&self) {
+        self.pending_writes.fetch_add(1, Ordering::SeqCst);
+    }
+
+    // return true if this memtable must be scheduled flush at once
+    pub fn mark_write_done(&self) -> bool {
+        if self.pending_writes.fetch_sub(1, Ordering::SeqCst) - 1 == 0 {
+            self.pending_schedule.load(Ordering::Acquire)
+        } else {
+            false
+        }
     }
 }
 

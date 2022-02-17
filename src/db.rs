@@ -1,40 +1,21 @@
 use crate::common::{make_log_file, parse_file_name, DBFileType, Error, Result};
 use crate::options::{ColumnFamilyDescriptor, DBOptions, ImmutableDBOptions};
-use crate::version::{KernelNumberContext, SuperVersion, VersionSet};
-use futures::channel::mpsc::{unbounded, UnboundedReceiver};
+use crate::version::{KernelNumberContext, VersionSet};
+use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::common::format::ValueType;
+use crate::compaction::{run_flush_memtable_job, FlushRequest};
 use crate::log::LogReader;
 use crate::manifest::{Manifest, ManifestScheduler, ManifestWriter};
 use crate::memtable::Memtable;
 use crate::wal::{WALScheduler, WALTask, WALWriter};
-use crate::write_batch::{ReadOnlyWriteBatch, WriteBatchItem};
-use futures::StreamExt;
+use crate::write_batch::{ReadOnlyWriteBatch, WriteBatch, WriteBatchItem};
+use futures::{SinkExt, StreamExt};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use yatp::{task::future::TaskCell, Builder as PoolBuilder, ThreadPool};
-
-pub struct Core {
-    versions: VersionSet,
-}
-
-impl Core {
-    // fn handle_write_buffer_full(&mut self) {
-    //     let cfs = self.versions.get_column_familys();
-    //     for cf in cfs {
-    //         if !cf.should_flush() {
-    //             break;
-    //         }
-    //         let old_mem = cf.get_memtable();
-    //         old_mem.set_next_log_number(logfile_number);
-    //         let mem = cf.create_memtable();
-    //         let new_cf = cf.switch_memtable(Arc::new(mem));
-    //         self.versions.set_column_family(Arc::new(new_cf));
-    //         cf.invalid_column_family();
-    //     }
-    // }
-}
 
 #[derive(Clone)]
 pub struct Engine {
@@ -42,10 +23,10 @@ pub struct Engine {
     kernel: Arc<KernelNumberContext>,
     pool: Arc<ThreadPool<TaskCell>>,
     options: Arc<ImmutableDBOptions>,
-    version_cache: Vec<Option<Arc<SuperVersion>>>,
     manifest_scheduler: ManifestScheduler,
     wal_scheduler: WALScheduler,
     stopped: Arc<AtomicBool>,
+    flush_scheduler: UnboundedSender<FlushRequest>,
 }
 
 impl Engine {
@@ -56,6 +37,44 @@ impl Engine {
     ) -> Result<Self> {
         let immutable_options = Arc::new(db_options.into());
         Self::recover(immutable_options, cfs, other_pool).await
+    }
+
+    pub async fn write(&mut self, wb: &mut WriteBatch) -> Result<()> {
+        self.write_opt(wb, false, false).await
+    }
+
+    pub async fn write_opt(
+        &mut self,
+        wb: &mut WriteBatch,
+        disable_wal: bool,
+        sync: bool,
+    ) -> Result<()> {
+        let rwb = wb.to_raw();
+        let rwb = self.wal_scheduler.send(rwb, sync, disable_wal).await?;
+        let sequence = rwb.wb.get_sequence();
+        for item in rwb.wb.iter() {
+            match item {
+                WriteBatchItem::Put { cf, key, value } => {
+                    let idx = rwb.check_memtable_cf(cf);
+                    rwb.mems[idx]
+                        .1
+                        .add(key, value, sequence, ValueType::TypeValue);
+                }
+                WriteBatchItem::Delete { cf, key } => {
+                    let idx = rwb.check_memtable_cf(cf);
+                    rwb.mems[idx].1.delete(key, sequence);
+                }
+            }
+        }
+
+        for (cf, m) in rwb.mems {
+            if m.mark_write_done() {
+                self.schedule_flush(cf, m).await;
+            }
+        }
+
+        wb.recycle(rwb.wb);
+        Ok(())
     }
 
     async fn recover(
@@ -93,40 +112,22 @@ impl Engine {
         });
         let manifest_scheduler = Self::start_manifest_job(&pool, Box::new(manifest))?;
         let (tx, rx) = unbounded();
+        let (flush_tx, flush_rx) = unbounded();
         let wal_scheduler = WALScheduler::new(tx);
         let mut engine = Engine {
             version_set,
             kernel,
             pool,
             options: immutable_options,
-            version_cache: vec![],
+            flush_scheduler: flush_tx.clone(),
             manifest_scheduler,
             wal_scheduler,
             stopped: Arc::new(AtomicBool::new(false)),
         };
         engine.recover_log(logs).await?;
-        engine.run_wal_job(rx)?;
+        engine.run_wal_job(flush_tx, rx)?;
+        engine.run_flush_job(flush_rx)?;
         Ok(engine)
-    }
-
-    fn get_super_version(&mut self, cf: u32) -> Result<Arc<SuperVersion>> {
-        let idx = cf as usize;
-        while idx >= self.version_cache.len() {
-            self.version_cache.push(None);
-        }
-        if let Some(v) = self.version_cache[idx].as_ref() {
-            if v.valid.load(Ordering::Acquire) {
-                return Ok(v.clone());
-            }
-        }
-        let vs = self.version_set.lock().unwrap();
-        if let Some(v) = vs.get_superversion(cf) {
-            self.version_cache[idx] = Some(v.clone());
-            Ok(v)
-        } else {
-            self.version_cache[idx] = None;
-            Err(Error::Other(format!("Column family {} not exist", cf)))
-        }
     }
 
     async fn recover_log(&mut self, logs: Vec<u64>) -> Result<()> {
@@ -174,8 +175,12 @@ impl Engine {
             }
         }
         if mems[idx].is_none() {
-            let v = self.get_super_version(cf)?;
-            mems.push(Some(v.mem.clone()));
+            let vs = self.version_set.lock().unwrap();
+            if let Some(mem) = vs.get_superversion(cf).map(|v| v.mem.clone()) {
+                mems.push(Some(mem));
+            } else {
+                return Err(Error::Other(format!("Column family {} not exist", cf)));
+            }
         }
         f(mems[idx].as_ref().unwrap());
         Ok(())
@@ -222,16 +227,20 @@ impl Engine {
         Ok(engine)
     }
 
-    fn run_wal_job(&self, mut rx: UnboundedReceiver<WALTask>) -> Result<()> {
+    fn run_wal_job(
+        &self,
+        flush_scheduler: UnboundedSender<FlushRequest>,
+        mut rx: UnboundedReceiver<WALTask>,
+    ) -> Result<()> {
         let mut writer = WALWriter::new(
             self.kernel.clone(),
             self.version_set.clone(),
             self.options.clone(),
+            flush_scheduler,
         )?;
         let f = async move {
-            let mut wbs = vec![];
+            let mut tasks = vec![];
             while let Some(x) = rx.next().await {
-                let mut need_sync = false;
                 match x {
                     WALTask::Write {
                         wb,
@@ -239,10 +248,9 @@ impl Engine {
                         sync,
                         disable_wal,
                     } => {
-                        wbs.push((wb, cb, disable_wal));
-                        if sync {
-                            need_sync = true;
-                        }
+                        writer.preprocess_write().await;
+                        let task = writer.batch(wb, disable_wal, sync);
+                        tasks.push((task, cb));
                     }
                     WALTask::Ingest { .. } => {
                         unimplemented!();
@@ -251,21 +259,14 @@ impl Engine {
                 while let Some(x) = rx.try_next().unwrap() {
                     match x {
                         WALTask::Write {
-                            mut wb,
+                            wb,
                             cb,
                             sync,
                             disable_wal,
                         } => {
-                            if wbs.len() == 1 {
-                                let disable_wal = wbs[0].2;
-                                writer.batch(&mut wbs[0].0, disable_wal);
-                            }
-                            let need_flush = writer.batch(&mut wb, disable_wal);
-                            if sync {
-                                need_sync = true;
-                            }
-                            wbs.push((wb, cb, disable_wal));
-                            if need_flush {
+                            let task = writer.batch(wb, disable_wal, sync);
+                            tasks.push((task, cb));
+                            if writer.should_flush() {
                                 break;
                             }
                         }
@@ -274,23 +275,18 @@ impl Engine {
                         }
                     }
                 }
-                let mut r = if wbs.len() == 1 {
-                    let disable_wal = wbs[0].2;
-                    writer.write(&mut wbs[0].0, disable_wal).await
-                } else {
-                    writer.flush().await
-                };
-                if need_sync && r.is_ok() {
+                let mut r = writer.flush().await;
+                if r.is_ok() {
                     r = writer.fsync().await;
                 }
                 match r {
                     Ok(()) => {
-                        for (wb, cb, _) in wbs.drain(..) {
+                        for (wb, cb) in tasks.drain(..) {
                             let _ = cb.send(Ok(wb));
                         }
                     }
                     Err(e) => {
-                        for (_, cb, _) in wbs.drain(..) {
+                        for (_, cb) in tasks.drain(..) {
                             let _ = cb.send(Err(e.clone()));
                         }
                         return Err(e);
@@ -310,5 +306,53 @@ impl Engine {
             }
         });
         Ok(())
+    }
+
+    fn run_flush_job(&self, mut rx: UnboundedReceiver<FlushRequest>) -> Result<()> {
+        let engine = self.manifest_scheduler.clone();
+        let kernel = self.kernel.clone();
+        let options = self.options.clone();
+        let stopped = self.stopped.clone();
+        let version_set = self.version_set.clone();
+        let mut cf_options = HashMap::default();
+        for (cf, opt) in version_set.lock().unwrap().get_column_family_options() {
+            cf_options.insert(cf, opt);
+        }
+
+        let f = async move {
+            while let Some(x) = rx.next().await {
+                run_flush_memtable_job(
+                    engine.clone(),
+                    vec![x],
+                    kernel.clone(),
+                    options.clone(),
+                    cf_options.clone(),
+                )
+                .await?;
+            }
+            Ok(())
+        };
+        self.pool.spawn(async move {
+            if let Err(e) = f.await {
+                if !stopped.load(Ordering::Acquire) {
+                    let mut v = version_set.lock().unwrap();
+                    v.record_error(e);
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    async fn schedule_flush(&mut self, cf: u32, mem: Arc<Memtable>) {
+        self.flush_scheduler
+            .send(FlushRequest::new(cf, mem))
+            .await
+            .unwrap_or_else(|_| {
+                if !self.stopped.load(Ordering::Acquire) {
+                    let mut v = self.version_set.lock().unwrap();
+                    v.record_error(Error::Other(format!("schedule flush failed")));
+                }
+            });
     }
 }

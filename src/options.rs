@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 pub struct ImmutableDBOptions {
     pub max_manifest_file_size: usize,
+    pub max_total_wal_size: usize,
     pub db_path: String,
     pub fs: Arc<dyn FileSystem>,
     pub max_background_jobs: usize,
@@ -45,6 +46,7 @@ impl Default for ColumnFamilyOptions {
 #[derive(Clone)]
 pub struct DBOptions {
     pub max_manifest_file_size: usize,
+    pub max_total_wal_size: usize,
     pub create_if_missing: bool,
     pub create_missing_column_families: bool,
     pub fs: Arc<dyn FileSystem>,
@@ -56,7 +58,8 @@ pub struct DBOptions {
 impl Default for DBOptions {
     fn default() -> Self {
         Self {
-            max_manifest_file_size: 0,
+            max_manifest_file_size: 128 * 1024 * 1024, // 100MB
+            max_total_wal_size: 128 * 1024 * 1024,     // 100MB
             create_if_missing: false,
             create_missing_column_families: false,
             fs: Arc::new(SyncPoxisFileSystem {}),
@@ -76,6 +79,7 @@ impl From<DBOptions> for ImmutableDBOptions {
     fn from(opt: DBOptions) -> Self {
         Self {
             max_manifest_file_size: opt.max_manifest_file_size,
+            max_total_wal_size: opt.max_total_wal_size,
             db_path: "".to_string(),
             fs: opt.fs.clone(),
             max_background_jobs: opt.max_background_jobs,

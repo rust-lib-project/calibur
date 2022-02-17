@@ -17,7 +17,7 @@ pub use merge_iterator::MergingIterator;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub trait InternalIterator {
+pub trait InternalIterator: Send {
     fn valid(&self) -> bool;
     fn seek(&mut self, key: &[u8]);
     fn seek_to_first(&mut self);
@@ -30,7 +30,7 @@ pub trait InternalIterator {
 }
 
 #[async_trait]
-pub trait AsyncIterator {
+pub trait AsyncIterator: Send {
     fn valid(&self) -> bool;
     async fn seek(&mut self, key: &[u8]);
     async fn seek_to_first(&mut self);

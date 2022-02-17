@@ -82,7 +82,11 @@ impl VersionSet {
                 ColumnFamily::new(
                     cf,
                     version.get_cf_name().to_string(),
-                    Memtable::new(kernel.new_memtable_number(), cf_opt.comparator.clone()),
+                    Memtable::new(
+                        kernel.new_memtable_number(),
+                        cf_opt.write_buffer_size,
+                        cf_opt.comparator.clone(),
+                    ),
                     cf_opt.comparator.clone(),
                     version,
                     cf_opt,
@@ -136,11 +140,22 @@ impl VersionSet {
         options
     }
 
+    pub fn switch_memtable(&mut self, cf: u32) -> Arc<Memtable> {
+        let cf = self.column_family_set.get_mut(&cf).unwrap();
+        let mem = Arc::new(cf.create_memtable(self.kernel.new_memtable_number()));
+        cf.switch_memtable(mem.clone());
+        mem
+    }
+
     pub fn create_column_family(&mut self, mut edit: VersionEdit) -> Result<Arc<Version>> {
         let cf_opt = edit.cf_options.options.take().unwrap();
         let id = edit.column_family;
         let name = edit.column_family_name.clone();
-        let m = Memtable::new(self.kernel.new_memtable_number(), cf_opt.comparator.clone());
+        let m = Memtable::new(
+            self.kernel.new_memtable_number(),
+            cf_opt.write_buffer_size,
+            cf_opt.comparator.clone(),
+        );
         let log_number = edit.log_number;
         let new_version = Arc::new(Version::new(
             edit.column_family,

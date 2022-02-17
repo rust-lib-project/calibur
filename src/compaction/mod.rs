@@ -1,7 +1,7 @@
 mod compaction_iter;
 mod flush_job;
 
-use crate::common::{InternalKeyComparator, Result};
+use crate::common::Result;
 use crate::compaction::flush_job::FlushJob;
 use crate::memtable::Memtable;
 use crate::options::{ColumnFamilyOptions, ImmutableDBOptions};
@@ -23,13 +23,20 @@ pub struct FlushRequest {
     mems: Vec<(u32, Arc<Memtable>)>,
 }
 
-async fn run_flush_memtable_job<Engine: CompactionEngine>(
+impl FlushRequest {
+    pub fn new(cf: u32, mem: Arc<Memtable>) -> Self {
+        Self {
+            mems: vec![(cf, mem)],
+        }
+    }
+}
+
+pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
     mut engine: Engine,
     reqs: Vec<FlushRequest>,
-    versions: Arc<KernelNumberContext>,
+    kernel: Arc<KernelNumberContext>,
     options: Arc<ImmutableDBOptions>,
     cf_options: HashMap<u32, Arc<ColumnFamilyOptions>>,
-    comparator: InternalKeyComparator,
 ) -> Result<()> {
     let mut mems = vec![];
     for req in &reqs {
@@ -43,19 +50,20 @@ async fn run_flush_memtable_job<Engine: CompactionEngine>(
     let mut edits = vec![];
     for i in 0..mems.len() {
         if !mems[i].is_empty() {
-            let file_number = versions.new_file_number();
+            let file_number = kernel.new_file_number();
             let memids = mems[i].iter().map(|mem| mem.get_id()).collect();
             let idx = i as u32;
             let cf_opt = cf_options
                 .get(&idx)
                 .cloned()
                 .unwrap_or(Arc::new(ColumnFamilyOptions::default()));
+            let comparator = cf_opt.comparator.clone();
             let mut job = FlushJob::new(
                 engine.clone(),
                 options.clone(),
                 cf_opt,
                 mems[i].clone(),
-                comparator.clone(),
+                comparator,
                 i as u32,
                 file_number,
             );

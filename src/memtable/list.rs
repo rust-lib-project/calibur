@@ -354,6 +354,8 @@ where
     cursor: *const Node,
 }
 
+unsafe impl<T: AsRef<Skiplist>> Send for IterRef<T> {}
+
 impl<T: AsRef<Skiplist>> IterRef<T> {
     pub fn valid(&self) -> bool {
         !self.cursor.is_null()

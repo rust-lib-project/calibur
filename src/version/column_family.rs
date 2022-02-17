@@ -33,7 +33,7 @@ impl ColumnFamily {
     ) -> Self {
         let mem = Arc::new(m);
         Self {
-            log_number: 0,
+            log_number: version.get_log_number(),
             mem: mem.clone(),
             imms: Default::default(),
             super_version: Arc::new(SuperVersion {
@@ -123,6 +123,6 @@ impl ColumnFamily {
     }
 
     pub fn create_memtable(&self, id: u64) -> Memtable {
-        Memtable::new(id, self.comparator.clone())
+        Memtable::new(id, self.options.write_buffer_size, self.comparator.clone())
     }
 }

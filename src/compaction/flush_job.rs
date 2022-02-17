@@ -87,6 +87,7 @@ impl<E: CompactionEngine> FlushJob<E> {
                 .update_boundary(key, compact_iter.current_sequence());
             compact_iter.next().await;
         }
+        drop(compact_iter);
         builder.finish().await?;
         self.meta.fd.file_size = builder.file_size();
         Ok(self.meta.clone())
