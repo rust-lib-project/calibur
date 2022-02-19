@@ -2,6 +2,8 @@ use super::{Error, Result};
 use std::path::PathBuf;
 
 const ROCKS_DB_TFILE_EXT: &str = "sst";
+const UNENCRYPTED_TEMP_FILE_NAME_SUFFIX: &str = "dbtmp.plain";
+
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum DBFileType {
     Current,
@@ -9,13 +11,8 @@ pub enum DBFileType {
     LogFile,
 }
 
-// TODO: support multi path
-pub fn make_table_file_name(path: &str, number: u64) -> PathBuf {
-    make_file_name(path, number, ROCKS_DB_TFILE_EXT)
-}
-
-pub fn make_file_name(path: &str, number: u64, suffix: &str) -> PathBuf {
-    let p = format!("{}/{:06}.{}", path, number, suffix);
+pub fn make_current_file(path: &str) -> PathBuf {
+    let p = format!("{}/CURRENT", path);
     PathBuf::from(p)
 }
 
@@ -24,13 +21,22 @@ pub fn make_descriptor_file_name(path: &str, number: u64) -> PathBuf {
     PathBuf::from(p)
 }
 
+pub fn make_file_name(path: &str, number: u64, suffix: &str) -> PathBuf {
+    let p = format!("{}/{:06}.{}", path, number, suffix);
+    PathBuf::from(p)
+}
+
 pub fn make_log_file(path: &str, number: u64) -> PathBuf {
     make_file_name(path, number, "log")
 }
 
-pub fn make_current_file(path: &str) -> PathBuf {
-    let p = format!("{}/CURRENT", path);
-    PathBuf::from(p)
+// TODO: support multi path
+pub fn make_table_file_name(path: &str, number: u64) -> PathBuf {
+    make_file_name(path, number, ROCKS_DB_TFILE_EXT)
+}
+
+pub fn make_temp_plain_file_name(path: &str, number: u64) -> PathBuf {
+    make_file_name(path, number, ROCKS_DB_TFILE_EXT)
 }
 
 pub fn parse_file_name(fname: &str) -> Result<(DBFileType, u64)> {

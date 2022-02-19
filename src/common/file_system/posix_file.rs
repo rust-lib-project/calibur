@@ -1,6 +1,6 @@
 // Copyright (c) 2017-present, PingCAP, Inc. Licensed under Apache-2.0.
 
-use std::fs::read_dir;
+use std::fs::{read_dir, rename};
 use std::io::{Result as IoResult, Write};
 use std::os::unix::io::RawFd;
 use std::path::PathBuf;
@@ -380,9 +380,12 @@ impl FileSystem for SyncPoxisFileSystem {
         Ok(files)
     }
 
-    fn file_exist(&self, path: PathBuf, file_name: String) -> Result<bool> {
-        let p = path.join(&file_name);
-        Ok(p.exists())
+    fn rename(&self, origin: PathBuf, target: PathBuf) -> Result<()> {
+        rename(origin, target).map_err(|e| Error::Io(Box::new(e)))
+    }
+
+    fn file_exist(&self, path: &PathBuf) -> Result<bool> {
+        Ok(path.exists())
     }
 }
 

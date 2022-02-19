@@ -58,6 +58,7 @@ impl KernelNumberContext {
 pub struct VersionSet {
     kernel: Arc<KernelNumberContext>,
     column_family_set: HashMap<u32, ColumnFamily>,
+    column_family_set_names: HashMap<String, u32>,
     fs: Arc<dyn FileSystem>,
 }
 
@@ -73,14 +74,16 @@ impl VersionSet {
             cf_options.insert(cf.name.clone(), cf.options.clone());
         }
         let mut column_family_set = HashMap::default();
-        for (cf, version) in versions {
+        let mut column_family_set_names = HashMap::default();
+        for (cf_id, version) in versions {
             let cf_opt = cf_options
                 .remove(version.get_cf_name())
                 .unwrap_or(ColumnFamilyOptions::default());
+            column_family_set_names.insert(version.get_cf_name().to_string(), cf_id);
             column_family_set.insert(
-                cf,
+                cf_id,
                 ColumnFamily::new(
-                    cf,
+                    cf_id,
                     version.get_cf_name().to_string(),
                     Memtable::new(
                         kernel.new_memtable_number(),
@@ -97,6 +100,7 @@ impl VersionSet {
             kernel,
             column_family_set,
             fs,
+            column_family_set_names,
         }
     }
 
@@ -123,6 +127,17 @@ impl VersionSet {
             versions.push(cf.get_version())
         }
         versions
+    }
+
+    pub fn mut_column_family(&mut self, cf_id: u32) -> Option<&mut ColumnFamily> {
+        self.column_family_set.get_mut(&cf_id)
+    }
+
+    pub fn mut_column_family_by_name(&mut self, cf_name: &str) -> Option<&mut ColumnFamily> {
+        if let Some(cf_id) = self.column_family_set_names.get(cf_name) {
+            return self.column_family_set.get_mut(cf_id);
+        }
+        None
     }
 
     pub fn get_superversion(&self, cf_id: u32) -> Option<Arc<SuperVersion>> {

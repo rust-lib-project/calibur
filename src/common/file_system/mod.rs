@@ -86,10 +86,11 @@ pub trait FileSystem: Send + Sync {
     }
 
     fn remove(&self, path: PathBuf) -> Result<()>;
+    fn rename(&self, origin: PathBuf, target: PathBuf) -> Result<()>;
 
     fn list_files(&self, path: PathBuf) -> Result<Vec<PathBuf>>;
 
-    fn file_exist(&self, path: PathBuf, file_name: String) -> Result<bool>;
+    fn file_exist(&self, path: &PathBuf) -> Result<bool>;
 }
 
 #[derive(Default)]
@@ -248,12 +249,8 @@ impl FileSystem for InMemFileSystem {
         Ok(files)
     }
 
-    fn remove(&self, f: PathBuf) -> Result<()> {
-        let filename = f
-            .file_name()
-            .ok_or(Error::InvalidFile(format!("can not convert to filename")))?
-            .to_str()
-            .ok_or(Error::InvalidFile(format!("can not convert to filename")))?;
+    fn remove(&self, path: PathBuf) -> Result<()> {
+        let filename = path.to_str().unwrap();
         let mut fs = self.inner.lock().unwrap();
         fs.files.remove(filename).ok_or(Error::InvalidFile(format!(
             "file [{}] not exists",
@@ -262,8 +259,21 @@ impl FileSystem for InMemFileSystem {
         Ok(())
     }
 
-    fn file_exist(&self, _path: PathBuf, filename: String) -> Result<bool> {
+    fn rename(&self, origin: PathBuf, target: PathBuf) -> Result<()> {
+        let filename = origin.to_str().unwrap();
+        let mut fs = self.inner.lock().unwrap();
+        let f = fs.files.remove(filename).ok_or(Error::InvalidFile(format!(
+            "file [{}] not exists",
+            filename
+        )))?;
+        let filename = target.to_str().unwrap();
+        fs.files.insert(filename.to_string(), f);
+        Ok(())
+    }
+
+    fn file_exist(&self, path: &PathBuf) -> Result<bool> {
         let fs = self.inner.lock().unwrap();
-        Ok(fs.files.get(&filename).is_some())
+        let filename = path.to_str().unwrap();
+        Ok(fs.files.get(filename).is_some())
     }
 }

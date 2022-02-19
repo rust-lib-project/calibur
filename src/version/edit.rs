@@ -154,6 +154,16 @@ impl VersionEdit {
         self.has_log_number = true;
     }
 
+    pub fn set_next_file(&mut self, file_number: u64) {
+        self.next_file_number = file_number;
+        self.has_next_file_number = true;
+    }
+
+    pub fn set_last_sequence(&mut self, seq: u64) {
+        self.last_sequence = seq;
+        self.has_last_sequence = true;
+    }
+
     pub fn get_log_number(&self) -> u64 {
         self.log_number
     }

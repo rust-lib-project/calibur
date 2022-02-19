@@ -1,8 +1,9 @@
-use crate::common::{make_log_file, parse_file_name, DBFileType, Error, Result};
+use crate::common::{make_current_file, make_log_file, parse_file_name, DBFileType, Error, Result};
 use crate::options::{ColumnFamilyDescriptor, DBOptions, ImmutableDBOptions};
 use crate::version::{KernelNumberContext, VersionSet};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::RandomState;
 use std::path::PathBuf;
 
 use crate::common::format::ValueType;
@@ -16,6 +17,7 @@ use futures::{SinkExt, StreamExt};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use yatp::{task::future::TaskCell, Builder as PoolBuilder, ThreadPool};
+use crate::ColumnFamilyOptions;
 
 #[derive(Clone)]
 pub struct Engine {
@@ -36,7 +38,23 @@ impl Engine {
         other_pool: Option<Arc<ThreadPool<TaskCell>>>,
     ) -> Result<Self> {
         let immutable_options = Arc::new(db_options.into());
-        Self::recover(immutable_options, cfs, other_pool).await
+        let mut engine = Self::recover(immutable_options, &cfs, other_pool).await?;
+        let mut created_cfs: HashSet<String, RandomState> = HashSet::default();
+        {
+            let mut vs = engine.version_set.lock().unwrap();
+            for desc in &cfs {
+                if vs.mut_column_family_by_name(&desc.name).is_some() {
+                    created_cfs.insert(desc.name.clone());
+                }
+            }
+        }
+        for desc in cfs {
+            if created_cfs.get(&desc.name).is_some() {
+                continue;
+            }
+            engine.create_column_family(&desc.name, desc.options).await?;
+        }
+        Ok(engine)
     }
 
     pub async fn write(&mut self, wb: &mut WriteBatch) -> Result<()> {
@@ -67,6 +85,7 @@ impl Engine {
             }
         }
 
+        // TODO: check atomic flush.
         for (cf, m) in rwb.mems {
             if m.mark_write_done() {
                 self.schedule_flush(cf, m).await;
@@ -77,12 +96,21 @@ impl Engine {
         Ok(())
     }
 
+    pub async fn create_column_family(&mut self, name: &str, options: ColumnFamilyOptions) -> Result<u32> {
+        Ok(0)
+    }
+
     async fn recover(
         immutable_options: Arc<ImmutableDBOptions>,
-        cfs: Vec<ColumnFamilyDescriptor>,
+        cfs: &[ColumnFamilyDescriptor],
         other_pool: Option<Arc<ThreadPool<TaskCell>>>,
     ) -> Result<Self> {
-        let manifest = Manifest::recover(&cfs, &immutable_options).await?;
+        let current = make_current_file(&immutable_options.db_path);
+        let manifest = if !immutable_options.fs.file_exist(&current)? {
+            Manifest::create(cfs, &immutable_options).await?
+        } else {
+            Manifest::recover(cfs, &immutable_options).await?
+        };
         let version_set = manifest.get_version_set();
         let files = immutable_options
             .fs
@@ -248,7 +276,7 @@ impl Engine {
                         sync,
                         disable_wal,
                     } => {
-                        writer.preprocess_write().await;
+                        writer.preprocess_write().await?;
                         let task = writer.batch(wb, disable_wal, sync);
                         tasks.push((task, cb));
                     }

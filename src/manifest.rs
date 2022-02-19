@@ -1,6 +1,6 @@
 use crate::common::{
-    make_current_file, make_descriptor_file_name, make_table_file_name, parse_file_name,
-    DBFileType, Error, FileSystem, Result,
+    make_current_file, make_descriptor_file_name, make_table_file_name, make_temp_plain_file_name,
+    parse_file_name, DBFileType, Error, FileSystem, Result,
 };
 use futures::channel::mpsc::UnboundedSender;
 use futures::channel::oneshot::{channel as once_channel, Sender as OnceSender};
@@ -9,6 +9,7 @@ use crate::compaction::CompactionEngine;
 use crate::log::{LogReader, LogWriter};
 use crate::options::{ColumnFamilyDescriptor, ImmutableDBOptions};
 use crate::table::TableReaderOptions;
+use crate::util::BtreeComparable;
 use crate::version::{
     FileMetaData, KernelNumberContext, TableFile, Version, VersionEdit, VersionSet,
 };
@@ -33,6 +34,25 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    pub async fn create(
+        cf_descriptor: &[ColumnFamilyDescriptor],
+        db_options: &Arc<ImmutableDBOptions>,
+    ) -> Result<Self> {
+        let mut new_db = VersionEdit::default();
+        new_db.set_log_number(0);
+        new_db.set_next_file(2);
+        new_db.set_last_sequence(0);
+        let descrip_file_name = make_descriptor_file_name(&db_options.db_path, 1);
+        let writer = db_options.fs.open_writable_file(descrip_file_name)?;
+        let mut writer = LogWriter::new(writer, 0);
+        let mut buf = vec![];
+        new_db.encode_to(&mut buf);
+        writer.add_record(&buf).await?;
+        writer.fsync().await?;
+        store_current_file(&db_options.fs, 1, &db_options.db_path).await?;
+        Self::recover(cf_descriptor, db_options).await
+    }
+
     pub async fn recover(
         cfs: &[ColumnFamilyDescriptor],
         db_options: &Arc<ImmutableDBOptions>,
@@ -84,7 +104,12 @@ impl Manifest {
         for cf in cf_descriptor.iter() {
             cf_options.insert(cf.name.clone(), cf.options.clone());
         }
+        if cf_options.get("default").is_none() {
+            cf_options.insert("default".to_string(), ColumnFamilyOptions::default());
+        }
         let mut cf_names: HashMap<u32, String> = HashMap::default();
+        cf_names.insert(0, "default".to_string());
+        edits.insert(0, vec![]);
         while reader.read_record(&mut record).await? {
             let mut edit = VersionEdit::default();
             edit.decode_from(&record)?;
@@ -251,6 +276,7 @@ impl Manifest {
                         self.options.fs.clone(),
                         fname,
                     ));
+                    self.files_by_id.insert(table.id(), table.clone());
                     to_add.push(table);
                 }
             }
@@ -390,6 +416,24 @@ impl CompactionEngine for ManifestScheduler {
         })?;
         x
     }
+}
+
+pub async fn store_current_file(
+    fs: &Arc<dyn FileSystem>,
+    descriptor_number: u64,
+    dbpath: &str,
+) -> Result<()> {
+    let fname = make_descriptor_file_name(dbpath, descriptor_number);
+    let contents = fname.to_str().unwrap();
+    let prefix = dbpath.to_string() + "/";
+    let mut ret = contents.trim_start_matches(&prefix).to_string();
+    ret.push('\n');
+    let tmp = make_temp_plain_file_name(dbpath, descriptor_number);
+    let mut writer = fs.open_writable_file(tmp.clone())?;
+    let data = ret.into_bytes();
+    writer.append(&data).await?;
+    writer.sync().await?;
+    fs.rename(tmp, make_current_file(dbpath))
 }
 
 pub async fn get_current_manifest_path(

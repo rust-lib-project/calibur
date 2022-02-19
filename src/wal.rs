@@ -120,10 +120,14 @@ impl WALWriter {
         if self.writer.get_file_size() > self.immutation_options.max_total_wal_size {
             new_log_writer = true;
         }
+        // TODO: check atomic flush.
         for (cf, mem) in &mut self.mems {
             if mem.should_flush() {
+                // If this method returns false, it means that another write thread still hold this
+                // memtable. Maybe we shall also check the previous memtables has been flushed.
                 if mem.mark_schedule_flush() {
-                    self.flush_scheduler
+                    let _ = self
+                        .flush_scheduler
                         .send(FlushRequest::new(*cf, mem.clone()))
                         .await;
                 }
