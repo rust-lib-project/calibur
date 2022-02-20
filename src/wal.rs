@@ -5,15 +5,14 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::common::{make_log_file, Error, Result};
-use crate::compaction::FlushRequest;
+use crate::compaction::{CompactionEngine, FlushRequest};
 use crate::log::LogWriter;
+use crate::manifest::ManifestScheduler;
 use crate::memtable::Memtable;
 use crate::options::ImmutableDBOptions;
-use crate::version::{KernelNumberContext, VersionSet};
+use crate::version::{KernelNumberContext, VersionEdit, VersionSet};
 use crate::write_batch::ReadOnlyWriteBatch;
-use crate::FileSystem;
-
-const MAX_BATCH_SIZE: usize = 1 << 20; // 1MB
+use crate::{ColumnFamilyOptions, FileSystem, KeyComparator};
 
 pub struct IngestFile {
     pub file: PathBuf,
@@ -55,6 +54,11 @@ pub enum WALTask {
         files: Vec<IngestFile>,
         cb: OnceSender<Result<()>>,
     },
+    CreateColumnFamily {
+        name: String,
+        opts: ColumnFamilyOptions,
+        cb: OnceSender<Result<u32>>,
+    },
 }
 
 pub struct WALContext {
@@ -70,6 +74,7 @@ pub struct WALWriter {
     mems: Vec<(u32, Arc<Memtable>)>,
     version_sets: Arc<Mutex<VersionSet>>,
     flush_scheduler: UnboundedSender<FlushRequest>,
+    manifest_scheduler: ManifestScheduler,
     immutation_options: Arc<ImmutableDBOptions>,
     ctx: WALContext,
 }
@@ -80,6 +85,7 @@ impl WALWriter {
         version_sets: Arc<Mutex<VersionSet>>,
         immutation_options: Arc<ImmutableDBOptions>,
         flush_scheduler: UnboundedSender<FlushRequest>,
+        manifest_scheduler: ManifestScheduler,
     ) -> Result<Self> {
         let writer = Self::create_wal(
             kernel.as_ref(),
@@ -91,6 +97,7 @@ impl WALWriter {
             kernel,
             writer,
             flush_scheduler,
+            manifest_scheduler,
             logs: vec![],
             mems: vec![],
             version_sets,
@@ -151,42 +158,65 @@ impl WALWriter {
         Ok(())
     }
 
-    pub fn batch(
+    pub async fn create_column_family(
         &mut self,
-        mut wb: ReadOnlyWriteBatch,
-        disable_wal: bool,
-        sync: bool,
-    ) -> WriteMemtableTask {
-        let sequence = self.ctx.last_sequence + 1;
-        self.ctx.last_sequence = sequence;
-        wb.set_sequence(sequence);
-        if !disable_wal {
-            wb.append_to(&mut self.ctx.buf);
+        name: String,
+        opts: ColumnFamilyOptions,
+    ) -> Result<u32> {
+        {
+            let mut vs = self.version_sets.lock().unwrap();
+            if vs.mut_column_family_by_name(&name).is_some() {
+                return Err(Error::Config(format!(
+                    "Column family [{}] already exists",
+                    name
+                )));
+            }
         }
-        if sync {
-            self.ctx.need_sync = true;
-        }
-
-        for (_cf, m) in &self.mems {
-            m.mark_write_begin();
-        }
-
-        WriteMemtableTask {
-            wb,
-            mems: self.mems.clone(),
-        }
+        let new_id = self.kernel.next_column_family_id();
+        let mut edit = VersionEdit::default();
+        edit.set_max_column_family(new_id);
+        edit.set_log_number(self.writer.get_log_number());
+        edit.add_column_family(name);
+        edit.column_family = new_id;
+        edit.set_comparator_name(opts.comparator.name());
+        self.manifest_scheduler.apply(vec![edit]).await?;
+        let vs = self.version_sets.lock().unwrap();
+        self.mems
+            .push((new_id, vs.get_superversion(new_id).unwrap().mem.clone()));
+        Ok(new_id)
     }
 
-    pub fn should_flush(&self) -> bool {
-        self.ctx.buf.len() > MAX_BATCH_SIZE || self.ctx.buf.is_empty()
-    }
-
-    pub async fn flush(&mut self) -> Result<()> {
-        if !self.ctx.buf.is_empty() {
-            self.writer.add_record(&self.ctx.buf).await?;
-            self.ctx.buf.clear();
+    pub async fn write(
+        &mut self,
+        tasks: &mut Vec<(
+            ReadOnlyWriteBatch,
+            OnceSender<Result<WriteMemtableTask>>,
+            bool,
+        )>,
+        sync_wal: bool,
+    ) -> Result<Vec<(u32, Arc<Memtable>)>> {
+        if tasks.is_empty() {
+            return Ok(vec![]);
         }
-        Ok(())
+        let l = tasks.len();
+        for (wb, _, disable_wal) in tasks {
+            let sequence = self.ctx.last_sequence + 1;
+            self.ctx.last_sequence = sequence;
+            wb.set_sequence(sequence);
+            if !*disable_wal {
+                if l == 1 {
+                    self.writer.add_record(wb.get_data()).await?;
+                } else {
+                    self.ctx.buf.extend_from_slice(wb.get_data());
+                }
+            }
+        }
+        self.writer.add_record(&self.ctx.buf).await?;
+        self.ctx.buf.clear();
+        if sync_wal {
+            self.writer.fsync().await?;
+        }
+        Ok(self.mems.clone())
     }
 
     pub async fn fsync(&mut self) -> Result<()> {
@@ -208,7 +238,26 @@ impl WALScheduler {
         Self { sender }
     }
 
-    pub async fn send(
+    pub async fn schedule_create_column_family(
+        &mut self,
+        name: &str,
+        opts: ColumnFamilyOptions,
+    ) -> Result<u32> {
+        let (cb, rx) = once_channel();
+        let task = WALTask::CreateColumnFamily {
+            name: name.to_string(),
+            opts,
+            cb,
+        };
+        self.sender
+            .send(task)
+            .await
+            .map_err(|_| Error::Cancel(format!("wal")))?;
+        let ret = rx.await.map_err(|_| Error::Cancel(format!("wal")))?;
+        ret
+    }
+
+    pub async fn schedule_writebatch(
         &mut self,
         wb: ReadOnlyWriteBatch,
         sync: bool,

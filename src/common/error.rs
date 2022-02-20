@@ -27,8 +27,8 @@ pub enum Error {
     Cancel(String),
     #[error("Error when reading from log: {0}")]
     LogRead(String),
-    #[error("Invalid Log Offset: {0} > {1}")]
-    InvalidLogOffset(u32, u32),
+    #[error("Invalid column family id: {0}")]
+    InvalidColumnFamily(u32),
     #[error("Error when compaction: {0}")]
     CompactionError(String),
     #[error("Other Error: {0}")]
@@ -56,7 +56,7 @@ impl Clone for Error {
             Error::DBClosed => Error::DBClosed,
             Error::Cancel(e) => Error::Cancel(e.clone()),
             Error::LogRead(x) => Error::LogRead(x.clone()),
-            Error::InvalidLogOffset(x, y) => Error::InvalidLogOffset(*x, *y),
+            Error::InvalidColumnFamily(x) => Error::InvalidColumnFamily(*x),
             Error::Other(x) => Error::Other(x.clone()),
             Error::CompactionError(s) => Error::CompactionError(s.clone()),
         }

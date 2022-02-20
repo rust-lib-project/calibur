@@ -12,6 +12,7 @@ pub struct KernelNumberContext {
     next_file_number: atomic::AtomicU64,
     next_mem_number: atomic::AtomicU64,
     last_sequence: atomic::AtomicU64,
+    max_column_family: atomic::AtomicU32,
 }
 
 impl KernelNumberContext {
@@ -37,6 +38,20 @@ impl KernelNumberContext {
 
     pub fn set_last_sequence(&self, v: u64) {
         self.last_sequence.store(v, atomic::Ordering::Release);
+    }
+
+    pub fn set_max_column_family(&self, v: u32) {
+        self.max_column_family.store(v, atomic::Ordering::Release);
+    }
+
+    pub fn get_max_column_family(&self) -> u32 {
+        self.max_column_family.load(atomic::Ordering::Acquire)
+    }
+
+    pub fn next_column_family_id(&self) -> u32 {
+        self.max_column_family
+            .fetch_add(1, atomic::Ordering::SeqCst)
+            + 1
     }
 
     pub fn mark_file_number_used(&self, v: u64) {

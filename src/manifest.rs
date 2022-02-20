@@ -132,6 +132,8 @@ impl Manifest {
         let mut next_file_number = 0;
         let mut has_last_sequence = false;
         let mut last_sequence = 0;
+        let mut has_max_column_family = false;
+        let mut max_column_family = 0;
         let mut files = HashMap::default();
         for (cf_id, edit) in edits {
             let cf_name = cf_names.get(&cf_id).unwrap();
@@ -153,6 +155,10 @@ impl Manifest {
                 if e.has_last_sequence {
                     has_last_sequence = true;
                     last_sequence = e.last_sequence;
+                }
+                if e.has_max_column_family {
+                    has_max_column_family = true;
+                    max_column_family = e.max_column_family;
                 }
                 max_log_number = std::cmp::max(max_log_number, e.log_number);
                 for m in e.deleted_files {
@@ -195,6 +201,9 @@ impl Manifest {
         if has_last_sequence {
             kernel.set_last_sequence(last_sequence);
         }
+        if has_max_column_family {
+            kernel.set_max_column_family(max_column_family);
+        }
         let vs = VersionSet::new(cf_descriptor, kernel, options.fs.clone(), versions);
         Ok((files, vs))
     }
@@ -203,7 +212,10 @@ impl Manifest {
         self.version_set.clone()
     }
 
-    pub async fn process_manifest_writes(&mut self, edits: Vec<VersionEdit>) -> Result<()> {
+    pub async fn process_manifest_writes(&mut self, mut edits: Vec<VersionEdit>) -> Result<()> {
+        if edits.is_empty() {
+            return Ok(());
+        }
         if self.log.as_ref().map_or(true, |f| {
             f.get_file_size() > self.options.max_manifest_file_size
         }) {
@@ -215,6 +227,9 @@ impl Manifest {
             self.write_snapshot(&mut writer).await?;
             self.log = Some(Box::new(writer));
             self.manifest_file_number = file_number;
+            if let Some(edit) = edits.first_mut() {
+                edit.set_max_column_family(self.kernel.get_max_column_family());
+            }
         }
         let mut data = vec![];
         for e in &edits {
@@ -298,10 +313,10 @@ impl Manifest {
             let mut record = Vec::new();
             {
                 let mut edit = VersionEdit::default();
-                edit.column_family_name = version.get_cf_name().to_string();
                 edit.column_family = version.get_cf_id() as u32;
                 edit.is_column_family_add = true;
-                edit.comparator_name = version.get_comparator_name().to_string();
+                edit.add_column_family(version.get_cf_name().to_string());
+                edit.set_comparator_name(version.get_comparator_name());
                 if !edit.encode_to(&mut record) {
                     return Err(Error::CompactionError(format!(
                         "write snapshot failed because encode failed"

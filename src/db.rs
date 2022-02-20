@@ -2,8 +2,9 @@ use crate::common::{make_current_file, make_log_file, parse_file_name, DBFileTyp
 use crate::options::{ColumnFamilyDescriptor, DBOptions, ImmutableDBOptions};
 use crate::version::{KernelNumberContext, VersionSet};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
-use std::collections::{HashMap, HashSet};
+use futures::channel::oneshot::Sender;
 use std::collections::hash_map::RandomState;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::common::format::ValueType;
@@ -11,13 +12,13 @@ use crate::compaction::{run_flush_memtable_job, FlushRequest};
 use crate::log::LogReader;
 use crate::manifest::{Manifest, ManifestScheduler, ManifestWriter};
 use crate::memtable::Memtable;
-use crate::wal::{WALScheduler, WALTask, WALWriter};
+use crate::wal::{WALScheduler, WALTask, WALWriter, WriteMemtableTask};
 use crate::write_batch::{ReadOnlyWriteBatch, WriteBatch, WriteBatchItem};
+use crate::ColumnFamilyOptions;
 use futures::{SinkExt, StreamExt};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use yatp::{task::future::TaskCell, Builder as PoolBuilder, ThreadPool};
-use crate::ColumnFamilyOptions;
 
 #[derive(Clone)]
 pub struct Engine {
@@ -52,7 +53,9 @@ impl Engine {
             if created_cfs.get(&desc.name).is_some() {
                 continue;
             }
-            engine.create_column_family(&desc.name, desc.options).await?;
+            engine
+                .create_column_family(&desc.name, desc.options)
+                .await?;
         }
         Ok(engine)
     }
@@ -68,22 +71,12 @@ impl Engine {
         sync: bool,
     ) -> Result<()> {
         let rwb = wb.to_raw();
-        let rwb = self.wal_scheduler.send(rwb, sync, disable_wal).await?;
+        let rwb = self
+            .wal_scheduler
+            .schedule_writebatch(rwb, sync, disable_wal)
+            .await?;
         let sequence = rwb.wb.get_sequence();
-        for item in rwb.wb.iter() {
-            match item {
-                WriteBatchItem::Put { cf, key, value } => {
-                    let idx = rwb.check_memtable_cf(cf);
-                    rwb.mems[idx]
-                        .1
-                        .add(key, value, sequence, ValueType::TypeValue);
-                }
-                WriteBatchItem::Delete { cf, key } => {
-                    let idx = rwb.check_memtable_cf(cf);
-                    rwb.mems[idx].1.delete(key, sequence);
-                }
-            }
-        }
+        self.write_memtable(&rwb.wb, sequence, &rwb.mems)?;
 
         // TODO: check atomic flush.
         for (cf, m) in rwb.mems {
@@ -96,8 +89,14 @@ impl Engine {
         Ok(())
     }
 
-    pub async fn create_column_family(&mut self, name: &str, options: ColumnFamilyOptions) -> Result<u32> {
-        Ok(0)
+    pub async fn create_column_family(
+        &mut self,
+        name: &str,
+        options: ColumnFamilyOptions,
+    ) -> Result<u32> {
+        self.wal_scheduler
+            .schedule_create_column_family(name, options)
+            .await
     }
 
     async fn recover(
@@ -167,6 +166,7 @@ impl Engine {
         for v in &versions {
             min_log_number = std::cmp::min(min_log_number, v.get_log_number());
         }
+        let mut cf_mems = vec![];
         for log_number in logs {
             if log_number < min_log_number {
                 continue;
@@ -181,7 +181,7 @@ impl Engine {
                 let wb = ReadOnlyWriteBatch::try_from(buf.clone())?;
                 let count = wb.count() as u64;
                 let sequence = wb.get_sequence();
-                self.write_memtable(&wb, sequence)?;
+                self.write_memtable(&wb, sequence, &mut cf_mems)?;
                 next_seq = sequence + count - 1;
                 // TODO: flush if the memtable is full
             }
@@ -190,44 +190,39 @@ impl Engine {
         Ok(())
     }
 
-    fn seek_to_mem<F: FnMut(&Arc<Memtable>)>(
+    fn write_memtable(
         &mut self,
-        mems: &mut Vec<Option<Arc<Memtable>>>,
-        cf: u32,
-        mut f: F,
+        wb: &ReadOnlyWriteBatch,
+        sequence: u64,
+        cf_mems: &[(u32, Arc<Memtable>)],
     ) -> Result<()> {
-        let idx = cf as usize;
-        if mems.len() <= idx {
-            while mems.len() <= idx {
-                mems.push(None);
+        pub fn check_memtable_cf(mems: &[(u32, Arc<Memtable>)], cf: u32) -> usize {
+            let mut idx = cf as usize;
+            if idx >= mems.len() || cf != mems[idx].0 {
+                idx = mems.len();
+                for i in 0..mems.len() {
+                    if mems[i].0 == cf {
+                        idx = i;
+                        break;
+                    }
+                }
+                if idx == mems.len() {
+                    panic!("write miss column family");
+                }
             }
+            idx
         }
-        if mems[idx].is_none() {
-            let vs = self.version_set.lock().unwrap();
-            if let Some(mem) = vs.get_superversion(cf).map(|v| v.mem.clone()) {
-                mems.push(Some(mem));
-            } else {
-                return Err(Error::Other(format!("Column family {} not exist", cf)));
-            }
-        }
-        f(mems[idx].as_ref().unwrap());
-        Ok(())
-    }
-
-    fn write_memtable(&mut self, wb: &ReadOnlyWriteBatch, sequence: u64) -> Result<()> {
-        let mut cf_mems = vec![];
         for item in wb.iter() {
             match item {
                 WriteBatchItem::Put { cf, key, value } => {
-                    self.seek_to_mem(&mut cf_mems, cf, |mem| {
-                        mem.add(key, value, sequence, ValueType::TypeValue);
-                    })?;
-                    // cf_mems[idx].as_ref().unwrap().add(key, value, sequence, ValueType::TypeValue);
+                    let idx = check_memtable_cf(cf_mems, cf);
+                    cf_mems[idx]
+                        .1
+                        .add(key, value, sequence, ValueType::TypeValue);
                 }
                 WriteBatchItem::Delete { cf, key } => {
-                    self.seek_to_mem(&mut cf_mems, cf, |mem| {
-                        mem.delete(key, sequence);
-                    })?;
+                    let idx = check_memtable_cf(cf_mems, cf);
+                    cf_mems[idx].1.delete(key, sequence);
                 }
             }
         }
@@ -260,14 +255,16 @@ impl Engine {
         flush_scheduler: UnboundedSender<FlushRequest>,
         mut rx: UnboundedReceiver<WALTask>,
     ) -> Result<()> {
-        let mut writer = WALWriter::new(
+        let writer = WALWriter::new(
             self.kernel.clone(),
             self.version_set.clone(),
             self.options.clone(),
             flush_scheduler,
+            self.manifest_scheduler.clone(),
         )?;
+        let mut processor = BatchWALProcessor::new(writer);
+
         let f = async move {
-            let mut tasks = vec![];
             while let Some(x) = rx.next().await {
                 match x {
                     WALTask::Write {
@@ -276,12 +273,16 @@ impl Engine {
                         sync,
                         disable_wal,
                     } => {
-                        writer.preprocess_write().await?;
-                        let task = writer.batch(wb, disable_wal, sync);
-                        tasks.push((task, cb));
+                        processor.writer.preprocess_write().await?;
+                        processor.batch(wb, cb, sync, disable_wal);
                     }
                     WALTask::Ingest { .. } => {
                         unimplemented!();
+                    }
+                    WALTask::CreateColumnFamily { name, opts, cb } => {
+                        processor.flush().await?;
+                        let ret = processor.writer.create_column_family(name, opts).await;
+                        cb.send(ret).unwrap();
                     }
                 }
                 while let Some(x) = rx.try_next().unwrap() {
@@ -292,34 +293,22 @@ impl Engine {
                             sync,
                             disable_wal,
                         } => {
-                            let task = writer.batch(wb, disable_wal, sync);
-                            tasks.push((task, cb));
-                            if writer.should_flush() {
+                            processor.batch(wb, cb, sync, disable_wal);
+                            if processor.should_flush() {
                                 break;
                             }
+                        }
+                        WALTask::CreateColumnFamily { name, opts, cb } => {
+                            processor.flush().await?;
+                            let ret = processor.writer.create_column_family(name, opts).await;
+                            cb.send(ret).unwrap();
                         }
                         WALTask::Ingest { .. } => {
                             unimplemented!();
                         }
                     }
                 }
-                let mut r = writer.flush().await;
-                if r.is_ok() {
-                    r = writer.fsync().await;
-                }
-                match r {
-                    Ok(()) => {
-                        for (wb, cb) in tasks.drain(..) {
-                            let _ = cb.send(Ok(wb));
-                        }
-                    }
-                    Err(e) => {
-                        for (_, cb) in tasks.drain(..) {
-                            let _ = cb.send(Err(e.clone()));
-                        }
-                        return Err(e);
-                    }
-                }
+                processor.flush().await?;
             }
             Ok(())
         };
@@ -382,5 +371,65 @@ impl Engine {
                     v.record_error(Error::Other(format!("schedule flush failed")));
                 }
             });
+    }
+}
+
+const MAX_BATCH_SIZE: usize = 1 << 20; // 1MB
+
+pub struct BatchWALProcessor {
+    writer: WALWriter,
+    tasks: Vec<(ReadOnlyWriteBatch, Sender<Result<WriteMemtableTask>>, bool)>,
+    need_sync: bool,
+    batch_size: usize,
+}
+
+impl BatchWALProcessor {
+    pub fn new(writer: WALWriter) -> Self {
+        Self {
+            writer,
+            tasks: vec![],
+            need_sync: false,
+            batch_size: 0,
+        }
+    }
+
+    pub fn batch(
+        &mut self,
+        wb: ReadOnlyWriteBatch,
+        cb: Sender<Result<WriteMemtableTask>>,
+        disable_wal: bool,
+        sync: bool,
+    ) {
+        if sync {
+            self.need_sync = true;
+        }
+        if !disable_wal {
+            self.batch_size += wb.get_data().len();
+        }
+        self.tasks.push((wb, cb, disable_wal));
+    }
+
+    pub fn should_flush(&self) -> bool {
+        self.batch_size > MAX_BATCH_SIZE
+    }
+
+    pub async fn flush(&mut self) -> Result<()> {
+        let r = self.writer.write(&mut self.tasks, self.need_sync).await;
+        self.need_sync = false;
+        self.batch_size = 0;
+        for (wb, cb, _) in self.tasks.drain(..) {
+            match &r {
+                Err(e) => {
+                    let _ = cb.send(Err(e.clone()));
+                }
+                Ok(mems) => {
+                    let _ = cb.send(Ok(WriteMemtableTask {
+                        wb,
+                        mems: mems.clone(),
+                    }));
+                }
+            }
+        }
+        r.map(|_| ())
     }
 }

@@ -154,6 +154,16 @@ impl VersionEdit {
         self.has_log_number = true;
     }
 
+    pub fn add_column_family(&mut self, name: String) {
+        self.is_column_family_add = true;
+        self.column_family_name = name;
+    }
+
+    pub fn set_comparator_name(&mut self, name: &str) {
+        self.has_comparator = true;
+        self.comparator_name = name.to_string();
+    }
+
     pub fn set_next_file(&mut self, file_number: u64) {
         self.next_file_number = file_number;
         self.has_next_file_number = true;
@@ -162,6 +172,11 @@ impl VersionEdit {
     pub fn set_last_sequence(&mut self, seq: u64) {
         self.last_sequence = seq;
         self.has_last_sequence = true;
+    }
+
+    pub fn set_max_column_family(&mut self, c: u32) {
+        self.has_max_column_family = true;
+        self.max_column_family = c;
     }
 
     pub fn get_log_number(&self) -> u64 {
