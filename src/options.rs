@@ -80,7 +80,7 @@ impl From<DBOptions> for ImmutableDBOptions {
         Self {
             max_manifest_file_size: opt.max_manifest_file_size,
             max_total_wal_size: opt.max_total_wal_size,
-            db_path: "".to_string(),
+            db_path: opt.db_path.clone(),
             fs: opt.fs.clone(),
             max_background_jobs: opt.max_background_jobs,
         }

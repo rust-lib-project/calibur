@@ -62,7 +62,6 @@ pub enum WALTask {
 }
 
 pub struct WALContext {
-    need_sync: bool,
     last_sequence: u64,
     buf: Vec<u8>,
 }
@@ -93,16 +92,19 @@ impl WALWriter {
             immutation_options.fs.as_ref(),
         )?;
         let last_sequence = kernel.last_sequence();
+        let mems = {
+            let vs = version_sets.lock().unwrap();
+            vs.get_column_family_memtables()
+        };
         let wal = WALWriter {
             kernel,
             writer,
             flush_scheduler,
             manifest_scheduler,
             logs: vec![],
-            mems: vec![],
+            mems,
             version_sets,
             ctx: WALContext {
-                need_sync: false,
                 last_sequence,
                 buf: vec![],
             },
@@ -179,6 +181,7 @@ impl WALWriter {
         edit.add_column_family(name);
         edit.column_family = new_id;
         edit.set_comparator_name(opts.comparator.name());
+        edit.cf_options.options = Some(opts);
         self.manifest_scheduler.apply(vec![edit]).await?;
         let vs = self.version_sets.lock().unwrap();
         self.mems
@@ -216,15 +219,10 @@ impl WALWriter {
         if sync_wal {
             self.writer.fsync().await?;
         }
-        Ok(self.mems.clone())
-    }
-
-    pub async fn fsync(&mut self) -> Result<()> {
-        if !self.ctx.need_sync {
-            self.writer.fsync().await?;
-            self.ctx.need_sync = false;
+        for (cf, m) in &self.mems {
+            m.mark_write_begin(l as u64);
         }
-        Ok(())
+        Ok(self.mems.clone())
     }
 }
 

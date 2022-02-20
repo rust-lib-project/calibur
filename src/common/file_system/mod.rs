@@ -145,7 +145,7 @@ impl RandomAccessFile for InMemFile {
             Ok(0)
         } else if offset + data.len() > self.buf.len() {
             let rest = self.buf.len() - offset;
-            data.copy_from_slice(&self.buf[offset..(offset + rest)]);
+            data[..rest].copy_from_slice(&self.buf[offset..(offset + rest)]);
             Ok(rest)
         } else {
             data.copy_from_slice(&self.buf[offset..(offset + data.len())]);
@@ -158,10 +158,10 @@ impl RandomAccessFile for InMemFile {
             Ok(0)
         } else if offset + n > self.buf.len() {
             let rest = self.buf.len() - offset;
-            data.copy_from_slice(&self.buf[offset..(offset + rest)]);
+            data[..rest].copy_from_slice(&self.buf[offset..(offset + rest)]);
             Ok(rest)
         } else {
-            data.copy_from_slice(&self.buf[offset..(offset + n)]);
+            data[..n].copy_from_slice(&self.buf[offset..(offset + n)]);
             Ok(n)
         }
     }

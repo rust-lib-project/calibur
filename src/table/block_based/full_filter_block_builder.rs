@@ -56,7 +56,7 @@ impl FullFilterBitsBuilder {
         }
         let pos = total_bits as usize / 8;
         data[pos] = self.num_probes as u8;
-        data[pos + 1..].copy_from_slice(&num_lines.to_le_bytes());
+        data[(pos + 1)..(pos + 5)].copy_from_slice(&num_lines.to_le_bytes());
         data
     }
 }

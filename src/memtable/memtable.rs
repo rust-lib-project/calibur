@@ -87,8 +87,8 @@ impl Memtable {
         self.pending_writes.load(Ordering::Acquire) == 0
     }
 
-    pub fn mark_write_begin(&self) {
-        self.pending_writes.fetch_add(1, Ordering::SeqCst);
+    pub fn mark_write_begin(&self, count: u64) {
+        self.pending_writes.fetch_add(count, Ordering::SeqCst);
     }
 
     // return true if this memtable must be scheduled flush at once

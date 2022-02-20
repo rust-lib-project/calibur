@@ -144,6 +144,15 @@ impl VersionSet {
         versions
     }
 
+    pub fn get_column_family_memtables(&self) -> Vec<(u32, Arc<Memtable>)> {
+        let mut mems = vec![];
+        for (id, cf) in self.column_family_set.iter() {
+            mems.push((*id, cf.get_super_version().mem.clone()));
+        }
+        mems.sort_by_key(|m| m.0);
+        mems
+    }
+
     pub fn mut_column_family(&mut self, cf_id: u32) -> Option<&mut ColumnFamily> {
         self.column_family_set.get_mut(&cf_id)
     }

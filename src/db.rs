@@ -238,9 +238,17 @@ impl Engine {
         pool.spawn(async move {
             while let Some(x) = rx.next().await {
                 writer.batch(x);
-                while let Some(x) = rx.try_next().unwrap() {
-                    if writer.batch(x) {
-                        break;
+                while let Ok(x) = rx.try_next() {
+                    match x {
+                        Some(msg) => {
+                            if writer.batch(msg) {
+                                break;
+                            }
+                        }
+                        None => {
+                            writer.apply().await;
+                            return;
+                        }
                     }
                 }
                 writer.apply().await;
@@ -285,26 +293,30 @@ impl Engine {
                         cb.send(ret).unwrap();
                     }
                 }
-                while let Some(x) = rx.try_next().unwrap() {
+                while let Ok(x) = rx.try_next() {
                     match x {
-                        WALTask::Write {
+                        Some(WALTask::Write {
                             wb,
                             cb,
                             sync,
                             disable_wal,
-                        } => {
+                        }) => {
                             processor.batch(wb, cb, sync, disable_wal);
                             if processor.should_flush() {
                                 break;
                             }
                         }
-                        WALTask::CreateColumnFamily { name, opts, cb } => {
+                        Some(WALTask::CreateColumnFamily { name, opts, cb }) => {
                             processor.flush().await?;
                             let ret = processor.writer.create_column_family(name, opts).await;
                             cb.send(ret).unwrap();
                         }
-                        WALTask::Ingest { .. } => {
+                        Some(WALTask::Ingest { .. }) => {
                             unimplemented!();
+                        }
+                        None => {
+                            processor.flush().await?;
+                            return Ok(());
                         }
                     }
                 }
@@ -357,7 +369,6 @@ impl Engine {
                 }
             }
         });
-
         Ok(())
     }
 
@@ -371,6 +382,12 @@ impl Engine {
                     v.record_error(Error::Other(format!("schedule flush failed")));
                 }
             });
+    }
+
+    pub fn close(&mut self) -> Result<()> {
+        self.stopped.store(true, Ordering::Release);
+        self.pool.shutdown();
+        Ok(())
     }
 }
 
@@ -431,5 +448,48 @@ impl BatchWALProcessor {
             }
         }
         r.map(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::runtime::Runtime;
+
+    #[test]
+    fn test_open_new_db() {
+        let dir = tempfile::Builder::new()
+            .prefix("test_open_new_db")
+            .tempdir()
+            .unwrap();
+        let r = Runtime::new().unwrap();
+        let mut db_options = DBOptions::default();
+        db_options.db_path = dir.path().to_str().unwrap().to_string();
+        let mut engine = r
+            .block_on(Engine::open(db_options.clone(), vec![], None))
+            .unwrap();
+        let vs = engine.version_set.lock().unwrap();
+        assert_eq!(vs.get_column_family_versions().len(), 1);
+        drop(vs);
+        engine.close();
+        drop(engine);
+        let mut write_opt = ColumnFamilyOptions::default();
+        write_opt.write_buffer_size = 1000;
+        let mut engine = r
+            .block_on(Engine::open(
+                db_options,
+                vec![ColumnFamilyDescriptor {
+                    name: "write".to_string(),
+                    options: write_opt,
+                }],
+                None,
+            ))
+            .unwrap();
+        let vs = engine.version_set.lock().unwrap();
+        assert_eq!(vs.get_column_family_versions().len(), 2);
+        drop(vs);
+        let mut wb = WriteBatch::new();
+        wb.put_cf(0, b"k1", b"v1");
+        r.block_on(engine.write(&mut wb)).unwrap();
     }
 }

@@ -87,7 +87,7 @@ impl WriteBatch {
 
     fn set_count(&mut self, count: u32) {
         let c = count.to_le_bytes();
-        self.data[8..].copy_from_slice(&c);
+        self.data[8..12].copy_from_slice(&c);
     }
 
     pub fn to_raw(&mut self) -> ReadOnlyWriteBatch {
@@ -167,6 +167,9 @@ impl ReadOnlyWriteBatch {
 
 impl<'a> WriteBatchIter<'a> {
     pub fn read_record(&mut self) -> Option<WriteBatchItem<'a>> {
+        if self.offset >= self.batch.data.len() {
+            return None;
+        }
         let tag = self.batch.data[self.offset];
         let mut cf = 0;
         self.offset += 1;

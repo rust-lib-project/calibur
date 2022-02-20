@@ -251,13 +251,13 @@ impl Manifest {
             }
         }
         for (cf, mut edits) in edits_by_cf {
+            // TODO: get options from version_set
             if edits.len() == 1 && edits[0].is_column_family_add {
                 let mut version_set = self.version_set.lock().unwrap();
                 let version = version_set.create_column_family(edits.pop().unwrap())?;
                 self.versions.insert(cf, version);
                 continue;
             }
-            // TODO: get options from version_set
             let opts = self.cf_options.get(&cf).unwrap();
             let version = self.versions.get(&cf).unwrap();
             let mut mems = vec![];

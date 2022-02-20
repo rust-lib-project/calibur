@@ -313,7 +313,7 @@ mod tests {
         }
         runtime.block_on(builder.finish()).unwrap();
         assert_eq!(builder.num_entries(), 2000);
-        let r = fs.open_random_access_file("sst0".to_string()).unwrap();
+        let r = fs.open_random_access_file(PathBuf::from("sst0")).unwrap();
         let mut tbl_opts = TableReaderOptions::default();
         tbl_opts.file_size = r.file_size();
         let reader = runtime
