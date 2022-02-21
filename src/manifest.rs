@@ -304,7 +304,12 @@ impl Manifest {
         }
         self.log.as_mut().unwrap().fsync().await?;
         if new_descripter {
-            store_current_file(&self.options.fs, self.manifest_file_number, &self.options.db_path).await?;
+            store_current_file(
+                &self.options.fs,
+                self.manifest_file_number,
+                &self.options.db_path,
+            )
+            .await?;
         }
         Ok(())
     }
