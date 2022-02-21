@@ -70,6 +70,7 @@ impl Default for DBOptions {
     }
 }
 
+#[derive(Clone)]
 pub struct ColumnFamilyDescriptor {
     pub name: String,
     pub options: ColumnFamilyOptions,

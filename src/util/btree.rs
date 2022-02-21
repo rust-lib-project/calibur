@@ -1,11 +1,10 @@
-use bytes::Bytes;
 use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
 pub trait ComparableRecord: Clone {
-    fn smallest(&self) -> &Bytes;
-    fn largest(&self) -> &Bytes;
+    fn smallest(&self) -> &[u8];
+    fn largest(&self) -> &[u8];
     fn id(&self) -> u64;
 }
 
@@ -14,9 +13,9 @@ pub trait Page<T: ComparableRecord>: Clone {
 
     fn new_page(max_page_size: usize) -> Self;
     fn new_iterator(self: &Arc<Self>) -> Self::Iter;
-    fn seek(&self, key: &Bytes) -> Option<T>;
-    fn smallest(&self) -> &Bytes;
-    fn largest(&self) -> &Bytes;
+    fn seek(&self, key: &[u8]) -> Option<T>;
+    fn smallest(&self) -> &[u8];
+    fn largest(&self) -> &[u8];
     fn split(&self) -> Vec<Arc<Self>>;
     fn merge(&self, other: &Self) -> Arc<Self>;
     fn size(&self) -> usize;
@@ -33,8 +32,8 @@ pub trait Page<T: ComparableRecord>: Clone {
 }
 
 pub trait PageIterator<T: ComparableRecord>: Clone {
-    fn seek(&mut self, key: &Bytes);
-    fn seek_for_previous(&mut self, key: &Bytes);
+    fn seek(&mut self, key: &[u8]);
+    fn seek_for_previous(&mut self, key: &[u8]);
     fn seek_to_first(&mut self);
     fn seek_to_last(&mut self);
     fn next(&mut self);
@@ -52,7 +51,7 @@ pub struct LeafNodeIterator<T: ComparableRecord> {
 }
 
 impl<T: ComparableRecord> PageIterator<T> for LeafNodeIterator<T> {
-    fn seek(&mut self, key: &Bytes) {
+    fn seek(&mut self, key: &[u8]) {
         if self.page.data.is_empty() {
             self.cursor = 0;
             return;
@@ -67,7 +66,7 @@ impl<T: ComparableRecord> PageIterator<T> for LeafNodeIterator<T> {
         };
     }
 
-    fn seek_for_previous(&mut self, key: &Bytes) {
+    fn seek_for_previous(&mut self, key: &[u8]) {
         if self.page.data.is_empty() {
             self.cursor = 0;
             return;
@@ -136,8 +135,8 @@ impl<T: ComparableRecord> PageIterator<T> for LeafNodeIterator<T> {
 #[derive(Clone, Default)]
 pub struct LeafPage<T: ComparableRecord> {
     data: Vec<T>,
-    smallest: Bytes,
-    largest: Bytes,
+    smallest: Vec<u8>,
+    largest: Vec<u8>,
     max_page_size: usize,
 }
 
@@ -146,8 +145,8 @@ impl<T: ComparableRecord> Page<T> for LeafPage<T> {
     fn new_page(max_page_size: usize) -> Self {
         LeafPage::<T> {
             data: vec![],
-            largest: Bytes::new(),
-            smallest: Bytes::new(),
+            largest: Vec::new(),
+            smallest: Vec::new(),
             max_page_size,
         }
     }
@@ -159,7 +158,7 @@ impl<T: ComparableRecord> Page<T> for LeafPage<T> {
         }
     }
 
-    fn seek(&self, key: &Bytes) -> Option<T> {
+    fn seek(&self, key: &[u8]) -> Option<T> {
         if self.data.is_empty() {
             return None;
         }
@@ -175,11 +174,11 @@ impl<T: ComparableRecord> Page<T> for LeafPage<T> {
         }
     }
 
-    fn smallest(&self) -> &Bytes {
+    fn smallest(&self) -> &[u8] {
         &self.smallest
     }
 
-    fn largest(&self) -> &Bytes {
+    fn largest(&self) -> &[u8] {
         &self.largest
     }
 
@@ -194,12 +193,12 @@ impl<T: ComparableRecord> Page<T> for LeafPage<T> {
             let key = if start_idx == 0 {
                 self.smallest.clone()
             } else {
-                self.data[start_idx].smallest().clone()
+                self.data[start_idx].smallest().to_vec()
             };
             nodes.push(Arc::new(Self {
                 data: new_data,
                 smallest: key,
-                largest: self.data[end_idx - 1].largest().clone(),
+                largest: self.data[end_idx - 1].largest().to_vec(),
                 max_page_size: self.max_page_size,
             }));
             start_idx += split_size;
@@ -235,7 +234,7 @@ impl<T: ComparableRecord> Page<T> for LeafPage<T> {
     fn insert(&mut self, mut tables: Vec<T>) {
         self.data.append(&mut tables);
         self.data.sort_by(|a, b| a.smallest().cmp(b.smallest()));
-        self.largest = self.data.last().unwrap().largest().clone();
+        self.largest = self.data.last().unwrap().largest().to_vec();
     }
 
     fn delete(&mut self, tables: Vec<T>) {
@@ -266,8 +265,8 @@ impl<T: ComparableRecord> Page<T> for LeafPage<T> {
 #[derive(Clone)]
 pub struct BTreePage<R: ComparableRecord, P: Page<R>> {
     son: Vec<Arc<P>>,
-    smallest: Bytes,
-    largest: Bytes,
+    smallest: Vec<u8>,
+    largest: Vec<u8>,
     record_number: usize,
     max_page_size: usize,
     _phantom: PhantomData<R>,
@@ -285,7 +284,7 @@ where
     R: ComparableRecord,
     P: Page<R>,
 {
-    fn seek(&mut self, key: &Bytes) {
+    fn seek(&mut self, key: &[u8]) {
         if self.page.son.is_empty() {
             self.cursor = 0;
             return;
@@ -326,7 +325,7 @@ where
         }
     }
 
-    fn seek_for_previous(&mut self, key: &Bytes) {
+    fn seek_for_previous(&mut self, key: &[u8]) {
         if self.page.son.is_empty() {
             self.cursor = 0;
             return;
@@ -459,8 +458,8 @@ where
     fn new_page(max_page_size: usize) -> Self {
         BTreePage::<R, P> {
             son: vec![Arc::new(P::new_page(max_page_size))],
-            largest: Bytes::new(),
-            smallest: Bytes::new(),
+            largest: Vec::new(),
+            smallest: Vec::new(),
             max_page_size,
             record_number: 0,
             _phantom: Default::default(),
@@ -475,7 +474,7 @@ where
         }
     }
 
-    fn seek(&self, key: &Bytes) -> Option<R> {
+    fn seek(&self, key: &[u8]) -> Option<R> {
         if self.son.is_empty() {
             return None;
         }
@@ -497,10 +496,10 @@ where
         }
     }
 
-    fn smallest(&self) -> &Bytes {
+    fn smallest(&self) -> &[u8] {
         &self.smallest
     }
-    fn largest(&self) -> &Bytes {
+    fn largest(&self) -> &[u8] {
         &self.largest
     }
 
@@ -519,12 +518,12 @@ where
             let key = if start_idx == 0 {
                 self.smallest.clone()
             } else {
-                self.son[start_idx].smallest().clone()
+                self.son[start_idx].smallest().to_vec()
             };
             nodes.push(Arc::new(BTreePage {
                 son: new_data,
                 smallest: key,
-                largest: self.son[end_idx - 1].largest().clone(),
+                largest: self.son[end_idx - 1].largest().to_vec(),
                 max_page_size: self.max_page_size,
                 record_number,
                 _phantom: Default::default(),
@@ -615,9 +614,9 @@ where
             self.son.sort_by(|a, b| a.smallest().cmp(b.smallest()));
             if self.son.first().unwrap().smallest().cmp(self.smallest()) == std::cmp::Ordering::Less
             {
-                self.smallest = self.son.first().unwrap().smallest().clone();
+                self.smallest = self.son.first().unwrap().smallest().to_vec();
             }
-            self.largest = self.son.last().unwrap().largest().clone();
+            self.largest = self.son.last().unwrap().largest().to_vec();
         }
     }
 
@@ -677,7 +676,7 @@ where
         if new_idx < self.son.len() {
             self.son.truncate(new_idx);
         }
-        self.largest = self.son.last().unwrap().largest().clone();
+        self.largest = self.son.last().unwrap().largest().to_vec();
     }
 
     fn max_page_size(&self) -> usize {
@@ -703,7 +702,7 @@ impl<T: ComparableRecord, P: Page<T>> BTree<T, P> {
         self.node.record_number()
     }
 
-    pub fn get(&self, key: &Bytes) -> Option<T> {
+    pub fn get(&self, key: &[u8]) -> Option<T> {
         self.node.seek(key)
     }
 
@@ -750,16 +749,16 @@ mod tests {
     #[derive(Clone)]
     struct FakeTable {
         id: u64,
-        smallest: Bytes,
-        largest: Bytes,
+        smallest: Vec<u8>,
+        largest: Vec<u8>,
     }
 
     impl ComparableRecord for FakeTable {
-        fn smallest(&self) -> &Bytes {
+        fn smallest(&self) -> &[u8] {
             &self.smallest
         }
 
-        fn largest(&self) -> &Bytes {
+        fn largest(&self) -> &[u8] {
             &self.largest
         }
 
@@ -781,8 +780,8 @@ mod tests {
             let largest = (i + 1) * gap - 1;
             ops.push(FakeTable {
                 id: i,
-                smallest: Bytes::from(smallest.to_string()),
-                largest: Bytes::from(largest.to_string()),
+                smallest: smallest.to_string().into_bytes(),
+                largest: largest.to_string().into_bytes(),
             });
         }
         if is_insert {
@@ -796,18 +795,18 @@ mod tests {
     fn test_leaf_page() {
         let mut page = LeafPage::new_page(120);
         update_page(&mut page, 200, 300, 100, true);
-        let p = page.seek(&Bytes::from("0".to_string()));
+        let p = page.seek("0".to_string().as_bytes());
         assert_eq!(p.unwrap().id, 200);
         assert_eq!(page.record_number(), 100);
         assert_eq!(page.size(), 100);
         update_page(&mut page, 100, 200, 100, true);
-        let p = page.seek(&Bytes::from("0".to_string()));
+        let p = page.seek("0".to_string().as_bytes());
         assert_eq!(p.unwrap().id, 100);
-        let p = page.seek(&Bytes::from("10099".to_string()));
+        let p = page.seek("10099".to_string().as_bytes());
         assert_eq!(p.unwrap().id, 100);
-        let p = page.seek(&Bytes::from("29999".to_string()));
+        let p = page.seek("29999".to_string().as_bytes());
         assert_eq!(p.unwrap().id, 299);
-        let p = page.seek(&Bytes::from("30000".to_string()));
+        let p = page.seek("30000".to_string().as_bytes());
         assert!(p.is_none());
 
         assert_eq!(page.record_number(), 200);
@@ -825,10 +824,10 @@ mod tests {
         let page = page2.merge(&page3);
         assert_eq!(page.size(), 25);
         let mut it = page.new_iterator();
-        it.seek(&Bytes::from("250".to_string()));
+        it.seek("250".to_string().as_bytes());
         assert_eq!(it.record().unwrap().id, 290);
         let mut it = page.new_iterator();
-        it.seek_for_previous(&Bytes::from("250".to_string()));
+        it.seek_for_previous("250".to_string().as_bytes());
         assert_eq!(it.record().unwrap().id, 214);
     }
 
@@ -844,8 +843,8 @@ mod tests {
             let largest = (i + 1) * gap - 1;
             ops.push(FakeTable {
                 id: i,
-                smallest: Bytes::from(smallest.to_string()),
-                largest: Bytes::from(largest.to_string()),
+                smallest: smallest.to_string().into_bytes(),
+                largest: largest.to_string().into_bytes(),
             });
         }
         tree.replace(vec![], ops)
@@ -863,8 +862,8 @@ mod tests {
             let largest = (i + 1) * gap - 1;
             ops.push(FakeTable {
                 id: i,
-                smallest: Bytes::from(smallest.to_string()),
-                largest: Bytes::from(largest.to_string()),
+                smallest: smallest.to_string().into_bytes(),
+                largest: largest.to_string().into_bytes(),
             });
         }
         tree.replace(ops, vec![])
@@ -874,22 +873,22 @@ mod tests {
     fn test_leveltree() {
         let tree = ThreeLevelBTree::<FakeTable>::new(64);
         let tree = insert_to_tree(tree, 100, 228, 100);
-        let t = tree.get(&Bytes::from("20000"));
+        let t = tree.get("20000".to_string().as_bytes());
         assert!(t.is_some());
         assert_eq!(t.unwrap().id, 200);
-        let t = tree.get(&Bytes::from("20099"));
+        let t = tree.get("20099".to_string().as_bytes());
         assert!(t.is_some());
         assert_eq!(t.unwrap().id, 200);
 
         let tree = insert_to_tree(tree, 228, 100 + 640, 100);
         assert_eq!(tree.node.son[0].record_number(), 640);
         assert_eq!(tree.node.son[0].size(), 20);
-        let t = tree.get(&Bytes::from("69999"));
+        let t = tree.get("69999".to_string().as_bytes());
         assert!(t.is_some());
         assert_eq!(t.unwrap().id, 699);
 
         let mut tree = delete_from_tree(tree, 100, 400, 100);
-        let t = tree.get(&Bytes::from("20000"));
+        let t = tree.get("20000".to_string().as_bytes());
         assert!(t.is_some());
         assert_eq!(tree.node.son[0].size(), 11);
         // 640 - 300
@@ -906,7 +905,7 @@ mod tests {
         assert_eq!(tree.node.size(), 3);
         assert_eq!(tree.node.record_number(), 2340);
         assert_eq!(tree.node.son[0].size(), 22);
-        let t = tree.get(&Bytes::from("20000"));
+        let t = tree.get(b"20000");
         assert!(t.is_some());
     }
 }

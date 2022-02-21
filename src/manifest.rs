@@ -216,6 +216,7 @@ impl Manifest {
         if edits.is_empty() {
             return Ok(());
         }
+        let mut new_descripter = false;
         if self.log.as_ref().map_or(true, |f| {
             f.get_file_size() > self.options.max_manifest_file_size
         }) {
@@ -230,6 +231,7 @@ impl Manifest {
             if let Some(edit) = edits.first_mut() {
                 edit.set_max_column_family(self.kernel.get_max_column_family());
             }
+            new_descripter = true;
         }
         let mut data = vec![];
         for e in &edits {
@@ -301,6 +303,9 @@ impl Manifest {
             self.versions.insert(cf, version);
         }
         self.log.as_mut().unwrap().fsync().await?;
+        if new_descripter {
+            store_current_file(&self.options.fs, self.manifest_file_number, &self.options.db_path).await?;
+        }
         Ok(())
     }
 
@@ -314,7 +319,6 @@ impl Manifest {
             {
                 let mut edit = VersionEdit::default();
                 edit.column_family = version.get_cf_id() as u32;
-                edit.is_column_family_add = true;
                 edit.add_column_family(version.get_cf_name().to_string());
                 edit.set_comparator_name(version.get_comparator_name());
                 if !edit.encode_to(&mut record) {

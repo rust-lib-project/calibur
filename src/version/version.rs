@@ -1,7 +1,8 @@
+use crate::common::options::ReadOptions;
+use crate::common::Result;
 use crate::memtable::Memtable;
 use crate::version::version_storage_info::VersionStorageInfo;
 use crate::version::{FileMetaData, TableFile};
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 #[derive(Default, Clone)]
@@ -97,29 +98,22 @@ impl Version {
     pub fn scan<F: FnMut(&FileMetaData)>(&self, f: F, level: usize) {
         self.storage.scan(f, level);
     }
-}
 
-pub struct SuperVersion {
-    pub mem: Arc<Memtable>,
-    pub imms: MemtableList,
-    pub current: Arc<Version>,
-    pub version_number: u64,
-    pub valid: AtomicBool,
-}
-
-impl SuperVersion {
-    pub fn new(
-        mem: Arc<Memtable>,
-        imms: MemtableList,
-        current: Arc<Version>,
-        version_number: u64,
-    ) -> SuperVersion {
-        SuperVersion {
-            mem,
-            imms,
-            current,
-            version_number,
-            valid: AtomicBool::new(true),
+    pub async fn get(&self, opts: &ReadOptions, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        let l = self.storage.level0.len();
+        for i in 0..l {
+            if let Some(v) = self.storage.level0[l - i - 1].reader.get(opts, key).await? {
+                return Ok(Some(v));
+            }
         }
+        let l = self.storage.size();
+        for i in 0..l {
+            if let Some(table) = self.storage.get_table(key, i) {
+                if let Some(v) = table.reader.get(opts, key).await? {
+                    return Ok(Some(v));
+                }
+            }
+        }
+        Ok(None)
     }
 }

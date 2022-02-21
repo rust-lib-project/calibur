@@ -1,7 +1,7 @@
 use crate::common::FileSystem;
 use crate::common::MAX_SEQUENCE_NUMBER;
 use crate::table::TableReader;
-use crate::util::BtreeComparable;
+use crate::util::{extract_user_key, BtreeComparable};
 use bytes::Bytes;
 use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
@@ -78,8 +78,10 @@ impl FileMetaData {
 pub struct TableFile {
     pub meta: FileMetaData,
     deleted: AtomicBool,
-    table: Box<dyn TableReader>,
+    pub reader: Box<dyn TableReader>,
     fs: Arc<dyn FileSystem>,
+    smallest: Vec<u8>,
+    largest: Vec<u8>,
     path: PathBuf,
 }
 
@@ -90,11 +92,15 @@ impl TableFile {
         fs: Arc<dyn FileSystem>,
         path: PathBuf,
     ) -> Self {
+        let smallest = extract_user_key(meta.smallest.as_ref()).to_vec();
+        let largest = extract_user_key(meta.largest.as_ref()).to_vec();
         TableFile {
             path,
             fs,
-            table,
+            reader: table,
             meta,
+            smallest,
+            largest,
             deleted: AtomicBool::new(false),
         }
     }
@@ -114,12 +120,12 @@ impl Drop for TableFile {
 }
 
 impl BtreeComparable for Arc<TableFile> {
-    fn smallest(&self) -> &Bytes {
-        &self.meta.smallest
+    fn smallest(&self) -> &[u8] {
+        &self.smallest
     }
 
-    fn largest(&self) -> &Bytes {
-        &self.meta.largest
+    fn largest(&self) -> &[u8] {
+        &self.largest
     }
 
     fn id(&self) -> u64 {

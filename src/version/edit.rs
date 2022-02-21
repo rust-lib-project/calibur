@@ -140,7 +140,8 @@ impl VersionEdit {
             put_varint32varint32(buf, Tag::ColumnFamily as u32, self.column_family);
         }
         if self.is_column_family_add {
-            put_varint32varint32(buf, Tag::ColumnFamilyAdd as u32, self.column_family);
+            put_var_uint32(buf, Tag::ColumnFamilyAdd as u32);
+            put_length_prefixed_slice(buf, self.column_family_name.as_bytes());
         }
         if self.is_column_family_drop {
             put_var_uint32(buf, Tag::ColumnFamilyDrop as u32);
@@ -370,7 +371,6 @@ mod tests {
         edit.deleted_files.push(f);
         let mut record = vec![];
         edit.encode_to(&mut record);
-        println!("record: {}", record.len());
         let mut new_edit = VersionEdit::default();
         new_edit.decode_from(&record).unwrap();
         assert_eq!(edit, new_edit);

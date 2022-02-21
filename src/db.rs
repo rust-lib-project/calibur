@@ -1,4 +1,7 @@
-use crate::common::{make_current_file, make_log_file, parse_file_name, DBFileType, Error, Result};
+use crate::common::{
+    make_current_file, make_log_file, parse_file_name, DBFileType, Error, Result,
+    MAX_SEQUENCE_NUMBER,
+};
 use crate::options::{ColumnFamilyDescriptor, DBOptions, ImmutableDBOptions};
 use crate::version::{KernelNumberContext, VersionSet};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
@@ -8,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::common::format::ValueType;
+use crate::common::options::ReadOptions;
 use crate::compaction::{run_flush_memtable_job, FlushRequest};
 use crate::log::LogReader;
 use crate::manifest::{Manifest, ManifestScheduler, ManifestWriter};
@@ -99,6 +103,22 @@ impl Engine {
             .await
     }
 
+    pub async fn get(
+        &self,
+        opts: &ReadOptions,
+        cf: u32,
+        key: &[u8],
+    ) -> Result<Option<Vec<u8>>> {
+        let version = {
+            let vs = self.version_set.lock().unwrap();
+            match vs.get_superversion(cf) {
+                Some(v) => v,
+                None => return Err(Error::InvalidColumnFamily(cf)),
+            }
+        };
+        version.get(opts, key, MAX_SEQUENCE_NUMBER).await
+    }
+
     async fn recover(
         immutable_options: Arc<ImmutableDBOptions>,
         cfs: &[ColumnFamilyDescriptor],
@@ -159,14 +179,13 @@ impl Engine {
 
     async fn recover_log(&mut self, logs: Vec<u64>) -> Result<()> {
         let mut min_log_number = u64::MAX;
-        let versions = {
+        let (versions, cf_mems) = {
             let version_set = self.version_set.lock().unwrap();
-            version_set.get_column_family_versions()
+            (version_set.get_column_family_versions(), version_set.get_column_family_memtables())
         };
         for v in &versions {
             min_log_number = std::cmp::min(min_log_number, v.get_log_number());
         }
-        let mut cf_mems = vec![];
         for log_number in logs {
             if log_number < min_log_number {
                 continue;
@@ -181,7 +200,7 @@ impl Engine {
                 let wb = ReadOnlyWriteBatch::try_from(buf.clone())?;
                 let count = wb.count() as u64;
                 let sequence = wb.get_sequence();
-                self.write_memtable(&wb, sequence, &mut cf_mems)?;
+                self.write_memtable(&wb, sequence, &cf_mems)?;
                 next_seq = sequence + count - 1;
                 // TODO: flush if the memtable is full
             }
@@ -207,7 +226,7 @@ impl Engine {
                     }
                 }
                 if idx == mems.len() {
-                    panic!("write miss column family");
+                    panic!("write miss column family, {}, mem size: {}", cf, mems.len());
                 }
             }
             idx
@@ -471,17 +490,18 @@ mod tests {
         let vs = engine.version_set.lock().unwrap();
         assert_eq!(vs.get_column_family_versions().len(), 1);
         drop(vs);
-        engine.close();
+        engine.close().unwrap();
         drop(engine);
         let mut write_opt = ColumnFamilyOptions::default();
         write_opt.write_buffer_size = 1000;
+        let cfs = vec![ColumnFamilyDescriptor {
+                name: "write".to_string(),
+                options: write_opt,
+            }];
         let mut engine = r
             .block_on(Engine::open(
-                db_options,
-                vec![ColumnFamilyDescriptor {
-                    name: "write".to_string(),
-                    options: write_opt,
-                }],
+                db_options.clone(),
+                cfs.clone(),
                 None,
             ))
             .unwrap();
@@ -491,5 +511,14 @@ mod tests {
         let mut wb = WriteBatch::new();
         wb.put_cf(0, b"k1", b"v1");
         r.block_on(engine.write(&mut wb)).unwrap();
+        let opts = ReadOptions::default();
+        let v = r.block_on(engine.get(&opts, 0, b"k1")).unwrap().unwrap();
+        assert_eq!(v, b"v1".to_vec());
+        engine.close().unwrap();
+        drop(engine);
+        let mut engine = r
+            .block_on(Engine::open(db_options, cfs, None)).unwrap();
+        let v = r.block_on(engine.get(&opts, 0, b"k1")).unwrap().unwrap();
+        assert_eq!(v, b"v1".to_vec());
     }
 }

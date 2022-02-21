@@ -219,7 +219,7 @@ impl WALWriter {
         if sync_wal {
             self.writer.fsync().await?;
         }
-        for (cf, m) in &self.mems {
+        for (_, m) in &self.mems {
             m.mark_write_begin(l as u64);
         }
         Ok(self.mems.clone())

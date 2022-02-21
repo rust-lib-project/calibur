@@ -2,6 +2,7 @@ use super::list::{IterRef, Skiplist};
 use crate::common::format::{pack_sequence_and_type, ValueType};
 use crate::common::InternalKeyComparator;
 use crate::table::InternalIterator;
+use crate::util::extract_user_key;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub struct Memtable {
@@ -66,6 +67,20 @@ impl Memtable {
 
     pub fn get_id(&self) -> u64 {
         self.id
+    }
+
+    pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
+        let mut iter = self.list.iter();
+        iter.seek(key);
+        if iter.valid()
+            && self
+                .comparator
+                .get_user_comparator()
+                .same_key(extract_user_key(key), extract_user_key(iter.key()))
+        {
+            return Some(iter.value().to_vec());
+        }
+        None
     }
 
     pub fn set_next_log_number(&self, num: u64) {

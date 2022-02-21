@@ -6,7 +6,7 @@ const MAX_BTREE_PAGE_SIZE: usize = 128;
 
 #[derive(Clone, Default)]
 pub struct VersionStorageInfo {
-    level0: Vec<Arc<TableFile>>,
+    pub(crate) level0: Vec<Arc<TableFile>>,
     base_level: Vec<BTree<Arc<TableFile>>>,
 }
 
@@ -110,5 +110,9 @@ impl VersionStorageInfo {
         }
 
         Self { level0, base_level }
+    }
+
+    pub fn get_table(&self, key: &[u8], level: usize) -> Option<Arc<TableFile>> {
+        self.base_level[level].get(key)
     }
 }
