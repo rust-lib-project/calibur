@@ -1,4 +1,5 @@
-mod posix_file;
+mod async_file_system;
+mod posix_file_system;
 mod reader;
 mod writer;
 
@@ -9,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::common::Error;
 use async_trait::async_trait;
-pub use posix_file::SyncPoxisFileSystem;
+pub use posix_file_system::SyncPoxisFileSystem;
 pub use reader::RandomAccessFileReader;
 pub use reader::SequentialFileReader;
 pub use writer::WritableFileWriter;
@@ -29,14 +30,13 @@ pub trait RandomAccessFile: 'static + Send + Sync {
 #[async_trait]
 pub trait SequentialFile: 'static + Send + Sync {
     async fn read_sequencial(&mut self, data: &mut [u8]) -> Result<usize>;
-    async fn position_read(&self, offset: usize, data: &mut [u8]) -> Result<usize>;
     fn get_file_size(&self) -> usize;
 }
 
 #[async_trait]
 pub trait WritableFile: Send {
     async fn append(&mut self, data: &[u8]) -> Result<()>;
-    fn truncate(&mut self, offset: u64) -> Result<()>;
+    async fn truncate(&mut self, offset: u64) -> Result<()>;
     fn allocate(&mut self, offset: u64, len: u64) -> Result<()>;
     async fn sync(&mut self) -> Result<()>;
     async fn fsync(&mut self) -> Result<()>;
@@ -60,6 +60,12 @@ pub trait FileSystem: Send + Sync {
     }
 
     fn open_writable_file(&self, file_name: PathBuf) -> Result<Box<WritableFileWriter>>;
+    fn open_writable_file_for_high_priority(
+        &self,
+        file_name: PathBuf,
+    ) -> Result<Box<WritableFileWriter>> {
+        self.open_writable_file(file_name)
+    }
 
     fn open_random_access_file(&self, p: PathBuf) -> Result<Box<RandomAccessFileReader>>;
 
@@ -118,7 +124,7 @@ impl WritableFile for InMemFile {
         Ok(())
     }
 
-    fn truncate(&mut self, offset: u64) -> Result<()> {
+    async fn truncate(&mut self, offset: u64) -> Result<()> {
         self.buf.resize(offset as usize, 0);
         Ok(())
     }
@@ -176,10 +182,6 @@ impl SequentialFile for InMemFile {
         let x = self.read(self.offset, data).await?;
         self.offset += x;
         Ok(x)
-    }
-
-    async fn position_read(&self, offset: usize, data: &mut [u8]) -> Result<usize> {
-        self.read(offset, data).await
     }
 
     fn get_file_size(&self) -> usize {

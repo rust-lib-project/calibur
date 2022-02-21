@@ -41,9 +41,6 @@ impl SequentialFileReader {
     pub fn new(file: Box<dyn SequentialFile>, filename: String) -> Self {
         Self { file, filename }
     }
-    pub async fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize> {
-        self.file.position_read(offset, buf).await
-    }
 
     pub async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         self.file.read_sequencial(buf).await

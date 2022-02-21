@@ -250,8 +250,8 @@ impl WALScheduler {
         self.sender
             .send(task)
             .await
-            .map_err(|_| Error::Cancel(format!("wal")))?;
-        let ret = rx.await.map_err(|_| Error::Cancel(format!("wal")))?;
+            .map_err(|_| Error::Cancel("wal"))?;
+        let ret = rx.await.map_err(|_| Error::Cancel("wal"))?;
         ret
     }
 
@@ -271,8 +271,8 @@ impl WALScheduler {
         self.sender
             .send(task)
             .await
-            .map_err(|_| Error::Cancel(format!("wal")))?;
-        let wb = rx.await.map_err(|_| Error::Cancel(format!("wal")))?;
+            .map_err(|_| Error::Cancel("wal"))?;
+        let wb = rx.await.map_err(|_| Error::Cancel("wal"))?;
         wb
     }
 }

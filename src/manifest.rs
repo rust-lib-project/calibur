@@ -304,7 +304,12 @@ impl Manifest {
         }
         self.log.as_mut().unwrap().fsync().await?;
         if new_descripter {
-            store_current_file(&self.options.fs, self.manifest_file_number, &self.options.db_path).await?;
+            store_current_file(
+                &self.options.fs,
+                self.manifest_file_number,
+                &self.options.db_path,
+            )
+            .await?;
         }
         Ok(())
     }
@@ -426,13 +431,10 @@ impl CompactionEngine for ManifestScheduler {
         self.sender
             .send(task)
             .await
-            .map_err(|e| Error::Cancel(format!("the manifest thread may close, {:?}", e)))?;
-        let x = rx.await.map_err(|e| {
-            Error::Cancel(format!(
-                "The manifest thread may cancel this apply, {:?}",
-                e
-            ))
-        })?;
+            .map_err(|_| Error::Cancel("the manifest thread may close"))?;
+        let x = rx
+            .await
+            .map_err(|_| Error::Cancel("The manifest thread may cancel this apply"))?;
         x
     }
 }

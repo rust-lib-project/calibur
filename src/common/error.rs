@@ -24,7 +24,7 @@ pub enum Error {
     #[error("Database Closed")]
     DBClosed,
     #[error("Task Cancel because of: {0}")]
-    Cancel(String),
+    Cancel(&'static str),
     #[error("Error when reading from log: {0}")]
     LogRead(String),
     #[error("Invalid column family id: {0}")]

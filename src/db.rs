@@ -103,12 +103,7 @@ impl Engine {
             .await
     }
 
-    pub async fn get(
-        &self,
-        opts: &ReadOptions,
-        cf: u32,
-        key: &[u8],
-    ) -> Result<Option<Vec<u8>>> {
+    pub async fn get(&self, opts: &ReadOptions, cf: u32, key: &[u8]) -> Result<Option<Vec<u8>>> {
         let version = {
             let vs = self.version_set.lock().unwrap();
             match vs.get_superversion(cf) {
@@ -181,7 +176,10 @@ impl Engine {
         let mut min_log_number = u64::MAX;
         let (versions, cf_mems) = {
             let version_set = self.version_set.lock().unwrap();
-            (version_set.get_column_family_versions(), version_set.get_column_family_memtables())
+            (
+                version_set.get_column_family_versions(),
+                version_set.get_column_family_memtables(),
+            )
         };
         for v in &versions {
             min_log_number = std::cmp::min(min_log_number, v.get_log_number());
@@ -495,15 +493,11 @@ mod tests {
         let mut write_opt = ColumnFamilyOptions::default();
         write_opt.write_buffer_size = 1000;
         let cfs = vec![ColumnFamilyDescriptor {
-                name: "write".to_string(),
-                options: write_opt,
-            }];
+            name: "write".to_string(),
+            options: write_opt,
+        }];
         let mut engine = r
-            .block_on(Engine::open(
-                db_options.clone(),
-                cfs.clone(),
-                None,
-            ))
+            .block_on(Engine::open(db_options.clone(), cfs.clone(), None))
             .unwrap();
         let vs = engine.version_set.lock().unwrap();
         assert_eq!(vs.get_column_family_versions().len(), 2);
@@ -516,8 +510,7 @@ mod tests {
         assert_eq!(v, b"v1".to_vec());
         engine.close().unwrap();
         drop(engine);
-        let mut engine = r
-            .block_on(Engine::open(db_options, cfs, None)).unwrap();
+        let mut engine = r.block_on(Engine::open(db_options, cfs, None)).unwrap();
         let v = r.block_on(engine.get(&opts, 0, b"k1")).unwrap().unwrap();
         assert_eq!(v, b"v1".to_vec());
     }

@@ -30,22 +30,47 @@ impl WritableFileWriter {
     pub async fn append(&mut self, data: &[u8]) -> Result<()> {
         // TODO: We will cache data in buf when we use direct_io for write operation.
         self.file_size += data.len();
-        self.writable_file.append(data).await?;
+        if self.max_buffer_size == 0 {
+            self.writable_file.append(data).await?;
+        } else if self.buf.is_empty() && data.len() >= self.max_buffer_size {
+            self.writable_file.append(data).await?;
+        } else {
+            self.buf.extend_from_slice(data);
+            if self.buf.len() >= self.max_buffer_size {
+                self.writable_file.append(&self.buf).await?;
+                self.buf.clear();
+            }
+        }
         Ok(())
     }
 
     pub async fn flush(&mut self) -> Result<()> {
+        if !self.buf.is_empty() {
+            self.writable_file.append(&self.buf).await?;
+            self.buf.clear();
+        }
         Ok(())
     }
 
     pub async fn pad(&mut self, pad_bytes: usize) -> Result<()> {
         self.file_size += pad_bytes;
-        self.buf.resize(pad_bytes, 0);
-        self.writable_file.append(&self.buf).await?;
+        if self.buf.is_empty() {
+            self.buf.resize(pad_bytes, 0);
+            self.writable_file.append(&self.buf).await?;
+        } else if pad_bytes < 100 {
+            let pad: [u8; 100] = [0u8; 100];
+            self.append(&pad[..pad_bytes]).await?;
+        } else {
+            let pad = vec![0u8; pad_bytes];
+            self.append(&pad).await?;
+        }
         Ok(())
     }
 
     pub async fn sync(&mut self) -> Result<()> {
+        if !self.buf.is_empty() {
+            self.flush().await?;
+        }
         self.writable_file.sync().await?;
         Ok(())
     }

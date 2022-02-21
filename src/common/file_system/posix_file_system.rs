@@ -44,8 +44,12 @@ impl RawFile {
         ))
     }
 
-    pub fn open_for_read<P: ?Sized + NixPath>(path: &P) -> IoResult<Self> {
-        let flags = OFlag::O_RDONLY;
+    pub fn open_for_read<P: ?Sized + NixPath>(path: &P, direct: bool) -> IoResult<Self> {
+        let mut flags = OFlag::O_RDONLY;
+        #[cfg(target_os = "linux")]
+        if direct {
+            flags |= OFlag::O_DIRECT;
+        }
         // Permission 644
         let mode = Mode::S_IRUSR | Mode::S_IWUSR | Mode::S_IRGRP | Mode::S_IROTH;
         Ok(RawFile(
@@ -208,7 +212,7 @@ impl WritableFile for PosixWritableFile {
         self.write_all(data).map_err(|e| Error::Io(Box::new(e)))
     }
 
-    fn truncate(&mut self, offset: u64) -> Result<()> {
+    async fn truncate(&mut self, offset: u64) -> Result<()> {
         self.inner
             .truncate(offset as usize)
             .map_err(|e| Error::Io(Box::new(e)))
@@ -265,7 +269,7 @@ pub struct PosixReadableFile {
 
 impl PosixReadableFile {
     pub fn open<P: ?Sized + NixPath>(path: &P) -> IoResult<Self> {
-        let fd = RawFile::open_for_read(path)?;
+        let fd = RawFile::open_for_read(path, false)?;
         let file_size = fd.file_size()?;
         Ok(Self {
             inner: Arc::new(fd),
@@ -300,7 +304,7 @@ pub struct PosixSequentialFile {
 
 impl PosixSequentialFile {
     pub fn open<P: ?Sized + NixPath>(path: &P) -> IoResult<Self> {
-        let fd = RawFile::open_for_read(path)?;
+        let fd = RawFile::open_for_read(path, false)?;
         let file_size = fd.file_size()?;
         Ok(Self {
             inner: Arc::new(fd),
@@ -325,12 +329,6 @@ impl SequentialFile for PosixSequentialFile {
         Ok(x)
     }
 
-    async fn position_read(&self, offset: usize, data: &mut [u8]) -> Result<usize> {
-        self.inner
-            .read(offset, data)
-            .map_err(|e| Error::Io(Box::new(e)))
-    }
-
     fn get_file_size(&self) -> usize {
         self.file_size
     }
@@ -342,7 +340,7 @@ impl FileSystem for SyncPoxisFileSystem {
     fn open_writable_file(&self, path: PathBuf) -> Result<Box<WritableFileWriter>> {
         let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
         let f = PosixWritableFile::create(&path).map_err(|e| Error::Io(Box::new(e)))?;
-        let writer = WritableFileWriter::new(Box::new(f), file_name, 65536);
+        let writer = WritableFileWriter::new(Box::new(f), file_name, 0);
         Ok(Box::new(writer))
     }
 
