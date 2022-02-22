@@ -181,7 +181,9 @@ mod tests {
             .unwrap();
         println!("block_size: {}, record_size: {}", BLOCK_SIZE, record_size);
         let fs = SyncPoxisFileSystem {};
-        let writer = fs.open_writable_file(dir.path().join("sst")).unwrap();
+        let writer = fs
+            .open_writable_file_writer(dir.path().join("sst"))
+            .unwrap();
         let mut writer = LogWriter::new(writer, 0);
         let mut rng = thread_rng();
         let mut data: [u8; 100000] = [0u8; 100000];

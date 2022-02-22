@@ -120,7 +120,7 @@ impl WALWriter {
     ) -> Result<Box<LogWriter>> {
         let log_number = kernel.new_file_number();
         let fname = make_log_file(path, log_number);
-        let writer = fs.open_writable_file(fname)?;
+        let writer = fs.open_writable_file_writer(fname)?;
         Ok(Box::new(LogWriter::new(writer, log_number)))
     }
 

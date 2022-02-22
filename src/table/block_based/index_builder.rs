@@ -187,7 +187,7 @@ mod tests {
         let seperate = builder.seperator_is_key_plus_seq();
         let fs = InMemFileSystem::default();
         let mut f = fs
-            .open_writable_file(PathBuf::from("index_block".to_string()))
+            .open_writable_file_writer(PathBuf::from("index_block".to_string()))
             .unwrap();
         let r = Runtime::new().unwrap();
         r.block_on(f.append(&data)).unwrap();

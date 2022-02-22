@@ -43,7 +43,7 @@ impl Manifest {
         new_db.set_next_file(2);
         new_db.set_last_sequence(0);
         let descrip_file_name = make_descriptor_file_name(&db_options.db_path, 1);
-        let writer = db_options.fs.open_writable_file(descrip_file_name)?;
+        let writer = db_options.fs.open_writable_file_writer(descrip_file_name)?;
         let mut writer = LogWriter::new(writer, 0);
         let mut buf = vec![];
         new_db.encode_to(&mut buf);
@@ -223,7 +223,10 @@ impl Manifest {
             // TODO: Switch manifest log writer
             let file_number = self.kernel.new_file_number();
             let descrip_file_name = make_descriptor_file_name(&self.options.db_path, file_number);
-            let writer = self.options.fs.open_writable_file(descrip_file_name)?;
+            let writer = self
+                .options
+                .fs
+                .open_writable_file_writer(descrip_file_name)?;
             let mut writer = LogWriter::new(writer, 0);
             self.write_snapshot(&mut writer).await?;
             self.log = Some(Box::new(writer));
@@ -450,7 +453,7 @@ pub async fn store_current_file(
     let mut ret = contents.trim_start_matches(&prefix).to_string();
     ret.push('\n');
     let tmp = make_temp_plain_file_name(dbpath, descriptor_number);
-    let mut writer = fs.open_writable_file(tmp.clone())?;
+    let mut writer = fs.open_writable_file_writer(tmp.clone())?;
     let data = ret.into_bytes();
     writer.append(&data).await?;
     writer.sync().await?;

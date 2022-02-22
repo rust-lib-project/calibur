@@ -290,7 +290,7 @@ mod tests {
         let mut opts = BlockBasedTableOptions::default();
         opts.block_size = 128;
         let fs = InMemFileSystem::default();
-        let w = fs.open_writable_file(PathBuf::from("sst0")).unwrap();
+        let w = fs.open_writable_file_writer(PathBuf::from("sst0")).unwrap();
         let tbl_opts = TableBuilderOptions::default();
         let mut builder = BlockBasedTableBuilder::new(&tbl_opts, opts.clone(), w);
         let mut key = b"abcdef".to_vec();

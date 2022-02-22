@@ -13,6 +13,7 @@ use crate::common::{
     WritableFileWriter,
 };
 
+use crate::common::file_system::IOOption;
 use crate::FileSystem;
 use async_trait::async_trait;
 use crossbeam::queue::ArrayQueue;
@@ -403,10 +404,8 @@ impl AsyncFileSystem {
         }
         AsyncFileSystem { ctx, pool_handles }
     }
-}
 
-impl FileSystem for AsyncFileSystem {
-    fn open_writable_file(&self, path: PathBuf) -> Result<Box<WritableFileWriter>> {
+    fn open_writable_file(&self, path: PathBuf, opts: &IOOption) -> Result<WritableFileWriter> {
         let file_name = path
             .file_name()
             .ok_or(Error::InvalidFile(format!("path has no file name")))?
@@ -414,12 +413,28 @@ impl FileSystem for AsyncFileSystem {
             .ok_or(Error::InvalidFile(format!(
                 "filename is not encode by utf8"
             )))?;
-        let f = AsyncWritableFile::open(&path, self.ctx.clone(), false)?;
-        Ok(Box::new(WritableFileWriter::new(
+        let f = AsyncWritableFile::open(&path, self.ctx.clone(), opts.high_priority)?;
+        Ok(WritableFileWriter::new(
             Box::new(f),
             file_name.to_string(),
-            65536,
-        )))
+            opts.buffer_size,
+        ))
+    }
+}
+
+impl FileSystem for AsyncFileSystem {
+    fn open_writable_file_writer(&self, path: PathBuf) -> Result<Box<WritableFileWriter>> {
+        let f = self.open_writable_file(path, &IOOption::default())?;
+        Ok(Box::new(f))
+    }
+
+    fn open_writable_file_writer_opt(
+        &self,
+        path: PathBuf,
+        opts: &IOOption,
+    ) -> Result<Box<WritableFileWriter>> {
+        let f = self.open_writable_file(path, &opts)?;
+        Ok(Box::new(f))
     }
 
     fn open_random_access_file(&self, p: PathBuf) -> Result<Box<RandomAccessFileReader>> {

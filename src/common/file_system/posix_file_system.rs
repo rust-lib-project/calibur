@@ -337,7 +337,7 @@ impl SequentialFile for PosixSequentialFile {
 pub struct SyncPoxisFileSystem {}
 
 impl FileSystem for SyncPoxisFileSystem {
-    fn open_writable_file(&self, path: PathBuf) -> Result<Box<WritableFileWriter>> {
+    fn open_writable_file_writer(&self, path: PathBuf) -> Result<Box<WritableFileWriter>> {
         let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
         let f = PosixWritableFile::create(&path).map_err(|e| Error::Io(Box::new(e)))?;
         let writer = WritableFileWriter::new(Box::new(f), file_name, 0);
@@ -399,7 +399,9 @@ mod tests {
             .tempdir()
             .unwrap();
         let fs = SyncPoxisFileSystem {};
-        let mut f = fs.open_writable_file(dir.path().join("sst")).unwrap();
+        let mut f = fs
+            .open_writable_file_writer(dir.path().join("sst"))
+            .unwrap();
         let r = Runtime::new().unwrap();
         r.block_on(async move {
             f.append("abcd".as_bytes()).await.unwrap();
