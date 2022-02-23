@@ -147,7 +147,9 @@ impl WALWriter {
                     let mut vs = self.version_sets.lock().unwrap();
                     *mem = vs.switch_memtable(*cf);
                 }
-                new_log_writer = true;
+                if self.writer.get_file_size() > 0 {
+                    new_log_writer = true;
+                }
             }
         }
         if new_log_writer {
@@ -217,8 +219,11 @@ impl WALWriter {
                 }
             }
         }
-        self.writer.add_record(&self.ctx.buf).await?;
-        self.ctx.buf.clear();
+        if !self.ctx.buf.is_empty() {
+            self.writer.add_record(&self.ctx.buf).await?;
+            self.ctx.buf.clear();
+        }
+
         if sync_wal {
             self.writer.fsync().await?;
         }

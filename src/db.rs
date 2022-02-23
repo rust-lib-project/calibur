@@ -322,7 +322,7 @@ impl Engine {
                         disable_wal,
                     } => {
                         processor.writer.preprocess_write().await?;
-                        processor.batch(wb, cb, sync, disable_wal);
+                        processor.batch(wb, cb, disable_wal, sync);
                     }
                     WALTask::Ingest { .. } => {
                         unimplemented!();
@@ -341,7 +341,7 @@ impl Engine {
                             sync,
                             disable_wal,
                         }) => {
-                            processor.batch(wb, cb, sync, disable_wal);
+                            processor.batch(wb, cb, disable_wal, sync);
                             if processor.should_flush() {
                                 break;
                             }
