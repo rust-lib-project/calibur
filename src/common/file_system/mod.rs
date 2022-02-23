@@ -1,4 +1,5 @@
-mod posix_file;
+mod async_file_system;
+mod posix_file_system;
 mod reader;
 mod writer;
 
@@ -8,8 +9,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::common::Error;
+pub use async_file_system::AsyncFileSystem;
 use async_trait::async_trait;
-pub use posix_file::SyncPoxisFileSystem;
+pub use posix_file_system::SyncPoxisFileSystem;
 pub use reader::RandomAccessFileReader;
 pub use reader::SequentialFileReader;
 pub use writer::WritableFileWriter;
@@ -29,14 +31,13 @@ pub trait RandomAccessFile: 'static + Send + Sync {
 #[async_trait]
 pub trait SequentialFile: 'static + Send + Sync {
     async fn read_sequencial(&mut self, data: &mut [u8]) -> Result<usize>;
-    async fn position_read(&self, offset: usize, data: &mut [u8]) -> Result<usize>;
     fn get_file_size(&self) -> usize;
 }
 
 #[async_trait]
 pub trait WritableFile: Send {
     async fn append(&mut self, data: &[u8]) -> Result<()>;
-    fn truncate(&mut self, offset: u64) -> Result<()>;
+    async fn truncate(&mut self, offset: u64) -> Result<()>;
     fn allocate(&mut self, offset: u64, len: u64) -> Result<()>;
     async fn sync(&mut self) -> Result<()>;
     async fn fsync(&mut self) -> Result<()>;
@@ -48,6 +49,22 @@ pub trait WritableFile: Send {
     }
 }
 
+pub struct IOOption {
+    pub direct: bool,
+    pub high_priority: bool,
+    pub buffer_size: usize,
+}
+
+impl Default for IOOption {
+    fn default() -> Self {
+        Self {
+            direct: false,
+            high_priority: false,
+            buffer_size: 0,
+        }
+    }
+}
+
 #[async_trait]
 pub trait FileSystem: Send + Sync {
     fn open_writable_file_in(
@@ -56,10 +73,17 @@ pub trait FileSystem: Send + Sync {
         file_name: String,
     ) -> Result<Box<WritableFileWriter>> {
         let f = path.join(file_name);
-        self.open_writable_file(f)
+        self.open_writable_file_writer(f)
     }
 
-    fn open_writable_file(&self, file_name: PathBuf) -> Result<Box<WritableFileWriter>>;
+    fn open_writable_file_writer(&self, file_name: PathBuf) -> Result<Box<WritableFileWriter>>;
+    fn open_writable_file_writer_opt(
+        &self,
+        file_name: PathBuf,
+        _opts: &IOOption,
+    ) -> Result<Box<WritableFileWriter>> {
+        self.open_writable_file_writer(file_name)
+    }
 
     fn open_random_access_file(&self, p: PathBuf) -> Result<Box<RandomAccessFileReader>>;
 
@@ -118,7 +142,7 @@ impl WritableFile for InMemFile {
         Ok(())
     }
 
-    fn truncate(&mut self, offset: u64) -> Result<()> {
+    async fn truncate(&mut self, offset: u64) -> Result<()> {
         self.buf.resize(offset as usize, 0);
         Ok(())
     }
@@ -178,17 +202,13 @@ impl SequentialFile for InMemFile {
         Ok(x)
     }
 
-    async fn position_read(&self, offset: usize, data: &mut [u8]) -> Result<usize> {
-        self.read(offset, data).await
-    }
-
     fn get_file_size(&self) -> usize {
         self.buf.len()
     }
 }
 
 impl FileSystem for InMemFileSystem {
-    fn open_writable_file(&self, filename: PathBuf) -> Result<Box<WritableFileWriter>> {
+    fn open_writable_file_writer(&self, filename: PathBuf) -> Result<Box<WritableFileWriter>> {
         let f = InMemFile {
             fs: self.inner.clone(),
             buf: vec![],

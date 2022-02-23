@@ -131,7 +131,7 @@ impl ReadOnlyWriteBatch {
     pub fn iter(&self) -> WriteBatchIter<'_> {
         WriteBatchIter {
             batch: self,
-            offset: 0,
+            offset: WRITE_BATCH_HEADER,
             sequence: 0,
         }
     }

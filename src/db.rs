@@ -1,28 +1,41 @@
+use std::cell::RefCell;
+use std::collections::hash_map::RandomState;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use crate::common::format::ValueType;
+use crate::common::options::ReadOptions;
 use crate::common::{
     make_current_file, make_log_file, parse_file_name, DBFileType, Error, Result,
     MAX_SEQUENCE_NUMBER,
 };
-use crate::options::{ColumnFamilyDescriptor, DBOptions, ImmutableDBOptions};
-use crate::version::{KernelNumberContext, VersionSet};
-use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
-use futures::channel::oneshot::Sender;
-use std::collections::hash_map::RandomState;
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-
-use crate::common::format::ValueType;
-use crate::common::options::ReadOptions;
 use crate::compaction::{run_flush_memtable_job, FlushRequest};
 use crate::log::LogReader;
 use crate::manifest::{Manifest, ManifestScheduler, ManifestWriter};
 use crate::memtable::Memtable;
+use crate::options::{ColumnFamilyDescriptor, DBOptions, ImmutableDBOptions};
+use crate::version::{KernelNumberContext, VersionSet};
 use crate::wal::{WALScheduler, WALTask, WALWriter, WriteMemtableTask};
 use crate::write_batch::{ReadOnlyWriteBatch, WriteBatch, WriteBatchItem};
 use crate::ColumnFamilyOptions;
+
+use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
+use futures::channel::oneshot::Sender;
 use futures::{SinkExt, StreamExt};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use yatp::{task::future::TaskCell, Builder as PoolBuilder, ThreadPool};
+
+#[derive(Default)]
+pub struct PerfContext {
+    write_wal: u64,
+    write_memtable: u64,
+    other: u64,
+}
+
+thread_local! {
+    pub static PERF_CTX: RefCell<PerfContext> = RefCell::new(PerfContext::default());
+}
 
 #[derive(Clone)]
 pub struct Engine {
@@ -74,13 +87,16 @@ impl Engine {
         disable_wal: bool,
         sync: bool,
     ) -> Result<()> {
+        let step1 = time::precise_time_ns();
         let rwb = wb.to_raw();
         let rwb = self
             .wal_scheduler
             .schedule_writebatch(rwb, sync, disable_wal)
             .await?;
+        let step2 = time::precise_time_ns();
         let sequence = rwb.wb.get_sequence();
         self.write_memtable(&rwb.wb, sequence, &rwb.mems)?;
+        let step3 = time::precise_time_ns();
 
         // TODO: check atomic flush.
         for (cf, m) in rwb.mems {
@@ -88,8 +104,15 @@ impl Engine {
                 self.schedule_flush(cf, m).await;
             }
         }
-
         wb.recycle(rwb.wb);
+
+        let step4 = time::precise_time_ns();
+        PERF_CTX.with(|x| {
+            let mut ctx = x.borrow_mut();
+            ctx.write_wal += (step2 - step1) / 1000;
+            ctx.write_memtable += (step3 - step2) / 1000;
+            ctx.other += (step4 - step3) / 1000;
+        });
         Ok(())
     }
 
@@ -471,16 +494,21 @@ impl BatchWALProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::AsyncFileSystem;
+    use crate::SyncPoxisFileSystem;
+    use std::thread::sleep;
+    use std::time::{Duration, Instant};
     use tokio::runtime::Runtime;
 
     #[test]
-    fn test_open_new_db() {
+    fn test_open_new_db_and_reopen() {
         let dir = tempfile::Builder::new()
             .prefix("test_open_new_db")
             .tempdir()
             .unwrap();
         let r = Runtime::new().unwrap();
         let mut db_options = DBOptions::default();
+        db_options.fs = Arc::new(AsyncFileSystem::new(2));
         db_options.db_path = dir.path().to_str().unwrap().to_string();
         let mut engine = r
             .block_on(Engine::open(db_options.clone(), vec![], None))
@@ -510,8 +538,58 @@ mod tests {
         assert_eq!(v, b"v1".to_vec());
         engine.close().unwrap();
         drop(engine);
-        let mut engine = r.block_on(Engine::open(db_options, cfs, None)).unwrap();
+        let engine = r.block_on(Engine::open(db_options, cfs, None)).unwrap();
         let v = r.block_on(engine.get(&opts, 0, b"k1")).unwrap().unwrap();
         assert_eq!(v, b"v1".to_vec());
+    }
+
+    #[test]
+    fn test_switch_memtable_and_flush() {
+        let dir = tempfile::Builder::new().prefix("").tempdir().unwrap();
+        let r = Runtime::new().unwrap();
+        let mut db_options = DBOptions::default();
+        db_options.fs = Arc::new(AsyncFileSystem::new(2));
+        db_options.db_path = dir.path().to_str().unwrap().to_string();
+        let mut cf_opt = ColumnFamilyOptions::default();
+        cf_opt.write_buffer_size = 128 * 1024;
+        let cfs = vec![ColumnFamilyDescriptor {
+            name: "default".to_string(),
+            options: cf_opt,
+        }];
+        let mut engine = r
+            .block_on(Engine::open(db_options.clone(), cfs.clone(), None))
+            .unwrap();
+        let mut bench_ret = vec![0; 10000];
+        let mut wb = WriteBatch::new();
+        const TOTAL_CASES: usize = 100;
+        let mut prev_perf = 0;
+        let total_time = Instant::now();
+        for i in 0..TOTAL_CASES {
+            for j in 0..100 {
+                let k = (i * 100 + j).to_string();
+                wb.put_cf(0, k.as_bytes(), b"v00000000000001");
+            }
+            r.block_on(engine.write_opt(&mut wb, false, false)).unwrap();
+            wb.clear();
+            let now = PERF_CTX.with(|ctx| ctx.borrow().write_wal);
+            let c = now - prev_perf;
+            prev_perf = now;
+            if c / 100 >= 10000 {
+                println!("tail latency: {:?}ns", c);
+            } else {
+                bench_ret[(c / 100) as usize] += 1;
+            }
+        }
+        println!("total cost time: {:?}", total_time.elapsed());
+        for i in 0..10000 {
+            if bench_ret[i] > 0 {
+                let f = (bench_ret[i] * 100) as f64 / TOTAL_CASES as f64;
+                println!("{}% latency is between [{},{})", f, i * 100, (i + 1) * 100);
+            }
+        }
+        sleep(Duration::from_secs(2));
+        let vs = engine.version_set.lock().unwrap();
+        let v = vs.get_superversion(0).unwrap();
+        assert_eq!(v.current.get_level0_file_num(), 6);
     }
 }

@@ -95,6 +95,10 @@ impl Version {
         self.storage.size()
     }
 
+    pub fn get_level0_file_num(&self) -> usize {
+        self.storage.level0.len()
+    }
+
     pub fn scan<F: FnMut(&FileMetaData)>(&self, f: F, level: usize) {
         self.storage.scan(f, level);
     }

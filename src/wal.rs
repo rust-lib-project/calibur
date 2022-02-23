@@ -4,7 +4,7 @@ use futures::SinkExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use crate::common::{make_log_file, Error, Result};
+use crate::common::{make_log_file, Error, IOOption, Result};
 use crate::compaction::{CompactionEngine, FlushRequest};
 use crate::log::LogWriter;
 use crate::manifest::ManifestScheduler;
@@ -120,7 +120,10 @@ impl WALWriter {
     ) -> Result<Box<LogWriter>> {
         let log_number = kernel.new_file_number();
         let fname = make_log_file(path, log_number);
-        let writer = fs.open_writable_file(fname)?;
+        let mut opts = IOOption::default();
+        opts.high_priority = true;
+        opts.buffer_size = 1024 * 64;
+        let writer = fs.open_writable_file_writer_opt(fname, &opts)?;
         Ok(Box::new(LogWriter::new(writer, log_number)))
     }
 
@@ -250,8 +253,8 @@ impl WALScheduler {
         self.sender
             .send(task)
             .await
-            .map_err(|_| Error::Cancel(format!("wal")))?;
-        let ret = rx.await.map_err(|_| Error::Cancel(format!("wal")))?;
+            .map_err(|_| Error::Cancel("wal"))?;
+        let ret = rx.await.map_err(|_| Error::Cancel("wal"))?;
         ret
     }
 
@@ -271,8 +274,8 @@ impl WALScheduler {
         self.sender
             .send(task)
             .await
-            .map_err(|_| Error::Cancel(format!("wal")))?;
-        let wb = rx.await.map_err(|_| Error::Cancel(format!("wal")))?;
+            .map_err(|_| Error::Cancel("wal"))?;
+        let wb = rx.await.map_err(|_| Error::Cancel("wal"))?;
         wb
     }
 }

@@ -15,20 +15,12 @@ mod wal;
 mod write_batch;
 
 pub use common::{
-    Error, FileSystem, InternalKeyComparator, KeyComparator, Result, SliceTransform,
-    SyncPoxisFileSystem,
+    AsyncFileSystem, Error, FileSystem, InternalKeyComparator, KeyComparator, Result,
+    SliceTransform, SyncPoxisFileSystem,
 };
 pub use db::*;
 pub use options::*;
 pub use table::{
     BlockBasedTableFactory, BlockBasedTableOptions, FilterBlockFactory, FullFilterBlockFactory,
 };
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
-}
+pub use write_batch::*;
