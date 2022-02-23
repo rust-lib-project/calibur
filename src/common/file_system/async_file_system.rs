@@ -170,7 +170,7 @@ pub struct AsyncWritableFile {
 
 impl AsyncWritableFile {
     fn open(path: &PathBuf, ctx: Arc<AsyncContext>, high_priority: bool) -> Result<Self> {
-        let fd = RawFile::open_for_read(path, true).map_err(|e| Error::Io(Box::new(e)))?;
+        let fd = RawFile::create(path).map_err(|e| Error::Io(Box::new(e)))?;
         Ok(Self {
             inner: Arc::new(fd),
             offset: 0,
@@ -384,7 +384,7 @@ impl SequentialFile for AsyncSequentialFile {
 
 pub struct AsyncFileSystem {
     ctx: Arc<AsyncContext>,
-    pool_handles: Vec<thread::JoinHandle<()>>,
+    pool_handles: Mutex<Vec<thread::JoinHandle<()>>>,
 }
 
 impl AsyncFileSystem {
@@ -402,7 +402,10 @@ impl AsyncFileSystem {
             });
             pool_handles.push(h);
         }
-        AsyncFileSystem { ctx, pool_handles }
+        AsyncFileSystem {
+            ctx,
+            pool_handles: Mutex::new(pool_handles),
+        }
     }
 
     fn open_writable_file(&self, path: PathBuf, opts: &IOOption) -> Result<WritableFileWriter> {
@@ -419,6 +422,14 @@ impl AsyncFileSystem {
             file_name.to_string(),
             opts.buffer_size,
         ))
+    }
+
+    pub fn stop(&self) {
+        self.ctx.close();
+        let mut handles = self.pool_handles.lock().unwrap();
+        for h in handles.drain(..) {
+            h.join().unwrap();
+        }
     }
 }
 

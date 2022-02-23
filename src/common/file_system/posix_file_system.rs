@@ -44,7 +44,9 @@ impl RawFile {
         ))
     }
 
+    #[allow(unused_variables)]
     pub fn open_for_read<P: ?Sized + NixPath>(path: &P, direct: bool) -> IoResult<Self> {
+        #[allow(unused_mut)]
         let mut flags = OFlag::O_RDONLY;
         #[cfg(target_os = "linux")]
         if direct {

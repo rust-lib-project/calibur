@@ -471,6 +471,7 @@ impl BatchWALProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::AsyncFileSystem;
     use tokio::runtime::Runtime;
 
     #[test]
@@ -481,6 +482,7 @@ mod tests {
             .unwrap();
         let r = Runtime::new().unwrap();
         let mut db_options = DBOptions::default();
+        db_options.fs = Arc::new(AsyncFileSystem::new(2));
         db_options.db_path = dir.path().to_str().unwrap().to_string();
         let mut engine = r
             .block_on(Engine::open(db_options.clone(), vec![], None))
@@ -510,7 +512,7 @@ mod tests {
         assert_eq!(v, b"v1".to_vec());
         engine.close().unwrap();
         drop(engine);
-        let mut engine = r.block_on(Engine::open(db_options, cfs, None)).unwrap();
+        let engine = r.block_on(Engine::open(db_options, cfs, None)).unwrap();
         let v = r.block_on(engine.get(&opts, 0, b"k1")).unwrap().unwrap();
         assert_eq!(v, b"v1".to_vec());
     }
