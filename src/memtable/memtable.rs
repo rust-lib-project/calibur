@@ -12,6 +12,8 @@ pub struct Memtable {
     comparator: InternalKeyComparator,
     pending_writes: AtomicU64,
     pending_schedule: AtomicBool,
+    first_seqno: AtomicU64,
+    earliest_seqno: AtomicU64,
     max_write_buffer_size: usize,
 }
 
@@ -20,7 +22,12 @@ pub struct MemIterator {
 }
 
 impl Memtable {
-    pub fn new(id: u64, max_write_buffer_size: usize, comparator: InternalKeyComparator) -> Self {
+    pub fn new(
+        id: u64,
+        max_write_buffer_size: usize,
+        comparator: InternalKeyComparator,
+        earliest_seq: u64,
+    ) -> Self {
         Self {
             list: Skiplist::with_capacity(comparator.clone(), 4 * 1024 * 1024),
             comparator,
@@ -29,6 +36,8 @@ impl Memtable {
             id,
             pending_schedule: AtomicBool::new(false),
             max_write_buffer_size,
+            first_seqno: AtomicU64::new(0),
+            earliest_seqno: AtomicU64::new(earliest_seq),
         }
     }
 
@@ -42,6 +51,7 @@ impl Memtable {
     }
 
     pub fn add(&self, key: &[u8], value: &[u8], sequence: u64, tp: ValueType) {
+        self.update_first_sequence(sequence);
         let mut ukey = Vec::with_capacity(key.len() + 8);
         ukey.extend_from_slice(key);
         ukey.extend_from_slice(&pack_sequence_and_type(sequence, tp as u8).to_le_bytes());
@@ -49,6 +59,7 @@ impl Memtable {
     }
 
     pub fn delete(&self, key: &[u8], sequence: u64) {
+        self.update_first_sequence(sequence);
         let mut ukey = Vec::with_capacity(key.len() + 8);
         ukey.extend_from_slice(key);
         ukey.extend_from_slice(
@@ -96,9 +107,19 @@ impl Memtable {
         self.list.mem_size() as usize > self.max_write_buffer_size
     }
 
-    // return true if this memtable can be scheduled flush at once
-    pub fn mark_schedule_flush(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
+        self.first_seqno.load(Ordering::Acquire) == 0
+    }
+
+    pub fn mark_schedule_flush(&self) {
         self.pending_schedule.store(true, Ordering::Release);
+    }
+
+    pub fn is_pending_schedule(&self) -> bool {
+        self.pending_schedule.load(Ordering::Acquire)
+    }
+
+    pub fn can_schedule_flush(&self) -> bool {
         self.pending_writes.load(Ordering::Acquire) == 0
     }
 
@@ -107,11 +128,34 @@ impl Memtable {
     }
 
     // return true if this memtable must be scheduled flush at once
-    pub fn mark_write_done(&self) -> bool {
-        if self.pending_writes.fetch_sub(1, Ordering::SeqCst) - 1 == 0 {
-            self.pending_schedule.load(Ordering::Acquire)
-        } else {
-            false
+    pub fn mark_write_done(&self) {
+        self.pending_writes.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    fn update_first_sequence(&self, sequence: u64) {
+        let mut cur_seq_num = self.first_seqno.load(Ordering::Relaxed);
+        while cur_seq_num == 0 || sequence < cur_seq_num {
+            match self.first_seqno.compare_exchange_weak(
+                cur_seq_num,
+                sequence,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => break,
+                Err(v) => cur_seq_num = v,
+            }
+        }
+        let mut cur_earliest_seqno = self.earliest_seqno.load(Ordering::Relaxed);
+        while sequence < cur_earliest_seqno {
+            match self.earliest_seqno.compare_exchange_weak(
+                cur_earliest_seqno,
+                sequence,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => break,
+                Err(v) => cur_earliest_seqno = v,
+            }
         }
     }
 }

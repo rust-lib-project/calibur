@@ -122,7 +122,12 @@ impl ColumnFamily {
         self.mem = mem;
     }
 
-    pub fn create_memtable(&self, id: u64) -> Memtable {
-        Memtable::new(id, self.options.write_buffer_size, self.comparator.clone())
+    pub fn create_memtable(&self, id: u64, earliest_seq: u64) -> Memtable {
+        Memtable::new(
+            id,
+            self.options.write_buffer_size,
+            self.comparator.clone(),
+            earliest_seq,
+        )
     }
 }

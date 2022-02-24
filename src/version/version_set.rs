@@ -1,4 +1,4 @@
-use crate::common::{Error, FileSystem, KeyComparator, Result};
+use crate::common::{Error, FileSystem, KeyComparator, Result, MAX_SEQUENCE_NUMBER};
 use crate::memtable::Memtable;
 use crate::options::{ColumnFamilyDescriptor, ColumnFamilyOptions};
 use crate::version::column_family::ColumnFamily;
@@ -104,6 +104,7 @@ impl VersionSet {
                         kernel.new_memtable_number(),
                         cf_opt.write_buffer_size,
                         cf_opt.comparator.clone(),
+                        MAX_SEQUENCE_NUMBER,
                     ),
                     cf_opt.comparator.clone(),
                     version,
@@ -179,11 +180,29 @@ impl VersionSet {
         options
     }
 
-    pub fn switch_memtable(&mut self, cf: u32) -> Arc<Memtable> {
+    pub fn switch_memtable(&mut self, cf: u32, earliest_seq: u64) -> Arc<Memtable> {
         let cf = self.column_family_set.get_mut(&cf).unwrap();
-        let mem = Arc::new(cf.create_memtable(self.kernel.new_memtable_number()));
+        let mem = Arc::new(cf.create_memtable(self.kernel.new_memtable_number(), earliest_seq));
         cf.switch_memtable(mem.clone());
         mem
+    }
+
+    pub fn schedule_immutable_memtables(&mut self, mems: &mut Vec<(u32, Arc<Memtable>)>) {
+        for (id, cf) in self.column_family_set.iter() {
+            let version = cf.get_super_version();
+            let l = version.imms.mems.len();
+            for i in 0..l {
+                let idx = l - i - 1;
+                if version.imms.mems[idx].is_pending_schedule() {
+                    assert!(mems.is_empty());
+                    continue;
+                } else if !version.imms.mems[idx].can_schedule_flush() {
+                    break;
+                }
+                version.imms.mems[idx].mark_schedule_flush();
+                mems.push((*id, version.imms.mems[idx].clone()));
+            }
+        }
     }
 
     pub fn create_column_family(&mut self, mut edit: VersionEdit) -> Result<Arc<Version>> {
@@ -194,6 +213,7 @@ impl VersionSet {
             self.kernel.new_memtable_number(),
             cf_opt.write_buffer_size,
             cf_opt.comparator.clone(),
+            self.kernel.last_sequence(),
         );
         let log_number = edit.log_number;
         let new_version = Arc::new(Version::new(

@@ -329,6 +329,7 @@ impl Manifest {
                 edit.column_family = version.get_cf_id() as u32;
                 edit.add_column_family(version.get_cf_name().to_string());
                 edit.set_comparator_name(version.get_comparator_name());
+                edit.set_log_number(version.get_log_number());
                 if !edit.encode_to(&mut record) {
                     return Err(Error::CompactionError(format!(
                         "write snapshot failed because encode failed"

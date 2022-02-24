@@ -28,8 +28,6 @@ impl WritableFileWriter {
     }
 
     pub async fn append(&mut self, data: &[u8]) -> Result<()> {
-        // TODO: We will cache data in buf when we use direct_io for write operation.
-
         self.file_size += data.len();
         if self.max_buffer_size == 0 {
             self.writable_file.append(data).await?;

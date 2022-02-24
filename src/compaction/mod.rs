@@ -24,10 +24,8 @@ pub struct FlushRequest {
 }
 
 impl FlushRequest {
-    pub fn new(cf: u32, mem: Arc<Memtable>) -> Self {
-        Self {
-            mems: vec![(cf, mem)],
-        }
+    pub fn new(mems: Vec<(u32, Arc<Memtable>)>) -> Self {
+        Self { mems }
     }
 }
 
@@ -70,7 +68,7 @@ pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
             let meta = job.run().await?;
             let mut edit = VersionEdit::default();
             edit.prev_log_number = 0;
-            edit.log_number = mems[i].last().unwrap().get_next_log_number();
+            edit.set_log_number(mems[i].last().unwrap().get_next_log_number());
             edit.add_file(
                 0,
                 file_number,

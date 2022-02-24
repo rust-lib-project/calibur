@@ -129,38 +129,40 @@ impl WALWriter {
 
     pub async fn preprocess_write(&mut self) -> Result<()> {
         let mut new_log_writer = false;
+        let mut switch_wal = false;
         if self.writer.get_file_size() > self.immutation_options.max_total_wal_size {
             new_log_writer = true;
+            switch_wal = true;
         }
         // TODO: check atomic flush.
         for (cf, mem) in &mut self.mems {
-            if mem.should_flush() {
+            if (switch_wal && !mem.is_empty()) || mem.should_flush() {
                 // If this method returns false, it means that another write thread still hold this
                 // memtable. Maybe we shall also check the previous memtables has been flushed.
-                if mem.mark_schedule_flush() {
-                    let _ = self
-                        .flush_scheduler
-                        .send(FlushRequest::new(*cf, mem.clone()))
-                        .await;
-                }
-                {
-                    let mut vs = self.version_sets.lock().unwrap();
-                    *mem = vs.switch_memtable(*cf);
-                }
+                new_log_writer = true;
                 if self.writer.get_file_size() > 0 {
-                    new_log_writer = true;
+                    self.writer.fsync().await?;
+                    let new_writer = Self::create_wal(
+                        &self.kernel,
+                        &self.immutation_options.db_path,
+                        self.immutation_options.fs.as_ref(),
+                    )?;
+                    let writer = std::mem::replace(&mut self.writer, new_writer);
+                    self.logs.push(writer);
                 }
+                mem.set_next_log_number(self.writer.get_log_number());
+                let mut vs = self.version_sets.lock().unwrap();
+                *mem = vs.switch_memtable(*cf, self.kernel.last_sequence());
             }
         }
+
+        let mut mems = vec![];
         if new_log_writer {
-            self.writer.fsync().await?;
-            let new_writer = Self::create_wal(
-                &self.kernel,
-                &self.immutation_options.db_path,
-                self.immutation_options.fs.as_ref(),
-            )?;
-            let writer = std::mem::replace(&mut self.writer, new_writer);
-            self.logs.push(writer);
+            let mut vs = self.version_sets.lock().unwrap();
+            vs.schedule_immutable_memtables(&mut mems);
+        }
+        if !mems.is_empty() {
+            let _ = self.flush_scheduler.send(FlushRequest::new(mems)).await;
         }
         Ok(())
     }
@@ -209,7 +211,7 @@ impl WALWriter {
         let l = tasks.len();
         for (wb, _, disable_wal) in tasks {
             let sequence = self.ctx.last_sequence + 1;
-            self.ctx.last_sequence = sequence;
+            self.ctx.last_sequence = self.ctx.last_sequence + wb.count() as u64;
             wb.set_sequence(sequence);
             if !*disable_wal {
                 if l == 1 {

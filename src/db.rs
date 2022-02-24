@@ -23,7 +23,7 @@ use crate::ColumnFamilyOptions;
 
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::channel::oneshot::Sender;
-use futures::{SinkExt, StreamExt};
+use futures::StreamExt;
 use yatp::{task::future::TaskCell, Builder as PoolBuilder, ThreadPool};
 
 #[derive(Default)]
@@ -99,10 +99,8 @@ impl Engine {
         let step3 = time::precise_time_ns();
 
         // TODO: check atomic flush.
-        for (cf, m) in rwb.mems {
-            if m.mark_write_done() {
-                self.schedule_flush(cf, m).await;
-            }
+        for (_, m) in rwb.mems {
+            m.mark_write_done();
         }
         wb.recycle(rwb.wb);
 
@@ -233,7 +231,7 @@ impl Engine {
     fn write_memtable(
         &mut self,
         wb: &ReadOnlyWriteBatch,
-        sequence: u64,
+        mut sequence: u64,
         cf_mems: &[(u32, Arc<Memtable>)],
     ) -> Result<()> {
         pub fn check_memtable_cf(mems: &[(u32, Arc<Memtable>)], cf: u32) -> usize {
@@ -265,6 +263,7 @@ impl Engine {
                     cf_mems[idx].1.delete(key, sequence);
                 }
             }
+            sequence += 1;
         }
         Ok(())
     }
@@ -410,18 +409,6 @@ impl Engine {
             }
         });
         Ok(())
-    }
-
-    async fn schedule_flush(&mut self, cf: u32, mem: Arc<Memtable>) {
-        self.flush_scheduler
-            .send(FlushRequest::new(cf, mem))
-            .await
-            .unwrap_or_else(|_| {
-                if !self.stopped.load(Ordering::Acquire) {
-                    let mut v = self.version_set.lock().unwrap();
-                    v.record_error(Error::Other(format!("schedule flush failed")));
-                }
-            });
     }
 
     pub fn close(&mut self) -> Result<()> {
