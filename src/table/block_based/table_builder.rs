@@ -1,4 +1,4 @@
-use crate::common::format::{extract_value_type, ValueType};
+use crate::common::format::{extract_user_key, extract_value_type, ValueType};
 use crate::common::options::CompressionType;
 use crate::common::InternalKeyComparator;
 use crate::common::{Result, WritableFileWriter};
@@ -12,7 +12,6 @@ use crate::table::block_based::{FILTER_BLOCK_PREFIX, FULL_FILTER_BLOCK_PREFIX};
 use crate::table::format::*;
 use crate::table::table_properties::{TableProperties, PROPERTIES_BLOCK};
 use crate::table::{TableBuilder, TableBuilderOptions};
-use crate::util::extract_user_key;
 
 // const PartitionedFilterBlockPrefix: &str = "partitionedfilter.";
 

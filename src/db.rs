@@ -12,6 +12,7 @@ use crate::common::{
     MAX_SEQUENCE_NUMBER,
 };
 use crate::compaction::{run_flush_memtable_job, FlushRequest};
+use crate::iterator::DBIterator;
 use crate::log::LogReader;
 use crate::manifest::{Manifest, ManifestScheduler, ManifestWriter};
 use crate::memtable::Memtable;
@@ -21,6 +22,8 @@ use crate::wal::{WALScheduler, WALTask, WALWriter, WriteMemtableTask};
 use crate::write_batch::{ReadOnlyWriteBatch, WriteBatch, WriteBatchItem};
 use crate::ColumnFamilyOptions;
 
+use crate::pipeline::PipelineCommitQueue;
+use crate::version::snapshot::{Snapshot, SnapshotList};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::channel::oneshot::Sender;
 use futures::StreamExt;
@@ -47,6 +50,8 @@ pub struct Engine {
     wal_scheduler: WALScheduler,
     stopped: Arc<AtomicBool>,
     flush_scheduler: UnboundedSender<FlushRequest>,
+    snapshot_list: Arc<Mutex<SnapshotList>>,
+    commit_queue: Arc<PipelineCommitQueue>,
 }
 
 impl Engine {
@@ -95,15 +100,13 @@ impl Engine {
             .await?;
         let step2 = time::precise_time_ns();
         let sequence = rwb.wb.get_sequence();
+        let last_commit_sequence = sequence - 1;
+        let commit_sequence = sequence + rwb.wb.count() as u64 - 1;
         self.write_memtable(&rwb.wb, sequence, &rwb.mems)?;
         let step3 = time::precise_time_ns();
-
-        // TODO: check atomic flush.
-        for (_, m) in rwb.mems {
-            m.mark_write_done();
-        }
+        self.commit_queue
+            .commit(last_commit_sequence, commit_sequence);
         wb.recycle(rwb.wb);
-
         let step4 = time::precise_time_ns();
         PERF_CTX.with(|x| {
             let mut ctx = x.borrow_mut();
@@ -133,6 +136,38 @@ impl Engine {
             }
         };
         version.get(opts, key, MAX_SEQUENCE_NUMBER).await
+    }
+
+    pub fn get_snapshot(&self) -> Box<Snapshot> {
+        let mut snapshot_list = self.snapshot_list.lock().unwrap();
+        let sequence = self.kernel.last_sequence();
+        snapshot_list.new_snapshot(sequence)
+    }
+
+    pub fn release_snapshot(&self, snapshot: Box<Snapshot>) {
+        let mut snapshot_list = self.snapshot_list.lock().unwrap();
+        snapshot_list.release_snapshot(snapshot)
+    }
+
+    pub fn new_iterator(&self, opts: &ReadOptions, cf: u32) -> Result<DBIterator> {
+        let version = {
+            let vs = self.version_set.lock().unwrap();
+            match vs.get_superversion(cf) {
+                Some(v) => v,
+                None => return Err(Error::InvalidColumnFamily(cf)),
+            }
+        };
+        let iter = version.new_iterator(opts)?;
+        let sequence = opts.snapshot.clone().unwrap_or(self.kernel.last_sequence());
+        Ok(DBIterator::new(
+            iter,
+            version
+                .column_family_options
+                .comparator
+                .get_user_comparator()
+                .clone(),
+            sequence,
+        ))
     }
 
     async fn recover(
@@ -179,6 +214,7 @@ impl Engine {
         let wal_scheduler = WALScheduler::new(tx);
         let mut engine = Engine {
             version_set,
+            commit_queue: Arc::new(PipelineCommitQueue::new(kernel.clone())),
             kernel,
             pool,
             options: immutable_options,
@@ -186,6 +222,7 @@ impl Engine {
             manifest_scheduler,
             wal_scheduler,
             stopped: Arc::new(AtomicBool::new(false)),
+            snapshot_list: Arc::new(Mutex::new(SnapshotList::new())),
         };
         engine.recover_log(logs).await?;
         engine.run_wal_job(flush_tx, rx)?;
@@ -387,11 +424,15 @@ impl Engine {
             cf_options.insert(cf, opt);
         }
 
+        let commit_queue = self.commit_queue.clone();
+
         let f = async move {
-            while let Some(x) = rx.next().await {
+            while let Some(req) = rx.next().await {
+                // We must wait other thread finish their write task to the current memtables.
+                commit_queue.wait_pending_writers(req.wait_commit_request);
                 run_flush_memtable_job(
                     engine.clone(),
-                    vec![x],
+                    vec![req],
                     kernel.clone(),
                     options.clone(),
                     cf_options.clone(),
@@ -482,10 +523,27 @@ impl BatchWALProcessor {
 mod tests {
     use super::*;
     use crate::common::AsyncFileSystem;
-    use crate::SyncPoxisFileSystem;
     use std::thread::sleep;
     use std::time::{Duration, Instant};
+    use tempfile::TempDir;
     use tokio::runtime::Runtime;
+
+    fn build_small_write_buffer_db(dir: TempDir) -> Engine {
+        let r = Runtime::new().unwrap();
+        let mut db_options = DBOptions::default();
+        db_options.fs = Arc::new(AsyncFileSystem::new(2));
+        db_options.db_path = dir.path().to_str().unwrap().to_string();
+        let mut cf_opt = ColumnFamilyOptions::default();
+        cf_opt.write_buffer_size = 128 * 1024;
+        let cfs = vec![ColumnFamilyDescriptor {
+            name: "default".to_string(),
+            options: cf_opt,
+        }];
+        let engine = r
+            .block_on(Engine::open(db_options.clone(), cfs.clone(), None))
+            .unwrap();
+        engine
+    }
 
     #[test]
     fn test_open_new_db_and_reopen() {
@@ -532,20 +590,12 @@ mod tests {
 
     #[test]
     fn test_switch_memtable_and_flush() {
-        let dir = tempfile::Builder::new().prefix("").tempdir().unwrap();
-        let r = Runtime::new().unwrap();
-        let mut db_options = DBOptions::default();
-        db_options.fs = Arc::new(AsyncFileSystem::new(2));
-        db_options.db_path = dir.path().to_str().unwrap().to_string();
-        let mut cf_opt = ColumnFamilyOptions::default();
-        cf_opt.write_buffer_size = 128 * 1024;
-        let cfs = vec![ColumnFamilyDescriptor {
-            name: "default".to_string(),
-            options: cf_opt,
-        }];
-        let mut engine = r
-            .block_on(Engine::open(db_options.clone(), cfs.clone(), None))
+        let dir = tempfile::Builder::new()
+            .prefix("test_switch_memtable_and_flush")
+            .tempdir()
             .unwrap();
+        let mut engine = build_small_write_buffer_db(dir);
+        let r = Runtime::new().unwrap();
         let mut bench_ret = vec![0; 10000];
         let mut wb = WriteBatch::new();
         const TOTAL_CASES: usize = 100;
@@ -578,5 +628,37 @@ mod tests {
         let vs = engine.version_set.lock().unwrap();
         let v = vs.get_superversion(0).unwrap();
         assert_eq!(v.current.get_level0_file_num(), 6);
+    }
+
+    #[test]
+    fn test_snapshot_and_iterator() {
+        let dir = tempfile::Builder::new()
+            .prefix("test_snapshot_and_iterator")
+            .tempdir()
+            .unwrap();
+        let mut engine = build_small_write_buffer_db(dir);
+        let r = Runtime::new().unwrap();
+        let mut wb = WriteBatch::new();
+        for j in 0..100 {
+            let k = (100 + j).to_string();
+            wb.put_cf(0, k.as_bytes(), b"v00000000000001");
+        }
+        r.block_on(engine.write_opt(&mut wb, false, false)).unwrap();
+        wb.clear();
+        let snapshot = engine.get_snapshot();
+        for j in 100..200 {
+            let k = (100 + j).to_string();
+            wb.put_cf(0, k.as_bytes(), b"v00000000000001");
+        }
+        let mut opts = ReadOptions::default();
+        opts.snapshot = Some(snapshot.get_sequence());
+        let mut iter = engine.new_iterator(&opts, 0).unwrap();
+        r.block_on(iter.seek_to_first());
+        for j in 0..100 {
+            let k = (100 + j).to_string();
+            assert_eq!(k.as_bytes(), iter.key());
+            assert_eq!(b"v00000000000001", iter.value());
+            r.block_on(iter.next());
+        }
     }
 }

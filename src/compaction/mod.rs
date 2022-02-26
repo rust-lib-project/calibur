@@ -26,11 +26,15 @@ pub struct CompactionRequest {
 }
 
 pub struct FlushRequest {
-    mems: Vec<(u32, Arc<Memtable>)>,
+    pub mems: Vec<(u32, Arc<Memtable>)>,
+    pub wait_commit_request: u64,
 }
 
 impl FlushRequest {
-    pub fn new(mems: Vec<(u32, Arc<Memtable>)>) -> Self {
-        Self { mems }
+    pub fn new(mems: Vec<(u32, Arc<Memtable>)>, wait_commit_request: u64) -> Self {
+        Self {
+            mems,
+            wait_commit_request,
+        }
     }
 }

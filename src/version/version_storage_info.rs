@@ -1,3 +1,5 @@
+use crate::common::options::ReadOptions;
+use crate::iterator::{AsyncIterator, BTreeTableAccessor, TwoLevelIterator};
 use crate::util::{BTree, BtreeComparable, PageIterator};
 use crate::version::{FileMetaData, TableFile};
 use std::sync::Arc;
@@ -120,5 +122,20 @@ impl VersionStorageInfo {
 
     pub fn get_table(&self, key: &[u8], level: usize) -> Option<Arc<TableFile>> {
         self.base_level[level].get(key)
+    }
+
+    pub fn append_iterator_to(&self, opts: &ReadOptions, iters: &mut Vec<Box<dyn AsyncIterator>>) {
+        let l = self.level0.len();
+        for i in 0..l {
+            iters.push(self.level0[l - i - 1].reader.new_iterator_opts(opts));
+        }
+        for tree in self.base_level.iter() {
+            if tree.size() > 0 {
+                let iter = tree.new_iterator();
+                let accessor = BTreeTableAccessor::new(iter);
+                let iter = TwoLevelIterator::new(accessor);
+                iters.push(Box::new(iter));
+            }
+        }
     }
 }

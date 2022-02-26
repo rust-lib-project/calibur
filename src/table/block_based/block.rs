@@ -1,11 +1,11 @@
-use crate::common::format::{GlobalSeqnoAppliedKey, Slice};
+use crate::common::format::{extract_user_key, GlobalSeqnoAppliedKey, Slice};
 use crate::common::{KeyComparator, RandomAccessFileReader, Result};
 use crate::table::block_based::data_block_hash_index_builder::DataBlockHashIndex;
 use crate::table::block_based::options::DataBlockIndexType;
 use crate::table::block_based::BLOCK_TRAILER_SIZE;
 use crate::table::format::{BlockHandle, IndexValue, MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX};
 use crate::table::InternalIterator;
-use crate::util::{decode_fixed_uint32, extract_user_key, get_var_uint32};
+use crate::util::{decode_fixed_uint32, get_var_uint32};
 use std::cmp::Ordering;
 use std::sync::Arc;
 

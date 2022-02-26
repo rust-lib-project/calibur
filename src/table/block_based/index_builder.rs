@@ -1,9 +1,9 @@
 use super::options::IndexShorteningMode;
+use crate::common::format::extract_user_key;
 use crate::common::{InternalKeyComparator, KeyComparator, Result};
 use crate::table::block_based::block_builder::{BlockBuilder, DEFAULT_HASH_TABLE_UTIL_RATIO};
 use crate::table::block_based::options::{BlockBasedTableOptions, DataBlockIndexType, IndexType};
 use crate::table::format::*;
-pub use crate::util::extract_user_key;
 use std::cmp::Ordering;
 
 pub struct IndexBlocks {

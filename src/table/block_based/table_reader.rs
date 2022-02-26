@@ -1,3 +1,4 @@
+use crate::common::format::extract_user_key;
 use crate::common::{
     options::ReadOptions, DefaultUserComparator, InternalKeyComparator, RandomAccessFileReader,
     Result, DISABLE_GLOBAL_SEQUENCE_NUMBER,
@@ -18,7 +19,6 @@ use crate::table::table_properties::{
     seek_to_metablock, seek_to_properties_block, TableProperties,
 };
 use crate::table::{AsyncIterator, InternalIterator, TableReader, TableReaderOptions};
-use crate::util::extract_user_key;
 use async_trait::async_trait;
 use std::cmp::Ordering;
 use std::sync::Arc;

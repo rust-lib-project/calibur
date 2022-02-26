@@ -1,4 +1,4 @@
-use crate::util::extract_user_key;
+use crate::common::format::extract_user_key;
 use std::sync::Arc;
 
 pub trait SliceTransform: Send + Sync {

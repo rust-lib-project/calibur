@@ -1,5 +1,5 @@
 use crate::common::DISABLE_GLOBAL_SEQUENCE_NUMBER;
-use crate::util::{decode_fixed_uint64, extract_user_key};
+use crate::util::decode_fixed_uint64;
 
 #[repr(u8)]
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
@@ -42,9 +42,15 @@ impl Slice {
 }
 
 pub const VALUE_TYPE_FOR_SEEK: u8 = ValueType::TypeBlobIndex as u8;
+pub const VALUE_TYPE_FOR_SEEK_FOR_PREV: u8 = ValueType::TypeDeletion as u8;
 
 pub fn pack_sequence_and_type(seq: u64, t: u8) -> u64 {
     return (seq << 8) | t as u64;
+}
+
+pub fn extract_user_key(key: &[u8]) -> &[u8] {
+    let l = key.len();
+    &key[..(l - 8)]
 }
 
 pub fn extract_internal_key_footer(key: &[u8]) -> u64 {

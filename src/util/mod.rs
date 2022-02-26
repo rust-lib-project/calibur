@@ -26,11 +26,6 @@ pub fn difference_offset(origin: &[u8], target: &[u8]) -> usize {
     off
 }
 
-pub fn extract_user_key(key: &[u8]) -> &[u8] {
-    let l = key.len();
-    &key[..(l - 8)]
-}
-
 pub fn encode_var_uint32(data: &mut [u8], n: u32) -> usize {
     const B: u32 = 128;
     const MASK: u32 = 255;

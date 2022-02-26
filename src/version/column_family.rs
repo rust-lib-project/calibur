@@ -32,6 +32,7 @@ impl ColumnFamily {
         options: ColumnFamilyOptions,
     ) -> Self {
         let mem = Arc::new(m);
+        let options = Arc::new(options);
         Self {
             log_number: version.get_log_number(),
             mem: mem.clone(),
@@ -41,6 +42,7 @@ impl ColumnFamily {
                 imms: Default::default(),
                 current: version.clone(),
                 version_number: 0,
+                column_family_options: options.clone(),
                 valid: AtomicBool::new(true),
             }),
             super_version_number: Arc::new(AtomicU64::new(0)),
@@ -48,7 +50,7 @@ impl ColumnFamily {
             id,
             comparator,
             name,
-            options: Arc::new(options),
+            options,
         }
     }
 
@@ -97,6 +99,7 @@ impl ColumnFamily {
             self.mem.clone(),
             imms.clone(),
             version.clone(),
+            self.options.clone(),
             super_version_number,
         ));
         self.super_version.valid.store(false, Ordering::Release);
@@ -114,6 +117,7 @@ impl ColumnFamily {
             mem.clone(),
             imms.clone(),
             self.version.clone(),
+            self.options.clone(),
             super_version_number,
         ));
         self.super_version.valid.store(false, Ordering::Release);

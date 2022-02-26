@@ -196,8 +196,6 @@ impl VersionSet {
                 if version.imms.mems[idx].is_pending_schedule() {
                     assert!(mems.is_empty());
                     continue;
-                } else if !version.imms.mems[idx].can_schedule_flush() {
-                    break;
                 }
                 version.imms.mems[idx].mark_schedule_flush();
                 mems.push((*id, version.imms.mems[idx].clone()));

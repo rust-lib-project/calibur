@@ -162,7 +162,10 @@ impl WALWriter {
             vs.schedule_immutable_memtables(&mut mems);
         }
         if !mems.is_empty() {
-            let _ = self.flush_scheduler.send(FlushRequest::new(mems)).await;
+            let _ = self
+                .flush_scheduler
+                .send(FlushRequest::new(mems, self.ctx.last_sequence))
+                .await;
         }
         Ok(())
     }
@@ -228,9 +231,6 @@ impl WALWriter {
 
         if sync_wal {
             self.writer.fsync().await?;
-        }
-        for (_, m) in &self.mems {
-            m.mark_write_begin(l as u64);
         }
         Ok(self.mems.clone())
     }

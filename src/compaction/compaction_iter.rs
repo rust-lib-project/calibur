@@ -251,7 +251,7 @@ mod tests {
         expected_ret: Vec<(Vec<u8>, Vec<u8>)>,
         bottommost_level: bool,
     ) {
-        let mut iter = memtable.new_iterator();
+        let iter = memtable.new_iterator();
         let mut compaction_iter = CompactionIter::new(
             iter,
             comparator.get_user_comparator().clone(),

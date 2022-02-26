@@ -9,6 +9,7 @@ mod log;
 mod manifest;
 mod memtable;
 mod options;
+mod pipeline;
 mod table;
 mod util;
 mod version;

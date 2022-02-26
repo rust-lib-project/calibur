@@ -90,6 +90,12 @@ pub struct BTreeTableAccessor {
     iter: BTreeIter<Arc<TableFile>>,
 }
 
+impl BTreeTableAccessor {
+    pub fn new(iter: BTreeIter<Arc<TableFile>>) -> Self {
+        Self { iter }
+    }
+}
+
 impl TableAccessor for BTreeTableAccessor {
     fn seek(&mut self, key: &[u8]) {
         self.iter.seek(key)

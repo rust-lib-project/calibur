@@ -1,7 +1,8 @@
+use crate::common::format::extract_user_key;
 use crate::common::FileSystem;
 use crate::common::MAX_SEQUENCE_NUMBER;
 use crate::table::TableReader;
-use crate::util::{extract_user_key, BtreeComparable};
+use crate::util::BtreeComparable;
 use bytes::Bytes;
 use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};

@@ -1,8 +1,9 @@
 use super::data_block_hash_index_builder::DataBlockHashIndexBuilder;
 use super::options::DataBlockIndexType;
+use crate::common::format::extract_user_key;
 use crate::table::block_based::block::pack_index_type_and_num_restarts;
 use crate::table::format::MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX;
-use crate::util::{difference_offset, encode_var_uint32, extract_user_key};
+use crate::util::{difference_offset, encode_var_uint32};
 
 pub const DEFAULT_HASH_TABLE_UTIL_RATIO: f64 = 0.75;
 

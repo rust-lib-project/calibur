@@ -1,5 +1,6 @@
 use crate::common::options::ReadOptions;
 use crate::common::Result;
+use crate::iterator::AsyncIterator;
 use crate::memtable::Memtable;
 use crate::version::version_storage_info::VersionStorageInfo;
 use crate::version::{FileMetaData, TableFile};
@@ -120,5 +121,9 @@ impl Version {
             }
         }
         Ok(None)
+    }
+
+    pub fn append_iterator_to(&self, opts: &ReadOptions, iters: &mut Vec<Box<dyn AsyncIterator>>) {
+        self.storage.append_iterator_to(opts, iters);
     }
 }

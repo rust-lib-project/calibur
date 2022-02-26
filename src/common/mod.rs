@@ -7,7 +7,7 @@ mod slice_transform;
 mod snapshot;
 pub use file::*;
 
-use crate::util::{decode_fixed_uint64, extract_user_key};
+use crate::util::decode_fixed_uint64;
 pub use slice_transform::{InternalKeySliceTransform, SliceTransform};
 
 pub use error::Error;
@@ -18,7 +18,7 @@ pub use file_system::{
 };
 pub type Result<T> = std::result::Result<T, Error>;
 
-use crate::common::format::VALUE_TYPE_FOR_SEEK;
+pub use crate::common::format::{extract_user_key, VALUE_TYPE_FOR_SEEK};
 use std::cmp::Ordering;
 use std::sync::Arc;
 

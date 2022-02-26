@@ -1,6 +1,6 @@
+use crate::common::format::extract_user_key;
 use crate::iterator::table_accessor::TableAccessor;
 use crate::iterator::AsyncIterator;
-use crate::util::extract_user_key;
 
 pub struct TwoLevelIterator<Acessor: TableAccessor> {
     table_accessor: Acessor,

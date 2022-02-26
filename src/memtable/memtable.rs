@@ -1,8 +1,7 @@
 use super::list::{IterRef, Skiplist};
-use crate::common::format::{pack_sequence_and_type, ValueType};
+use crate::common::format::{extract_user_key, pack_sequence_and_type, ValueType};
 use crate::common::InternalKeyComparator;
 use crate::iterator::{AsyncIterator, InternalIterator};
-use crate::util::extract_user_key;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub struct Memtable {
@@ -10,7 +9,6 @@ pub struct Memtable {
     mem_next_logfile_number: AtomicU64,
     id: u64,
     comparator: InternalKeyComparator,
-    pending_writes: AtomicU64,
     pending_schedule: AtomicBool,
     first_seqno: AtomicU64,
     earliest_seqno: AtomicU64,
@@ -31,7 +29,6 @@ impl Memtable {
         Self {
             list: Skiplist::with_capacity(comparator.clone(), 4 * 1024 * 1024),
             comparator,
-            pending_writes: AtomicU64::new(0),
             mem_next_logfile_number: AtomicU64::new(0),
             id,
             pending_schedule: AtomicBool::new(false),
@@ -44,6 +41,11 @@ impl Memtable {
     pub fn new_iterator(&self) -> Box<dyn InternalIterator> {
         let iter = self.list.iter();
         Box::new(MemIterator { inner: iter })
+    }
+
+    pub fn new_async_iterator(&self) -> Box<dyn AsyncIterator> {
+        let iter = self.list.iter();
+        Box::new(MemIteratorWrapper { inner: iter })
     }
 
     pub fn get_comparator(&self) -> InternalKeyComparator {
@@ -119,19 +121,6 @@ impl Memtable {
         self.pending_schedule.load(Ordering::Acquire)
     }
 
-    pub fn can_schedule_flush(&self) -> bool {
-        self.pending_writes.load(Ordering::Acquire) == 0
-    }
-
-    pub fn mark_write_begin(&self, count: u64) {
-        self.pending_writes.fetch_add(count, Ordering::SeqCst);
-    }
-
-    // return true if this memtable must be scheduled flush at once
-    pub fn mark_write_done(&self) {
-        self.pending_writes.fetch_sub(1, Ordering::SeqCst);
-    }
-
     fn update_first_sequence(&self, sequence: u64) {
         let mut cur_seq_num = self.first_seqno.load(Ordering::Relaxed);
         while cur_seq_num == 0 || sequence < cur_seq_num {
@@ -199,7 +188,7 @@ impl InternalIterator for MemIterator {
 }
 
 pub struct MemIteratorWrapper {
-    inner: MemIterator,
+    inner: IterRef<Skiplist>,
 }
 
 #[async_trait::async_trait]

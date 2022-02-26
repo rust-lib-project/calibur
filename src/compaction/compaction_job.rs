@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
+use crate::common::format::extract_user_key;
 use crate::common::options::CompressionType;
 use crate::common::{make_table_file_name, Result};
 use crate::compaction::compaction_iter::CompactionIter;
 use crate::compaction::{CompactionEngine, CompactionRequest};
 use crate::iterator::{AsyncIterator, AsyncMergingIterator, TwoLevelIterator, VecTableAccessor};
 use crate::table::TableBuilderOptions;
-use crate::util::{extract_user_key, BtreeComparable};
+use crate::util::BtreeComparable;
 use crate::version::{FileMetaData, KernelNumberContext, VersionEdit};
 use crate::{ColumnFamilyOptions, ImmutableDBOptions};
 

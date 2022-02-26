@@ -1,9 +1,11 @@
 mod async_merge_iterator;
+mod db_iterator;
 mod merge_iterator;
 mod table_accessor;
 mod two_level_iterator;
 
 pub use async_merge_iterator::MergingIterator as AsyncMergingIterator;
+pub use db_iterator::DBIterator;
 pub use merge_iterator::MergingIterator;
 pub use table_accessor::*;
 pub use two_level_iterator::TwoLevelIterator;
