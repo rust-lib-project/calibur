@@ -43,6 +43,16 @@ impl SnapshotList {
     pub fn count(&self) -> usize {
         self.count
     }
+
+    pub fn collect_snapshots(&mut self, snapshots: &mut Vec<u64>) {
+        unsafe {
+            let mut s: *mut Snapshot = self.head.as_mut();
+            while (*s).sequence != 0 {
+                snapshots.push((*s).sequence);
+                s = (*s).next;
+            }
+        }
+    }
 }
 
 pub struct Snapshot {

@@ -419,6 +419,7 @@ impl Engine {
         let options = self.options.clone();
         let stopped = self.stopped.clone();
         let version_set = self.version_set.clone();
+        let snapshot_list = self.snapshot_list.clone();
         let mut cf_options = HashMap::default();
         for (cf, opt) in version_set.lock().unwrap().get_column_family_options() {
             cf_options.insert(cf, opt);
@@ -430,12 +431,18 @@ impl Engine {
             while let Some(req) = rx.next().await {
                 // We must wait other thread finish their write task to the current memtables.
                 commit_queue.wait_pending_writers(req.wait_commit_request);
+                let mut snapshots = vec![];
+                {
+                    let mut snapshot_guard = snapshot_list.lock().unwrap();
+                    snapshot_guard.collect_snapshots(&mut snapshots);
+                }
                 run_flush_memtable_job(
                     engine.clone(),
                     vec![req],
                     kernel.clone(),
                     options.clone(),
                     cf_options.clone(),
+                    snapshots,
                 )
                 .await?;
             }

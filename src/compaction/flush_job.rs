@@ -18,6 +18,7 @@ pub struct FlushJob<E: CompactionEngine> {
     mems: Vec<Arc<Memtable>>,
     meta: FileMetaData,
     comparator: InternalKeyComparator,
+    snapshots: Vec<u64>,
     cf_id: u32,
 }
 
@@ -30,6 +31,7 @@ impl<E: CompactionEngine> FlushJob<E> {
         comparator: InternalKeyComparator,
         cf_id: u32,
         file_number: u64,
+        snapshots: Vec<u64>,
     ) -> Self {
         let mut version_edit = VersionEdit::default();
         version_edit.column_family = cf_id;
@@ -46,6 +48,7 @@ impl<E: CompactionEngine> FlushJob<E> {
             meta,
             comparator,
             cf_options,
+            snapshots,
         }
     }
 
@@ -73,7 +76,7 @@ impl<E: CompactionEngine> FlushJob<E> {
         let mut compact_iter = CompactionIter::new(
             iter,
             self.comparator.get_user_comparator().clone(),
-            vec![],
+            self.snapshots.clone(),
             false,
         );
         compact_iter.seek_to_first().await;
@@ -101,6 +104,7 @@ pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
     kernel: Arc<KernelNumberContext>,
     options: Arc<ImmutableDBOptions>,
     cf_options: HashMap<u32, Arc<ColumnFamilyOptions>>,
+    snapshots: Vec<u64>,
 ) -> Result<()> {
     let mut mems = vec![];
     for req in &reqs {
@@ -130,6 +134,7 @@ pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
                 comparator,
                 i as u32,
                 file_number,
+                snapshots.clone(),
             );
             let meta = job.run().await?;
             let mut edit = VersionEdit::default();
