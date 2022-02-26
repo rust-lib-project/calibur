@@ -1,7 +1,9 @@
 mod block_based;
 mod format;
-mod merge_iterator;
 mod table_properties;
+
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::common::format::ValueType;
 use crate::common::options::{CompressionType, ReadOptions};
@@ -9,38 +11,11 @@ use crate::common::{
     InternalKeyComparator, InternalKeySliceTransform, RandomAccessFileReader, Result,
     SliceTransform, WritableFileWriter,
 };
+use crate::iterator::{AsyncIterator, InternalIterator};
 use async_trait::async_trait;
 pub use block_based::{
     BlockBasedTableFactory, BlockBasedTableOptions, FilterBlockFactory, FullFilterBlockFactory,
 };
-pub use merge_iterator::MergingIterator;
-use std::collections::HashMap;
-use std::sync::Arc;
-
-pub trait InternalIterator: Send {
-    fn valid(&self) -> bool;
-    fn seek(&mut self, key: &[u8]);
-    fn seek_to_first(&mut self);
-    fn seek_to_last(&mut self);
-    fn seek_for_prev(&mut self, key: &[u8]);
-    fn next(&mut self);
-    fn prev(&mut self);
-    fn key(&self) -> &[u8];
-    fn value(&self) -> &[u8];
-}
-
-#[async_trait]
-pub trait AsyncIterator: Send {
-    fn valid(&self) -> bool;
-    async fn seek(&mut self, key: &[u8]);
-    async fn seek_to_first(&mut self);
-    async fn seek_to_last(&mut self);
-    async fn seek_for_prev(&mut self, key: &[u8]);
-    async fn next(&mut self);
-    async fn prev(&mut self);
-    fn key(&self) -> &[u8];
-    fn value(&self) -> &[u8];
-}
 
 #[async_trait]
 pub trait TableReader: 'static + Sync + Send {
@@ -69,6 +44,7 @@ pub trait TableFactory: Send + Sync {
 
 #[async_trait]
 pub trait TableBuilder: Send {
+    fn last_key(&self) -> &[u8];
     fn add(&mut self, key: &[u8], value: &[u8]) -> Result<()>;
     fn should_flush(&self) -> bool;
     async fn finish(&mut self) -> Result<()>;

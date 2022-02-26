@@ -4,6 +4,7 @@ mod column_family;
 mod common;
 mod compaction;
 mod db;
+mod iterator;
 mod log;
 mod manifest;
 mod memtable;

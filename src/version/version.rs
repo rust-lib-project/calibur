@@ -49,9 +49,10 @@ impl Version {
         comparator: String,
         tables: Vec<Arc<TableFile>>,
         log_number: u64,
+        max_level: usize,
     ) -> Self {
         Version {
-            storage: VersionStorageInfo::new(tables),
+            storage: VersionStorageInfo::new(tables, max_level),
             cf_id,
             cf_name,
             log_number,

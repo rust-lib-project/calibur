@@ -222,6 +222,7 @@ impl VersionSet {
             cf_opt.comparator.name().to_string(),
             vec![],
             edit.log_number,
+            cf_opt.max_level,
         ));
         let mut cf = ColumnFamily::new(
             id,

@@ -1,9 +1,9 @@
 use crate::common::{InternalKeyComparator, KeyComparator};
-use crate::table::InternalIterator;
+use crate::iterator::InternalIterator;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-pub struct IteratorWrapper {
+struct IteratorWrapper {
     inner: Box<dyn InternalIterator>,
     comparator: InternalKeyComparator,
 }

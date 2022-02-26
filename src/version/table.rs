@@ -45,7 +45,6 @@ pub struct FileMetaData {
     pub level: u32,
     pub smallest: Bytes,
     pub largest: Bytes,
-    pub being_compact: bool,
     pub marked_for_compaction: bool,
 }
 
@@ -56,7 +55,6 @@ impl FileMetaData {
             level,
             smallest: Bytes::from(smallest),
             largest: Bytes::from(largest),
-            being_compact: false,
             marked_for_compaction: false,
         }
     }
@@ -83,6 +81,7 @@ pub struct TableFile {
     smallest: Vec<u8>,
     largest: Vec<u8>,
     path: PathBuf,
+    being_compact: AtomicBool,
 }
 
 impl TableFile {
@@ -102,11 +101,20 @@ impl TableFile {
             smallest,
             largest,
             deleted: AtomicBool::new(false),
+            being_compact: AtomicBool::new(false),
         }
     }
 
     pub fn mark_removed(&self) {
         self.deleted.store(true, Ordering::Release);
+    }
+
+    pub fn mark_compaction(&self) {
+        self.being_compact.store(true, Ordering::Release);
+    }
+
+    pub fn is_pending_compaction(&self) -> bool {
+        self.being_compact.load(Ordering::Acquire)
     }
 }
 

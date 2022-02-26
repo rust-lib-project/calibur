@@ -8,13 +8,15 @@ const MAX_BTREE_PAGE_SIZE: usize = 128;
 pub struct VersionStorageInfo {
     pub(crate) level0: Vec<Arc<TableFile>>,
     base_level: Vec<BTree<Arc<TableFile>>>,
+    max_level: usize,
 }
 
 impl VersionStorageInfo {
-    pub fn new(to_add: Vec<Arc<TableFile>>) -> Self {
+    pub fn new(to_add: Vec<Arc<TableFile>>, max_level: usize) -> Self {
         let info = VersionStorageInfo {
             level0: vec![],
             base_level: vec![],
+            max_level,
         };
         if to_add.is_empty() {
             info
@@ -109,7 +111,11 @@ impl VersionStorageInfo {
             }
         }
 
-        Self { level0, base_level }
+        Self {
+            level0,
+            base_level,
+            max_level: self.max_level,
+        }
     }
 
     pub fn get_table(&self, key: &[u8], level: usize) -> Option<Arc<TableFile>> {

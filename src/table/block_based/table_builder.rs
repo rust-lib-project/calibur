@@ -193,6 +193,10 @@ impl BlockBasedTableBuilder {
 
 #[async_trait::async_trait]
 impl TableBuilder for BlockBasedTableBuilder {
+    fn last_key(&self) -> &[u8] {
+        &self.rep.last_key
+    }
+
     fn add(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
         let value_type = extract_value_type(key);
         // TODO: check out of order

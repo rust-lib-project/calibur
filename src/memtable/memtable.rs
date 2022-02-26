@@ -1,7 +1,7 @@
 use super::list::{IterRef, Skiplist};
 use crate::common::format::{pack_sequence_and_type, ValueType};
 use crate::common::InternalKeyComparator;
-use crate::table::InternalIterator;
+use crate::iterator::{AsyncIterator, InternalIterator};
 use crate::util::extract_user_key;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -195,5 +195,48 @@ impl InternalIterator for MemIterator {
 
     fn value(&self) -> &[u8] {
         self.inner.value().as_ref()
+    }
+}
+
+pub struct MemIteratorWrapper {
+    inner: MemIterator,
+}
+
+#[async_trait::async_trait]
+impl AsyncIterator for MemIteratorWrapper {
+    fn valid(&self) -> bool {
+        self.inner.valid()
+    }
+
+    async fn seek(&mut self, key: &[u8]) {
+        self.inner.seek(key)
+    }
+
+    async fn seek_to_first(&mut self) {
+        self.inner.seek_to_first()
+    }
+
+    async fn seek_to_last(&mut self) {
+        self.inner.seek_to_last()
+    }
+
+    async fn seek_for_prev(&mut self, key: &[u8]) {
+        self.inner.seek_for_prev(key)
+    }
+
+    async fn next(&mut self) {
+        self.inner.next()
+    }
+
+    async fn prev(&mut self) {
+        self.inner.prev()
+    }
+
+    fn key(&self) -> &[u8] {
+        self.inner.key()
+    }
+
+    fn value(&self) -> &[u8] {
+        self.inner.value()
     }
 }

@@ -189,6 +189,7 @@ impl Manifest {
                 cf_opts.comparator.name().to_string(),
                 tables,
                 max_log_number,
+                cf_opts.max_level,
             );
             versions.insert(cf_id, Arc::new(version));
         }

@@ -1,11 +1,13 @@
 use crate::common::options::CompressionType;
 use crate::common::{make_table_file_name, InternalKeyComparator, Result};
 use crate::compaction::compaction_iter::CompactionIter;
-use crate::compaction::CompactionEngine;
+use crate::compaction::{CompactionEngine, FlushRequest};
+use crate::iterator::{InternalIterator, MergingIterator};
 use crate::memtable::Memtable;
 use crate::options::{ColumnFamilyOptions, ImmutableDBOptions};
-use crate::table::{InternalIterator, MergingIterator, TableBuilderOptions};
-use crate::version::{FileMetaData, VersionEdit};
+use crate::table::TableBuilderOptions;
+use crate::version::{FileMetaData, KernelNumberContext, VersionEdit};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct FlushJob<E: CompactionEngine> {
@@ -67,8 +69,7 @@ impl<E: CompactionEngine> FlushJob<E> {
         build_opts.target_file_size = 0;
         build_opts.internal_comparator = self.comparator.clone();
         let mut builder = self.cf_options.factory.new_builder(&build_opts, file)?;
-        let mut iter = self.new_merging_iterator(&self.mems);
-        iter.seek_to_first();
+        let iter = self.new_merging_iterator(&self.mems);
         let mut compact_iter = CompactionIter::new(
             iter,
             self.comparator.get_user_comparator().clone(),
@@ -92,4 +93,61 @@ impl<E: CompactionEngine> FlushJob<E> {
         self.meta.fd.file_size = builder.file_size();
         Ok(self.meta.clone())
     }
+}
+
+pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
+    mut engine: Engine,
+    reqs: Vec<FlushRequest>,
+    kernel: Arc<KernelNumberContext>,
+    options: Arc<ImmutableDBOptions>,
+    cf_options: HashMap<u32, Arc<ColumnFamilyOptions>>,
+) -> Result<()> {
+    let mut mems = vec![];
+    for req in &reqs {
+        for (cf, mem) in &req.mems {
+            while *cf >= mems.len() as u32 {
+                mems.push(vec![]);
+            }
+            mems[(*cf) as usize].push(mem.clone());
+        }
+    }
+    let mut edits = vec![];
+    for i in 0..mems.len() {
+        if !mems[i].is_empty() {
+            let file_number = kernel.new_file_number();
+            let memids = mems[i].iter().map(|mem| mem.get_id()).collect();
+            let idx = i as u32;
+            let cf_opt = cf_options
+                .get(&idx)
+                .cloned()
+                .unwrap_or(Arc::new(ColumnFamilyOptions::default()));
+            let comparator = cf_opt.comparator.clone();
+            let mut job = FlushJob::new(
+                engine.clone(),
+                options.clone(),
+                cf_opt,
+                mems[i].clone(),
+                comparator,
+                i as u32,
+                file_number,
+            );
+            let meta = job.run().await?;
+            let mut edit = VersionEdit::default();
+            edit.prev_log_number = 0;
+            edit.set_log_number(mems[i].last().unwrap().get_next_log_number());
+            edit.add_file(
+                0,
+                file_number,
+                meta.fd.file_size,
+                meta.smallest.as_ref(),
+                meta.largest.as_ref(),
+                meta.fd.smallest_seqno,
+                meta.fd.largest_seqno,
+            );
+            edit.mems_deleted = memids;
+            edit.column_family = i as u32;
+            edits.push(edit);
+        }
+    }
+    engine.apply(edits).await
 }

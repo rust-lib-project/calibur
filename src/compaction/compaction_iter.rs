@@ -1,6 +1,6 @@
 use crate::common::format::{GlobalSeqnoAppliedKey, ParsedInternalKey, ValueType};
 use crate::common::{KeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER, MAX_SEQUENCE_NUMBER};
-use crate::table::{AsyncIterator, InternalIterator};
+use crate::iterator::{AsyncIterator, InternalIterator};
 use std::sync::Arc;
 
 enum InnerIterator {
@@ -17,7 +17,7 @@ pub struct CompactionIter {
     at_next: bool,
     valid: bool,
     has_current_user_key: bool,
-    comparator: Arc<dyn KeyComparator>,
+    user_comparator: Arc<dyn KeyComparator>,
     current_user_key_snapshot: u64,
     current_sequence: u64,
     earliest_snapshot: u64,
@@ -27,7 +27,7 @@ pub struct CompactionIter {
 impl CompactionIter {
     pub fn new(
         iter: Box<dyn InternalIterator>,
-        comparator: Arc<dyn KeyComparator>,
+        user_comparator: Arc<dyn KeyComparator>,
         snapshots: Vec<u64>,
         bottommost_level: bool,
     ) -> Self {
@@ -41,7 +41,7 @@ impl CompactionIter {
             at_next: false,
             valid: false,
             has_current_user_key: false,
-            comparator,
+            user_comparator,
             current_user_key_snapshot: 0,
             current_sequence: 0,
             earliest_snapshot,
@@ -51,7 +51,7 @@ impl CompactionIter {
 
     pub fn new_with_async(
         iter: Box<dyn AsyncIterator>,
-        comparator: Arc<dyn KeyComparator>,
+        user_comparator: Arc<dyn KeyComparator>,
         snapshots: Vec<u64>,
         bottommost_level: bool,
     ) -> Self {
@@ -65,7 +65,7 @@ impl CompactionIter {
             at_next: false,
             valid: false,
             has_current_user_key: false,
-            comparator,
+            user_comparator,
             current_user_key_snapshot: 0,
             current_sequence: 0,
             earliest_snapshot,
@@ -74,6 +74,10 @@ impl CompactionIter {
     }
 
     pub async fn seek_to_first(&mut self) {
+        match &mut self.inner {
+            InnerIterator::Async(iter) => iter.seek_to_first().await,
+            InnerIterator::Sync(iter) => iter.seek_to_first(),
+        }
         self.next_from_input().await;
     }
 
@@ -133,7 +137,7 @@ impl CompactionIter {
             self.current_sequence = ikey.sequence;
             if !self.has_current_user_key
                 || !self
-                    .comparator
+                    .user_comparator
                     .same_key(ikey.user_key(), self.applied_key.get_user_key())
             {
                 self.applied_key.set_key(&self.key);
@@ -180,7 +184,7 @@ impl CompactionIter {
                     let parsed_key = ParsedInternalKey::new(next_key);
                     if !parsed_key.valid()
                         || !self
-                            .comparator
+                            .user_comparator
                             .same_key(ikey.user_key(), parsed_key.user_key())
                     {
                         break;
@@ -248,8 +252,6 @@ mod tests {
         bottommost_level: bool,
     ) {
         let mut iter = memtable.new_iterator();
-        iter.seek_to_first();
-
         let mut compaction_iter = CompactionIter::new(
             iter,
             comparator.get_user_comparator().clone(),

@@ -18,6 +18,7 @@ pub struct ColumnFamilyOptions {
     pub factory: Arc<dyn TableFactory>,
     pub comparator: InternalKeyComparator,
     pub prefix_extractor: Arc<dyn SliceTransform>,
+    pub max_level: usize,
 }
 
 impl PartialEq for ColumnFamilyOptions {
@@ -26,6 +27,7 @@ impl PartialEq for ColumnFamilyOptions {
             && self.max_write_buffer_number == other.max_write_buffer_number
             && self.factory.name().eq(other.factory.name())
             && self.comparator.name().eq(other.comparator.name())
+            && self.max_level == other.max_level
     }
 }
 
@@ -39,6 +41,7 @@ impl Default for ColumnFamilyOptions {
             factory: Arc::new(BlockBasedTableFactory::default()),
             comparator: InternalKeyComparator::default(),
             prefix_extractor: Arc::new(InternalKeySliceTransform::default()),
+            max_level: 7,
         }
     }
 }

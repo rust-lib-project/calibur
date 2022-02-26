@@ -344,6 +344,11 @@ impl VersionEdit {
         f.fd.largest_seqno = largest_seqno;
         self.add_files.push(f);
     }
+
+    pub fn delete_file(&mut self, level: u32, file_number: u64) {
+        let f = FileMetaData::new(file_number, level, vec![], vec![]);
+        self.deleted_files.push(f);
+    }
 }
 
 #[cfg(test)]
