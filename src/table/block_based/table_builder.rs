@@ -1,5 +1,5 @@
 use crate::common::format::{extract_user_key, extract_value_type, ValueType};
-use crate::common::options::CompressionType;
+use crate::common::CompressionType;
 use crate::common::InternalKeyComparator;
 use crate::common::{Result, WritableFileWriter};
 use crate::table::block_based::block_builder::BlockBuilder;

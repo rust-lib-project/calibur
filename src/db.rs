@@ -6,7 +6,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::common::format::ValueType;
-use crate::common::options::ReadOptions;
 use crate::common::{
     make_current_file, make_log_file, parse_file_name, DBFileType, Error, Result,
     MAX_SEQUENCE_NUMBER,
@@ -16,7 +15,7 @@ use crate::iterator::DBIterator;
 use crate::log::LogReader;
 use crate::manifest::{Manifest, ManifestScheduler, ManifestWriter};
 use crate::memtable::Memtable;
-use crate::options::{ColumnFamilyDescriptor, DBOptions, ImmutableDBOptions};
+use crate::options::{ColumnFamilyDescriptor, DBOptions, ImmutableDBOptions, ReadOptions};
 use crate::version::{KernelNumberContext, VersionSet};
 use crate::wal::{WALScheduler, WALTask, WALWriter, WriteMemtableTask};
 use crate::write_batch::{ReadOnlyWriteBatch, WriteBatch, WriteBatchItem};

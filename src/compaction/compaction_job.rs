@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::common::format::extract_user_key;
-use crate::common::options::CompressionType;
+use crate::common::CompressionType;
 use crate::common::{make_table_file_name, Result};
 use crate::compaction::compaction_iter::CompactionIter;
 use crate::compaction::{CompactionEngine, CompactionRequest};

@@ -1,8 +1,8 @@
 use super::version::MemtableList;
-use crate::common::options::ReadOptions;
 use crate::common::Result;
 use crate::iterator::{AsyncIterator, AsyncMergingIterator};
 use crate::memtable::Memtable;
+use crate::options::ReadOptions;
 use crate::version::Version;
 use crate::ColumnFamilyOptions;
 use std::sync::atomic::AtomicBool;

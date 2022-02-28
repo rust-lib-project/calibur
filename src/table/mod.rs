@@ -6,12 +6,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::common::format::ValueType;
-use crate::common::options::{CompressionType, ReadOptions};
+use crate::common::CompressionType;
 use crate::common::{
     InternalKeyComparator, InternalKeySliceTransform, RandomAccessFileReader, Result,
     SliceTransform, WritableFileWriter,
 };
 use crate::iterator::{AsyncIterator, InternalIterator};
+use crate::options::ReadOptions;
 use async_trait::async_trait;
 pub use block_based::{
     BlockBasedTableFactory, BlockBasedTableOptions, FilterBlockFactory, FullFilterBlockFactory,

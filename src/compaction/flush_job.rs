@@ -1,4 +1,4 @@
-use crate::common::options::CompressionType;
+use crate::common::CompressionType;
 use crate::common::{make_table_file_name, InternalKeyComparator, Result};
 use crate::compaction::compaction_iter::CompactionIter;
 use crate::compaction::{CompactionEngine, FlushRequest};

@@ -2,7 +2,6 @@ mod error;
 mod file;
 mod file_system;
 pub mod format;
-pub mod options;
 mod slice_transform;
 mod snapshot;
 pub use file::*;
@@ -18,7 +17,7 @@ pub use file_system::{
 };
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub use crate::common::format::{extract_user_key, VALUE_TYPE_FOR_SEEK};
+pub use format::{extract_user_key, CompressionType, ValueType, VALUE_TYPE_FOR_SEEK};
 use std::cmp::Ordering;
 use std::sync::Arc;
 

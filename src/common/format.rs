@@ -1,6 +1,28 @@
 use crate::common::DISABLE_GLOBAL_SEQUENCE_NUMBER;
 use crate::util::decode_fixed_uint64;
 
+#[derive(Eq, PartialEq, Clone)]
+pub enum CompressionType {
+    NoCompression = 0x0,
+    SnappyCompression = 0x1,
+    ZlibCompression = 0x2,
+    BZip2Compression = 0x3,
+    LZ4Compression = 0x4,
+    LZ4HCCompression = 0x5,
+    XpressCompression = 0x6,
+    ZSTD = 0x7,
+
+    // Only use ZSTDNotFinalCompression if you have to use ZSTD lib older than
+    // 0.8.0 or consider a possibility of downgrading the service or copying
+    // the database files to another service running with an older version of
+    // RocksDB that doesn't have ZSTD. Otherwise, you should use ZSTD. We will
+    // eventually remove the option from the public API.
+    ZSTDNotFinalCompression = 0x40,
+
+    // DisableCompressionOption is used to disable some compression options.
+    DisableCompressionOption = 0xff,
+}
+
 #[repr(u8)]
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum ValueType {

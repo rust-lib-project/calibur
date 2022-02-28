@@ -1,8 +1,9 @@
 use crate::common::format::extract_user_key;
 use crate::common::{
-    options::ReadOptions, DefaultUserComparator, InternalKeyComparator, RandomAccessFileReader,
-    Result, DISABLE_GLOBAL_SEQUENCE_NUMBER,
+    DefaultUserComparator, InternalKeyComparator, RandomAccessFileReader, Result,
+    DISABLE_GLOBAL_SEQUENCE_NUMBER,
 };
+use crate::options::ReadOptions;
 use crate::table::block_based::block::{
     read_block_content_from_file, read_block_from_file, DataBlockIter,
 };

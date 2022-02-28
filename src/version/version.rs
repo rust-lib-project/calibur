@@ -1,7 +1,7 @@
-use crate::common::options::ReadOptions;
 use crate::common::Result;
 use crate::iterator::AsyncIterator;
 use crate::memtable::Memtable;
+use crate::options::ReadOptions;
 use crate::version::version_storage_info::VersionStorageInfo;
 use crate::version::{FileMetaData, TableFile};
 use std::sync::Arc;
@@ -98,7 +98,7 @@ impl Version {
     }
 
     pub fn get_level0_file_num(&self) -> usize {
-        self.storage.level0.len()
+        self.storage.get_level0_file_num()
     }
 
     pub fn scan<F: FnMut(&FileMetaData)>(&self, f: F, level: usize) {
@@ -106,21 +106,7 @@ impl Version {
     }
 
     pub async fn get(&self, opts: &ReadOptions, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        let l = self.storage.level0.len();
-        for i in 0..l {
-            if let Some(v) = self.storage.level0[l - i - 1].reader.get(opts, key).await? {
-                return Ok(Some(v));
-            }
-        }
-        let l = self.storage.size();
-        for i in 0..l {
-            if let Some(table) = self.storage.get_table(key, i) {
-                if let Some(v) = table.reader.get(opts, key).await? {
-                    return Ok(Some(v));
-                }
-            }
-        }
-        Ok(None)
+        self.storage.get(opts, key).await
     }
 
     pub fn append_iterator_to(&self, opts: &ReadOptions, iters: &mut Vec<Box<dyn AsyncIterator>>) {
