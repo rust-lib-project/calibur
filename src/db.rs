@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::hash_map::RandomState;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -10,7 +10,9 @@ use crate::common::{
     make_current_file, make_log_file, parse_file_name, DBFileType, Error, Result,
     MAX_SEQUENCE_NUMBER,
 };
-use crate::compaction::{run_flush_memtable_job, FlushRequest};
+use crate::compaction::{
+    run_compaction_job, run_flush_memtable_job, FlushRequest, LevelCompactionPicker,
+};
 use crate::iterator::DBIterator;
 use crate::log::LogReader;
 use crate::manifest::{Manifest, ManifestScheduler, ManifestWriter};
@@ -25,7 +27,7 @@ use crate::pipeline::PipelineCommitQueue;
 use crate::version::snapshot::{Snapshot, SnapshotList};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::channel::oneshot::Sender;
-use futures::StreamExt;
+use futures::{SinkExt, StreamExt};
 use yatp::{task::future::TaskCell, Builder as PoolBuilder, ThreadPool};
 
 #[derive(Default)]
@@ -207,9 +209,10 @@ impl Engine {
                 .build_multilevel_future_pool();
             Arc::new(pool)
         });
-        let manifest_scheduler = Self::start_manifest_job(&pool, Box::new(manifest))?;
         let (tx, rx) = unbounded();
         let (flush_tx, flush_rx) = unbounded();
+        let (compaction_tx, compaction_rx) = unbounded();
+        let manifest_scheduler = Self::start_manifest_job(&pool, Box::new(manifest))?;
         let wal_scheduler = WALScheduler::new(tx);
         let mut engine = Engine {
             version_set,
@@ -225,7 +228,8 @@ impl Engine {
         };
         engine.recover_log(logs).await?;
         engine.run_wal_job(flush_tx, rx)?;
-        engine.run_flush_job(flush_rx)?;
+        engine.run_flush_job(flush_rx, compaction_tx)?;
+        engine.run_compaction_job(compaction_rx)?;
         Ok(engine)
     }
 
@@ -301,6 +305,35 @@ impl Engine {
             }
             sequence += 1;
         }
+        Ok(())
+    }
+
+    fn run_compaction_job(&self, mut rx: UnboundedReceiver<u32>) -> Result<()> {
+        let cf_opts = {
+            let vs = self.version_set.lock().unwrap();
+            vs.get_column_family_options()
+        };
+        let picker = LevelCompactionPicker::new(cf_opts, self.options.clone());
+        let remote = self.pool.remote().clone();
+        let version_set = self.version_set.clone();
+        let manifest_scheduler = self.manifest_scheduler.clone();
+        let kernel = self.kernel.clone();
+        self.pool.spawn(async move {
+            while let Some(cf) = rx.next().await {
+                let version = {
+                    let vs = version_set.lock().unwrap();
+                    let super_version = vs.get_superversion(cf).unwrap();
+                    super_version.current.clone()
+                };
+                if let Some(request) = picker.pick_compaction(cf, version) {
+                    let engine = manifest_scheduler.clone();
+                    let kernel = kernel.clone();
+                    remote.spawn(async move {
+                        let _ = run_compaction_job(engine, request, kernel).await;
+                    });
+                }
+            }
+        });
         Ok(())
     }
 
@@ -412,18 +445,18 @@ impl Engine {
         Ok(())
     }
 
-    fn run_flush_job(&self, mut rx: UnboundedReceiver<FlushRequest>) -> Result<()> {
+    fn run_flush_job(
+        &self,
+        mut rx: UnboundedReceiver<FlushRequest>,
+        mut compaction_scheduler: UnboundedSender<u32>,
+    ) -> Result<()> {
         let engine = self.manifest_scheduler.clone();
         let kernel = self.kernel.clone();
         let options = self.options.clone();
         let stopped = self.stopped.clone();
         let version_set = self.version_set.clone();
         let snapshot_list = self.snapshot_list.clone();
-        let mut cf_options = HashMap::default();
-        for (cf, opt) in version_set.lock().unwrap().get_column_family_options() {
-            cf_options.insert(cf, opt);
-        }
-
+        let cf_options = version_set.lock().unwrap().get_column_family_options();
         let commit_queue = self.commit_queue.clone();
 
         let f = async move {
@@ -435,6 +468,7 @@ impl Engine {
                     let mut snapshot_guard = snapshot_list.lock().unwrap();
                     snapshot_guard.collect_snapshots(&mut snapshots);
                 }
+                let cfs: Vec<u32> = req.mems.iter().map(|(cf, _)| *cf).collect();
                 run_flush_memtable_job(
                     engine.clone(),
                     vec![req],
@@ -444,6 +478,9 @@ impl Engine {
                     snapshots,
                 )
                 .await?;
+                for cf in cfs {
+                    let _ = compaction_scheduler.send(cf).await;
+                }
             }
             Ok(())
         };
@@ -633,7 +670,7 @@ mod tests {
         sleep(Duration::from_secs(2));
         let vs = engine.version_set.lock().unwrap();
         let v = vs.get_superversion(0).unwrap();
-        assert_eq!(v.current.get_level0_file_num(), 6);
+        assert_eq!(v.current.get_storage_info().get_level0_file_num(), 6);
     }
 
     #[test]

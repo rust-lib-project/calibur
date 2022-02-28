@@ -2,26 +2,26 @@ use crate::common::Result;
 use crate::iterator::{AsyncIterator, BTreeTableAccessor, TwoLevelIterator};
 use crate::options::ReadOptions;
 use crate::util::{BTree, BtreeComparable, PageIterator};
-use crate::version::{FileMetaData, TableFile};
+use crate::version::TableFile;
 use std::sync::Arc;
 
 const MAX_BTREE_PAGE_SIZE: usize = 128;
 
 #[derive(Clone)]
 pub struct LevelInfo {
-    tables: BTree<Arc<TableFile>>,
-    total_file_size: u64,
+    pub tables: BTree<Arc<TableFile>>,
+    pub total_file_size: u64,
 }
 
 #[derive(Clone, Default)]
 pub struct Level0Info {
-    tables: Vec<Arc<TableFile>>,
-    total_file_size: u64,
+    pub tables: Vec<Arc<TableFile>>,
+    pub total_file_size: u64,
 }
 
 #[derive(Clone, Default)]
 pub struct VersionStorageInfo {
-    pub(crate) level0: Level0Info,
+    level0: Level0Info,
     levels: Vec<LevelInfo>,
     base_level: usize,
     max_level: usize,
@@ -52,10 +52,22 @@ impl VersionStorageInfo {
         self.levels.len()
     }
 
-    pub fn scan<F: FnMut(&FileMetaData)>(&self, mut consumer: F, level: usize) {
+    pub fn get_table_level0_info(&self) -> &Level0Info {
+        &self.level0
+    }
+
+    pub fn get_base_level_info(&self) -> &[LevelInfo] {
+        &self.levels
+    }
+
+    pub fn get_base_level(&self) -> usize {
+        self.base_level
+    }
+
+    pub fn scan<F: FnMut(&Arc<TableFile>)>(&self, mut consumer: F, level: usize) {
         if level == 0 {
             for f in &self.level0.tables {
-                consumer(&f.meta);
+                consumer(f);
             }
         } else {
             if level >= self.levels.len() + 1 {
@@ -65,7 +77,8 @@ impl VersionStorageInfo {
             iter.seek_to_first();
             while iter.valid() {
                 let r = iter.record().unwrap();
-                consumer(&r.meta);
+                consumer(&r);
+                iter.next();
             }
         }
     }
@@ -193,12 +206,42 @@ impl VersionStorageInfo {
         }
         let l = self.levels.len();
         for i in 0..l {
-            if let Some(table) = self.get_table(key, i) {
+            if let Some(table) = self.levels[i].tables.get(key) {
                 if let Some(v) = table.reader.get(opts, key).await? {
                     return Ok(Some(v));
                 }
             }
         }
         Ok(None)
+    }
+
+    pub fn get_overlap_with_compaction(
+        &self,
+        level: u32,
+        smallest: &[u8],
+        largest: &[u8],
+    ) -> Vec<Arc<TableFile>> {
+        let mut tables = vec![];
+        // TODO: compare with user_comparator
+        if level == 0 {
+            for t in &self.level0.tables {
+                if t.largest().ge(smallest) && t.smallest().le(largest) {
+                    tables.push(t.clone());
+                }
+            }
+        } else {
+            let idx = level as usize - 1;
+            let mut iter = self.levels[idx].tables.new_iterator();
+            iter.seek(smallest);
+            while iter.valid() {
+                let t = iter.record().unwrap();
+                if t.smallest().lt(largest) {
+                    break;
+                }
+                tables.push(t);
+                iter.next();
+            }
+        }
+        tables
     }
 }

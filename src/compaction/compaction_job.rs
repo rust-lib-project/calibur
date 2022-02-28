@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::common::format::extract_user_key;
@@ -8,24 +9,29 @@ use crate::compaction::{CompactionEngine, CompactionRequest};
 use crate::iterator::{AsyncIterator, AsyncMergingIterator, TwoLevelIterator, VecTableAccessor};
 use crate::table::TableBuilderOptions;
 use crate::util::BtreeComparable;
-use crate::version::{FileMetaData, KernelNumberContext, VersionEdit};
-use crate::{ColumnFamilyOptions, ImmutableDBOptions};
+use crate::version::{FileMetaData, KernelNumberContext, TableFile, VersionEdit};
 
 pub async fn run_compaction_job<Engine: CompactionEngine>(
     mut engine: Engine,
     request: CompactionRequest,
     kernel: Arc<KernelNumberContext>,
-    options: Arc<ImmutableDBOptions>,
-    cf_options: Arc<ColumnFamilyOptions>,
 ) -> Result<()> {
     let mut iters: Vec<Box<dyn AsyncIterator>> = vec![];
-    for (_level, tables) in request.input.iter() {
-        let accessor = VecTableAccessor::new(tables.clone());
+    let mut level_tables: HashMap<u32, Vec<Arc<TableFile>>> = HashMap::default();
+    for (level, f) in request.input.iter() {
+        if let Some(files) = level_tables.get_mut(&level) {
+            files.push(f.clone());
+        } else {
+            level_tables.insert(*level, vec![f.clone()]);
+        }
+    }
+    for (_level, tables) in level_tables {
+        let accessor = VecTableAccessor::new(tables);
         let two_level_iter = TwoLevelIterator::new(accessor);
         iters.push(Box::new(two_level_iter));
     }
-    let iter = AsyncMergingIterator::new(iters, cf_options.comparator.clone());
-    let user_comparator = cf_options.comparator.get_user_comparator().clone();
+    let iter = AsyncMergingIterator::new(iters, request.cf_options.comparator.clone());
+    let user_comparator = request.cf_options.comparator.get_user_comparator().clone();
     let mut compact_iter =
         CompactionIter::new_with_async(Box::new(iter), user_comparator.clone(), vec![], false);
     compact_iter.seek_to_first().await;
@@ -36,16 +42,16 @@ pub async fn run_compaction_job<Engine: CompactionEngine>(
         vec![],
         vec![],
     );
-    let fname = make_table_file_name(&options.db_path, meta.id());
-    let file = options.fs.open_writable_file_writer(fname)?;
+    let fname = make_table_file_name(&request.options.db_path, meta.id());
+    let file = request.options.fs.open_writable_file_writer(fname)?;
     let mut build_opts = TableBuilderOptions::default();
     build_opts.skip_filter = false;
     build_opts.column_family_id = request.cf;
     build_opts.compression_type = CompressionType::NoCompression;
     build_opts.target_file_size = 0;
-    build_opts.internal_comparator = cf_options.comparator.clone();
+    build_opts.internal_comparator = request.cf_options.comparator.clone();
 
-    let mut builder = cf_options.factory.new_builder(&build_opts, file)?;
+    let mut builder = request.cf_options.factory.new_builder(&build_opts, file)?;
     let mut metas = vec![];
     while compact_iter.valid() {
         let key = compact_iter.key();
@@ -63,9 +69,9 @@ pub async fn run_compaction_job<Engine: CompactionEngine>(
                 vec![],
                 vec![],
             );
-            let fname = make_table_file_name(&options.db_path, meta.id());
-            let file = options.fs.open_writable_file_writer(fname)?;
-            builder = cf_options.factory.new_builder(&build_opts, file)?;
+            let fname = make_table_file_name(&request.options.db_path, meta.id());
+            let file = request.options.fs.open_writable_file_writer(fname)?;
+            builder = request.cf_options.factory.new_builder(&build_opts, file)?;
         } else if builder.should_flush() {
             builder.flush().await?;
         }
@@ -91,10 +97,8 @@ pub async fn run_compaction_job<Engine: CompactionEngine>(
             m.fd.largest_seqno,
         );
     }
-    for (level, tables) in request.input.iter() {
-        for t in tables.iter() {
-            edit.delete_file(*level, t.id());
-        }
+    for (level, table) in request.input.iter() {
+        edit.delete_file(*level, table.id());
     }
     edit.column_family = request.cf;
     engine.apply(vec![edit]).await

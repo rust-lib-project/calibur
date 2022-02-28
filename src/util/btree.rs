@@ -441,6 +441,7 @@ where
     }
 
     fn record(&self) -> Option<R> {
+        assert!(self.iter.is_some());
         if let Some(iter) = self.iter.as_ref() {
             return iter.record();
         }

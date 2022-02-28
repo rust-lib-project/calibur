@@ -18,7 +18,12 @@ pub struct ColumnFamilyOptions {
     pub factory: Arc<dyn TableFactory>,
     pub comparator: InternalKeyComparator,
     pub prefix_extractor: Arc<dyn SliceTransform>,
-    pub max_level: usize,
+    pub max_level: u32,
+    pub max_bytes_for_level_base: usize,
+    pub max_bytes_for_level_multiplier: f64,
+    pub target_file_size_base: usize,
+    pub level0_file_num_compaction_trigger: usize,
+    pub max_compaction_bytes: usize,
 }
 
 impl PartialEq for ColumnFamilyOptions {
@@ -28,6 +33,9 @@ impl PartialEq for ColumnFamilyOptions {
             && self.factory.name().eq(other.factory.name())
             && self.comparator.name().eq(other.comparator.name())
             && self.max_level == other.max_level
+            && self.max_bytes_for_level_base == other.max_bytes_for_level_base
+            && self.max_bytes_for_level_multiplier == other.max_bytes_for_level_multiplier
+            && self.target_file_size_base == other.target_file_size_base
     }
 }
 
@@ -42,6 +50,11 @@ impl Default for ColumnFamilyOptions {
             comparator: InternalKeyComparator::default(),
             prefix_extractor: Arc::new(InternalKeySliceTransform::default()),
             max_level: 7,
+            max_bytes_for_level_base: 256 * 1024 * 1024,
+            max_bytes_for_level_multiplier: 10.0,
+            target_file_size_base: 64 * 1024 * 1024,
+            level0_file_num_compaction_trigger: 4,
+            max_compaction_bytes: 64 * 1024usize * 1024usize * 25,
         }
     }
 }

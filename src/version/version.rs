@@ -1,9 +1,6 @@
-use crate::common::Result;
-use crate::iterator::AsyncIterator;
 use crate::memtable::Memtable;
-use crate::options::ReadOptions;
 use crate::version::version_storage_info::VersionStorageInfo;
-use crate::version::{FileMetaData, TableFile};
+use crate::version::TableFile;
 use std::sync::Arc;
 
 #[derive(Default, Clone)]
@@ -50,10 +47,10 @@ impl Version {
         comparator: String,
         tables: Vec<Arc<TableFile>>,
         log_number: u64,
-        max_level: usize,
+        max_level: u32,
     ) -> Self {
         Version {
-            storage: VersionStorageInfo::new(tables, max_level),
+            storage: VersionStorageInfo::new(tables, max_level as usize),
             cf_id,
             cf_name,
             log_number,
@@ -97,19 +94,11 @@ impl Version {
         self.storage.size()
     }
 
-    pub fn get_level0_file_num(&self) -> usize {
-        self.storage.get_level0_file_num()
-    }
-
-    pub fn scan<F: FnMut(&FileMetaData)>(&self, f: F, level: usize) {
+    pub fn scan<F: FnMut(&Arc<TableFile>)>(&self, f: F, level: usize) {
         self.storage.scan(f, level);
     }
 
-    pub async fn get(&self, opts: &ReadOptions, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        self.storage.get(opts, key).await
-    }
-
-    pub fn append_iterator_to(&self, opts: &ReadOptions, iters: &mut Vec<Box<dyn AsyncIterator>>) {
-        self.storage.append_iterator_to(opts, iters);
+    pub fn get_storage_info(&self) -> &VersionStorageInfo {
+        &self.storage
     }
 }

@@ -172,10 +172,10 @@ impl VersionSet {
         None
     }
 
-    pub fn get_column_family_options(&self) -> Vec<(u32, Arc<ColumnFamilyOptions>)> {
-        let mut options = vec![];
+    pub fn get_column_family_options(&self) -> HashMap<u32, Arc<ColumnFamilyOptions>> {
+        let mut options = HashMap::default();
         for (&cf_id, cf) in self.column_family_set.iter() {
-            options.push((cf_id, cf.get_options()));
+            options.insert(cf_id, cf.get_options());
         }
         options
     }

@@ -54,7 +54,7 @@ impl SuperVersion {
             }
             l -= 1;
         }
-        self.current.get(opts, &ikey).await
+        self.current.get_storage_info().get(opts, &ikey).await
     }
 
     pub fn new_iterator(&self, opts: &ReadOptions) -> Result<Box<dyn AsyncIterator>> {
@@ -63,7 +63,9 @@ impl SuperVersion {
         for i in 0..l {
             iters.push(self.imms.mems[l - i - 1].new_async_iterator());
         }
-        self.current.append_iterator_to(opts, &mut iters);
+        self.current
+            .get_storage_info()
+            .append_iterator_to(opts, &mut iters);
         Ok(Box::new(AsyncMergingIterator::new(
             iters,
             self.column_family_options.comparator.clone(),

@@ -73,11 +73,7 @@ impl Manifest {
             versions.insert(v.get_cf_id(), v);
         }
 
-        let mut cf_options = HashMap::default();
-        let opts = version_set.get_column_family_options();
-        for (cf, opt) in opts {
-            cf_options.insert(cf, opt);
-        }
+        let cf_options = version_set.get_column_family_options();
 
         Ok(Self {
             log: None,
@@ -349,11 +345,11 @@ impl Manifest {
                         edit.add_file(
                             i as u32,
                             f.id(),
-                            f.fd.file_size,
-                            f.smallest.as_ref(),
-                            f.largest.as_ref(),
-                            f.fd.smallest_seqno,
-                            f.fd.largest_seqno,
+                            f.meta.fd.file_size,
+                            f.meta.smallest.as_ref(),
+                            f.meta.largest.as_ref(),
+                            f.meta.fd.smallest_seqno,
+                            f.meta.fd.largest_seqno,
                         );
                     },
                     i,

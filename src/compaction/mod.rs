@@ -1,6 +1,7 @@
 mod compaction_iter;
 mod compaction_job;
 mod flush_job;
+mod picker;
 
 use crate::common::Result;
 use crate::memtable::Memtable;
@@ -8,7 +9,9 @@ use crate::options::{ColumnFamilyOptions, ImmutableDBOptions};
 use crate::version::{TableFile, Version, VersionEdit};
 use std::sync::Arc;
 
+pub use compaction_job::run_compaction_job;
 pub use flush_job::run_flush_memtable_job;
+pub use picker::LevelCompactionPicker;
 
 #[async_trait::async_trait]
 pub trait CompactionEngine: Clone + Sync + Send {
@@ -16,7 +19,7 @@ pub trait CompactionEngine: Clone + Sync + Send {
 }
 
 pub struct CompactionRequest {
-    input: Vec<(u32, Vec<Arc<TableFile>>)>,
+    input: Vec<(u32, Arc<TableFile>)>,
     input_version: Arc<Version>,
     cf: u32,
     output_level: u32,
