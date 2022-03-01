@@ -214,25 +214,31 @@ impl VersionSet {
             self.kernel.last_sequence(),
         );
         let log_number = edit.log_number;
-        let new_version = Arc::new(Version::new(
+        let mut new_version = Version::new(
             edit.column_family,
             name.clone(),
             cf_opt.comparator.name().to_string(),
             vec![],
             edit.log_number,
             cf_opt.max_level,
-        ));
+        );
+        new_version.update_base_bytes(
+            cf_opt.max_bytes_for_level_base,
+            cf_opt.level0_file_num_compaction_trigger,
+            cf_opt.max_bytes_for_level_multiplier,
+        );
+        let version = Arc::new(new_version);
         let mut cf = ColumnFamily::new(
             id,
             name,
             m,
             cf_opt.comparator.clone(),
-            new_version.clone(),
+            version.clone(),
             cf_opt,
         );
         cf.set_log_number(log_number);
         self.column_family_set.insert(id, cf);
-        Ok(new_version)
+        Ok(version)
     }
 
     pub fn install_version(

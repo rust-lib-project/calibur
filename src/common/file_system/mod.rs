@@ -259,16 +259,6 @@ impl FileSystem for InMemFileSystem {
         }
     }
 
-    fn list_files(&self, _: PathBuf) -> Result<Vec<PathBuf>> {
-        let fs = self.inner.lock().unwrap();
-        let files = fs
-            .files
-            .iter()
-            .map(|(k, _)| PathBuf::from(k.clone()))
-            .collect();
-        Ok(files)
-    }
-
     fn remove(&self, path: PathBuf) -> Result<()> {
         let filename = path.to_str().unwrap();
         let mut fs = self.inner.lock().unwrap();
@@ -289,6 +279,16 @@ impl FileSystem for InMemFileSystem {
         let filename = target.to_str().unwrap();
         fs.files.insert(filename.to_string(), f);
         Ok(())
+    }
+
+    fn list_files(&self, _: PathBuf) -> Result<Vec<PathBuf>> {
+        let fs = self.inner.lock().unwrap();
+        let files = fs
+            .files
+            .iter()
+            .map(|(k, _)| PathBuf::from(k.clone()))
+            .collect();
+        Ok(files)
     }
 
     fn file_exist(&self, path: &PathBuf) -> Result<bool> {

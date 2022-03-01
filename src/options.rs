@@ -19,7 +19,7 @@ pub struct ColumnFamilyOptions {
     pub comparator: InternalKeyComparator,
     pub prefix_extractor: Arc<dyn SliceTransform>,
     pub max_level: u32,
-    pub max_bytes_for_level_base: usize,
+    pub max_bytes_for_level_base: u64,
     pub max_bytes_for_level_multiplier: f64,
     pub target_file_size_base: usize,
     pub level0_file_num_compaction_trigger: usize,

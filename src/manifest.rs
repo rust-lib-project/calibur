@@ -179,13 +179,18 @@ impl Manifest {
                 files.insert(table.meta.id(), table.clone());
                 tables.push(table);
             }
-            let version = Version::new(
+            let mut version = Version::new(
                 cf_id,
                 cf_name.clone(),
                 cf_opts.comparator.name().to_string(),
                 tables,
                 max_log_number,
                 cf_opts.max_level,
+            );
+            version.update_base_bytes(
+                cf_opts.max_bytes_for_level_base,
+                cf_opts.level0_file_num_compaction_trigger,
+                cf_opts.max_bytes_for_level_multiplier,
             );
             versions.insert(cf_id, Arc::new(version));
         }
@@ -297,7 +302,12 @@ impl Manifest {
                     to_add.push(table);
                 }
             }
-            let new_version = version.apply(to_add, to_delete, log_number);
+            let mut new_version = version.apply(to_add, to_delete, log_number);
+            new_version.update_base_bytes(
+                opts.max_bytes_for_level_base,
+                opts.level0_file_num_compaction_trigger,
+                opts.max_bytes_for_level_multiplier,
+            );
             let mut version_set = self.version_set.lock().unwrap();
             let version = version_set.install_version(cf, mems, new_version)?;
             self.versions.insert(cf, version);

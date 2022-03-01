@@ -595,6 +595,12 @@ where
             self.record_number -= cur_page.record_number();
             cur_page.insert(cur_records);
             self.record_number += cur_page.record_number();
+            if cur_page.smallest().cmp(self.smallest()) == std::cmp::Ordering::Less {
+                self.smallest = cur_page.smallest().to_vec();
+            }
+            if cur_page.largest().cmp(self.largest()) == std::cmp::Ordering::Greater {
+                self.largest = cur_page.largest().to_vec();
+            }
             self.son[idx] = Arc::new(cur_page);
         }
         let mut idx = 0;
@@ -884,6 +890,7 @@ mod tests {
         let tree = insert_to_tree(tree, 228, 100 + 640, 100);
         assert_eq!(tree.node.son[0].record_number(), 640);
         assert_eq!(tree.node.son[0].size(), 20);
+        assert_eq!(tree.node.largest(), 73999.to_string().as_bytes());
         let t = tree.get("69999".to_string().as_bytes());
         assert!(t.is_some());
         assert_eq!(t.unwrap().id, 699);

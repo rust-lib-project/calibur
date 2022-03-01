@@ -101,4 +101,17 @@ impl Version {
     pub fn get_storage_info(&self) -> &VersionStorageInfo {
         &self.storage
     }
+
+    pub fn update_base_bytes(
+        &mut self,
+        max_bytes_for_level_base: u64,
+        level0_file_num_compaction_trigger: usize,
+        max_bytes_for_level_multiplier: f64,
+    ) {
+        self.storage.update_base_bytes(
+            max_bytes_for_level_base,
+            level0_file_num_compaction_trigger,
+            max_bytes_for_level_multiplier,
+        );
+    }
 }

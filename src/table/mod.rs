@@ -2,7 +2,7 @@ mod block_based;
 mod format;
 mod table_properties;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use crate::common::format::ValueType;
@@ -118,5 +118,95 @@ impl Default for TableReaderOptions {
             file_size: 0,
             largest_seqno: 0,
         }
+    }
+}
+
+struct InMemTableReaderInner {
+    data: BTreeMap<Vec<u8>, Vec<u8>>,
+}
+
+pub struct InMemTableReader {
+    inner: Arc<InMemTableReaderInner>,
+}
+
+impl InMemTableReader {
+    pub fn new(data: Vec<(Vec<u8>, Vec<u8>)>) -> Self {
+        let mut tree = BTreeMap::default();
+        for (k, v) in data {
+            tree.insert(k, v);
+        }
+        Self {
+            inner: Arc::new(InMemTableReaderInner { data: tree }),
+        }
+    }
+}
+
+pub struct InMemTableIterator {
+    table: Vec<(Vec<u8>, Vec<u8>)>,
+    cursor: usize,
+}
+
+#[async_trait]
+impl TableReader for InMemTableReader {
+    async fn get(&self, _opts: &ReadOptions, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        let v = self.inner.data.get(key).map(|v| v.clone());
+        Ok(v)
+    }
+
+    fn new_iterator_opts(&self, _opts: &ReadOptions) -> Box<dyn AsyncIterator> {
+        let mut data = vec![];
+        for (k, v) in self.inner.data.iter() {
+            data.push((k.clone(), v.clone()));
+        }
+        Box::new(InMemTableIterator {
+            table: data,
+            cursor: 0,
+        })
+    }
+}
+
+#[async_trait]
+impl AsyncIterator for InMemTableIterator {
+    fn valid(&self) -> bool {
+        self.cursor < self.table.len()
+    }
+
+    async fn seek(&mut self, key: &[u8]) {
+        self.cursor = match self.table.binary_search_by(|a| a.0.as_slice().cmp(key)) {
+            Ok(offset) => offset,
+            Err(offset) => offset,
+        };
+    }
+
+    async fn seek_for_prev(&mut self, _key: &[u8]) {
+        unimplemented!()
+    }
+
+    async fn seek_to_first(&mut self) {
+        self.cursor = 0;
+    }
+
+    async fn seek_to_last(&mut self) {
+        self.cursor = self.table.len() - 1;
+    }
+
+    async fn next(&mut self) {
+        self.cursor += 1;
+    }
+
+    async fn prev(&mut self) {
+        if self.cursor == 0 {
+            self.cursor = self.table.len();
+            return;
+        }
+        self.cursor -= 1;
+    }
+
+    fn key(&self) -> &[u8] {
+        &self.table[self.cursor].0
+    }
+
+    fn value(&self) -> &[u8] {
+        &self.table[self.cursor].1
     }
 }
