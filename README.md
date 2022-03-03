@@ -39,11 +39,9 @@ we will create a new `SuperVersion` with the old `Memtable` and the new `Version
 
 ## TODO List
 
-### DB
+### Compaction
 
-* Compact files from Level0 to other level.
-* Support create iterator.
-* Support snapshot isolation for get and iterator.
+* refactor compaction pickup strategy and calculate the effect of delete keys.
 
 ### Table
 * Support LZ4 and ZSTD compression algorithm.
@@ -51,4 +49,4 @@ we will create a new `SuperVersion` with the old `Memtable` and the new `Version
 * Support block-cache.
 
 ### IO
-* Support AIO for real asynchronous IO.
+* Support AIO for asynchronous IO. (I used user threads as independent io thread, but I'm not sure if it's a better solution than AIO.)

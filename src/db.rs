@@ -726,5 +726,6 @@ mod tests {
             assert_eq!(b"v00000000000001", iter.value());
             r.block_on(iter.next());
         }
+        assert!(!iter.valid());
     }
 }
