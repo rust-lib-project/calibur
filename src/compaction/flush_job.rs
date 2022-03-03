@@ -93,6 +93,7 @@ impl<E: CompactionEngine> FlushJob<E> {
         }
         drop(compact_iter);
         builder.finish().await?;
+        self.meta.num_entries = builder.num_entries();
         self.meta.fd.file_size = builder.file_size();
         Ok(self.meta.clone())
     }

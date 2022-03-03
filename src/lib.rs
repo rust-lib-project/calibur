@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-mod column_family;
 mod common;
 mod compaction;
 mod db;
@@ -21,6 +20,7 @@ pub use common::{
     SliceTransform, SyncPoxisFileSystem,
 };
 pub use db::*;
+pub use iterator::DBIterator;
 pub use options::*;
 pub use table::{
     BlockBasedTableFactory, BlockBasedTableOptions, FilterBlockFactory, FullFilterBlockFactory,

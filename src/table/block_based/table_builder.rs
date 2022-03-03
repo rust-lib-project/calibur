@@ -285,6 +285,7 @@ mod tests {
     use crate::table::block_based::table_reader::BlockBasedTable;
     use crate::table::{TableReader, TableReaderOptions};
     use crate::util::next_key;
+    use crate::ReadOptions;
     use std::path::PathBuf;
     use tokio::runtime::Runtime;
 
@@ -322,6 +323,11 @@ mod tests {
         let reader = runtime
             .block_on(BlockBasedTable::open(&tbl_opts, opts, r))
             .unwrap();
+        let opts = ReadOptions::default();
+        for (k, v) in kvs.iter() {
+            let ret = runtime.block_on(reader.get(&opts, k.as_slice())).unwrap();
+            assert_eq!(ret.unwrap(), v.clone());
+        }
         let mut iter = reader.new_iterator();
         runtime.block_on(iter.seek_to_first());
         let mut ret = vec![];

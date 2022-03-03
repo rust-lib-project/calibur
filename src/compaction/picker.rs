@@ -41,9 +41,9 @@ impl LevelCompactionPicker {
                 input_version: version,
                 cf,
                 output_level,
+                target_file_size_base: opts.target_file_size_base,
                 cf_options: opts,
                 options: self.db_opts.clone(),
-                target_file_size_base: 0,
             };
             Some(request)
         } else {
@@ -118,15 +118,18 @@ impl LevelCompactionPriorityContext {
             }
         });
         let base_level = self.base_level;
-        self.level_and_scores.first().map(|(level, _)| {
-            if *level == 0 {
-                (*level, base_level)
+        if let Some((level, score)) = self.level_and_scores.first() {
+            if *score < 1.0 {
+                return None;
+            } else if *level == 0 {
+                return Some((*level, base_level));
             } else if *level + 1 == self.max_level {
-                (*level, *level)
+                return Some((*level, *level));
             } else {
-                (*level, *level + 1)
+                return Some((*level, *level + 1));
             }
-        })
+        }
+        None
     }
 
     fn pick_input_files_from_level(

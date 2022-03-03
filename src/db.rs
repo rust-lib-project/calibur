@@ -206,6 +206,7 @@ impl Engine {
             let mut builder = PoolBuilder::new("rocksdb");
             let pool = builder
                 .max_thread_count(immutable_options.max_background_jobs)
+                .stack_size(8 * 1024 * 1024)
                 .build_multilevel_future_pool();
             Arc::new(pool)
         });
@@ -571,7 +572,7 @@ mod tests {
     use tempfile::TempDir;
     use tokio::runtime::Runtime;
 
-    fn build_small_write_buffer_db(dir: TempDir) -> Engine {
+    fn build_small_write_buffer_db(dir: &TempDir) -> Engine {
         let r = Runtime::new().unwrap();
         let mut db_options = DBOptions::default();
         db_options.fs = Arc::new(AsyncFileSystem::new(2));
@@ -637,7 +638,7 @@ mod tests {
             .prefix("test_switch_memtable_and_flush")
             .tempdir()
             .unwrap();
-        let mut engine = build_small_write_buffer_db(dir);
+        let mut engine = build_small_write_buffer_db(&dir);
         let r = Runtime::new().unwrap();
         let mut bench_ret = vec![0; 10000];
         let mut wb = WriteBatch::new();
@@ -668,9 +669,31 @@ mod tests {
             }
         }
         sleep(Duration::from_secs(2));
-        let vs = engine.version_set.lock().unwrap();
-        let v = vs.get_superversion(0).unwrap();
-        assert_eq!(v.current.get_storage_info().get_level0_file_num(), 6);
+        {
+            let vs = engine.version_set.lock().unwrap();
+            let v = vs.get_superversion(0).unwrap();
+            assert_eq!(v.current.get_storage_info().get_level0_file_num(), 2);
+            assert_eq!(
+                v.current
+                    .get_storage_info()
+                    .get_base_level_info()
+                    .last()
+                    .unwrap()
+                    .tables
+                    .size(),
+                1
+            );
+        }
+        let opts = ReadOptions::default();
+        let expected_value = b"v00000000000001".to_vec();
+        for i in 0..TOTAL_CASES {
+            for j in 0..100 {
+                let k = (i * 100 + j).to_string();
+                let v = r.block_on(engine.get(&opts, 0, k.as_bytes())).unwrap();
+                assert!(v.is_some());
+                assert_eq!(v.unwrap(), expected_value);
+            }
+        }
     }
 
     #[test]
@@ -679,7 +702,7 @@ mod tests {
             .prefix("test_snapshot_and_iterator")
             .tempdir()
             .unwrap();
-        let mut engine = build_small_write_buffer_db(dir);
+        let mut engine = build_small_write_buffer_db(&dir);
         let r = Runtime::new().unwrap();
         let mut wb = WriteBatch::new();
         for j in 0..100 {

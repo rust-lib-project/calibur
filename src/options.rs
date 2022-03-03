@@ -81,7 +81,7 @@ impl Default for DBOptions {
             fs: Arc::new(SyncPoxisFileSystem {}),
             db_path: "db".to_string(),
             db_name: "db".to_string(),
-            max_background_jobs: 0,
+            max_background_jobs: 2,
         }
     }
 }

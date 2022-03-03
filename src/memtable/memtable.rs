@@ -109,6 +109,10 @@ impl Memtable {
         self.list.mem_size() as usize > self.max_write_buffer_size
     }
 
+    pub fn get_mem_size(&self) -> usize {
+        self.list.mem_size() as usize
+    }
+
     pub fn is_empty(&self) -> bool {
         self.first_seqno.load(Ordering::Acquire) == 0
     }

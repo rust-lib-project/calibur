@@ -19,16 +19,25 @@ pub async fn run_compaction_job<Engine: CompactionEngine>(
     let mut iters: Vec<Box<dyn AsyncIterator>> = vec![];
     let mut level_tables: HashMap<u32, Vec<Arc<TableFile>>> = HashMap::default();
     for (level, f) in request.input.iter() {
-        if let Some(files) = level_tables.get_mut(&level) {
-            files.push(f.clone());
+        if *level > 0 {
+            if let Some(files) = level_tables.get_mut(&level) {
+                files.push(f.clone());
+            } else {
+                level_tables.insert(*level, vec![f.clone()]);
+            }
         } else {
-            level_tables.insert(*level, vec![f.clone()]);
+            iters.push(f.reader.new_iterator());
         }
     }
-    for (_level, tables) in level_tables {
-        let accessor = VecTableAccessor::new(tables);
-        let two_level_iter = TwoLevelIterator::new(accessor);
-        iters.push(Box::new(two_level_iter));
+    for (_level, mut tables) in level_tables {
+        if tables.len() > 1 {
+            let accessor = VecTableAccessor::new(tables);
+            let two_level_iter = TwoLevelIterator::new(accessor);
+            iters.push(Box::new(two_level_iter));
+        } else {
+            let table = tables.pop().unwrap();
+            iters.push(table.reader.new_iterator());
+        }
     }
     let iter = AsyncMergingIterator::new(iters, request.cf_options.comparator.clone());
     let user_comparator = request.cf_options.comparator.get_user_comparator().clone();
@@ -82,13 +91,14 @@ pub async fn run_compaction_job<Engine: CompactionEngine>(
     drop(compact_iter);
     builder.finish().await?;
     meta.fd.file_size = builder.file_size();
+    meta.num_entries = builder.num_entries();
     metas.push(meta);
     let mut edit = VersionEdit::default();
     // edit.prev_log_number = 0;
     // edit.set_log_number(mems[i].last().unwrap().get_next_log_number());
     for m in metas {
         edit.add_file(
-            0,
+            request.output_level,
             m.id(),
             m.fd.file_size,
             m.smallest.as_ref(),

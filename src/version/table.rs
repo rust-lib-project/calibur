@@ -47,6 +47,7 @@ pub struct FileMetaData {
     pub smallest: Bytes,
     pub largest: Bytes,
     pub marked_for_compaction: bool,
+    pub num_entries: u64,
 }
 
 impl FileMetaData {
@@ -57,6 +58,7 @@ impl FileMetaData {
             smallest: Bytes::from(smallest),
             largest: Bytes::from(largest),
             marked_for_compaction: false,
+            num_entries: 0,
         }
     }
 
@@ -122,6 +124,7 @@ impl TableFile {
 impl Drop for TableFile {
     fn drop(&mut self) {
         if self.deleted.load(Ordering::Acquire) {
+            println!("delete file {:?}", self.path);
             let _ = self.fs.remove(self.path.clone());
             // TODO: log error here.
         }

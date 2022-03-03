@@ -64,9 +64,7 @@ impl MergingIterator {
             other,
         }
     }
-}
 
-impl MergingIterator {
     fn current_forward(&mut self) {
         while let Some(x) = self.children.peek() {
             if !x.inner.valid() {
@@ -153,8 +151,11 @@ impl AsyncIterator for MergingIterator {
     }
 
     async fn prev(&mut self) {
-        let mut x = self.children.peek_mut().unwrap();
-        x.inner.prev().await;
+        {
+            let mut x = self.children.peek_mut().unwrap();
+            x.inner.prev().await;
+        }
+        self.current_forward();
     }
 
     fn key(&self) -> &[u8] {
@@ -163,5 +164,57 @@ impl AsyncIterator for MergingIterator {
 
     fn value(&self) -> &[u8] {
         self.children.peek().unwrap().inner.value()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::extract_user_key;
+    use crate::table::InMemTableIterator;
+    use tokio::runtime::Runtime;
+
+    #[test]
+    fn test_merge_iterator() {
+        let mut tables = vec![];
+        let mut data = vec![];
+        let v = b"v00000000000001";
+        let mut ikey = vec![];
+        let comparator = InternalKeyComparator::default();
+        let mut keys = vec![];
+        for i in 0..100 {
+            for j in 0..100 {
+                let k = (i * 100 + j).to_string();
+                ikey.clear();
+                ikey.extend_from_slice(k.as_bytes());
+                ikey.extend_from_slice(&(i as u64).to_le_bytes());
+                data.push((ikey.clone(), v.to_vec()));
+                if data.len() > 1600 {
+                    let table: Box<dyn AsyncIterator + 'static> =
+                        Box::new(InMemTableIterator::new(data.clone(), &comparator));
+                    tables.push(table);
+                    data.clear();
+                }
+                keys.push(k);
+            }
+        }
+        if !data.is_empty() {
+            let table: Box<dyn AsyncIterator + 'static> =
+                Box::new(InMemTableIterator::new(data, &comparator));
+            tables.push(table);
+        }
+        let mut iter = MergingIterator::new(tables, comparator);
+        let r = Runtime::new().unwrap();
+        r.block_on(iter.seek_to_first());
+        let mut i = 0;
+        keys.sort();
+        while iter.valid() {
+            let k = iter.key();
+            if let Ok(user_key) = String::from_utf8(extract_user_key(k).to_vec()) {
+                assert_eq!(user_key, keys[i]);
+            }
+            r.block_on(iter.next());
+            i += 1;
+        }
     }
 }

@@ -152,8 +152,11 @@ impl InternalIterator for MergingIterator {
     }
 
     fn prev(&mut self) {
-        let mut x = self.children.peek_mut().unwrap();
-        x.inner.prev();
+        {
+            let mut x = self.children.peek_mut().unwrap();
+            x.inner.prev();
+        }
+        self.current_forward();
     }
 
     fn key(&self) -> &[u8] {

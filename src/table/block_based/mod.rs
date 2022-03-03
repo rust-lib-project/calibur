@@ -1,6 +1,5 @@
 mod block;
 mod block_builder;
-mod block_table;
 mod data_block_hash_index_builder;
 mod filter_block_builder;
 mod filter_reader;

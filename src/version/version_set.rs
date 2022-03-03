@@ -192,13 +192,12 @@ impl VersionSet {
             let version = cf.get_super_version();
             let l = version.imms.mems.len();
             for i in 0..l {
-                let idx = l - i - 1;
-                if version.imms.mems[idx].is_pending_schedule() {
+                if version.imms.mems[i].is_pending_schedule() {
                     assert!(mems.is_empty());
                     continue;
                 }
-                version.imms.mems[idx].mark_schedule_flush();
-                mems.push((*id, version.imms.mems[idx].clone()));
+                version.imms.mems[i].mark_schedule_flush();
+                mems.push((*id, version.imms.mems[i].clone()));
             }
         }
     }

@@ -13,6 +13,7 @@ use crate::common::{
 };
 use crate::iterator::{AsyncIterator, InternalIterator};
 use crate::options::ReadOptions;
+use crate::KeyComparator;
 use async_trait::async_trait;
 pub use block_based::{
     BlockBasedTableFactory, BlockBasedTableOptions, FilterBlockFactory, FullFilterBlockFactory,
@@ -144,6 +145,13 @@ impl InMemTableReader {
 pub struct InMemTableIterator {
     table: Vec<(Vec<u8>, Vec<u8>)>,
     cursor: usize,
+}
+
+impl InMemTableIterator {
+    pub fn new(mut table: Vec<(Vec<u8>, Vec<u8>)>, comparator: &dyn KeyComparator) -> Self {
+        table.sort_by(|a, b| comparator.compare_key(&a.0, &b.0));
+        InMemTableIterator { table, cursor: 0 }
+    }
 }
 
 #[async_trait]

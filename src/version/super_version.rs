@@ -1,5 +1,6 @@
 use super::version::MemtableList;
-use crate::common::Result;
+use crate::common::format::pack_sequence_and_type;
+use crate::common::{Result, VALUE_TYPE_FOR_SEEK};
 use crate::iterator::{AsyncIterator, AsyncMergingIterator};
 use crate::memtable::Memtable;
 use crate::options::ReadOptions;
@@ -43,16 +44,17 @@ impl SuperVersion {
     ) -> Result<Option<Vec<u8>>> {
         let mut ikey = Vec::with_capacity(key.len() + 8);
         ikey.extend_from_slice(key);
-        ikey.extend_from_slice(&sequence.to_le_bytes());
+        ikey.extend_from_slice(
+            &pack_sequence_and_type(sequence, VALUE_TYPE_FOR_SEEK).to_le_bytes(),
+        );
         if let Some(v) = self.mem.get(&ikey) {
             return Ok(Some(v));
         }
-        let mut l = self.imms.mems.len();
-        while l > 0 {
-            if let Some(v) = self.imms.mems[l - 1].get(&ikey) {
+        let l = self.imms.mems.len();
+        for i in 0..l {
+            if let Some(v) = self.imms.mems[l - i - 1].get(&ikey) {
                 return Ok(Some(v));
             }
-            l -= 1;
         }
         self.current.get_storage_info().get(opts, &ikey).await
     }

@@ -1,4 +1,4 @@
-use crate::common::Result;
+use crate::common::{extract_user_key, Result};
 use crate::iterator::{AsyncIterator, BTreeTableAccessor, TwoLevelIterator};
 use crate::options::ReadOptions;
 use crate::util::{BTree, BtreeComparable, PageIterator};
@@ -273,7 +273,10 @@ impl VersionStorageInfo {
         }
         let l = self.levels.len();
         for i in 0..l {
-            if let Some(table) = self.levels[i].tables.get(key) {
+            if self.levels[i].tables.size() == 0 {
+                continue;
+            }
+            if let Some(table) = self.levels[i].tables.get(extract_user_key(key)) {
                 if let Some(v) = table.reader.get(opts, key).await? {
                     return Ok(Some(v));
                 }
