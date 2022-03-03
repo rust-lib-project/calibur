@@ -43,7 +43,7 @@ impl SequentialFileReader {
     }
 
     pub async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        self.file.read_sequencial(buf).await
+        self.file.read_sequential(buf).await
     }
 
     pub fn name(&self) -> &str {

@@ -12,7 +12,7 @@ pub use slice_transform::{InternalKeySliceTransform, SliceTransform};
 pub use error::Error;
 pub use file_system::{
     AsyncFileSystem, FileSystem, IOOption, InMemFileSystem, RandomAccessFile,
-    RandomAccessFileReader, SequentialFile, SequentialFileReader, SyncPoxisFileSystem,
+    RandomAccessFileReader, SequentialFile, SequentialFileReader, SyncPosixFileSystem,
     WritableFile, WritableFileWriter,
 };
 pub type Result<T> = std::result::Result<T, Error>;
