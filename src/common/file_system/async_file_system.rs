@@ -287,7 +287,8 @@ pub struct AsyncRandomAccessFile {
 
 impl AsyncRandomAccessFile {
     fn open(path: &PathBuf, ctx: Arc<AsyncContext>) -> Result<Self> {
-        let fd = RawFile::open_for_read(path, true).map_err(|e| Error::Io(Box::new(e)))?;
+        // TODO: support direct io with alignment buffer read.
+        let fd = RawFile::open_for_read(path, false).map_err(|e| Error::Io(Box::new(e)))?;
         let file_size = fd.file_size().map_err(|e| Error::Io(Box::new(e)))?;
         Ok(Self {
             fd: Arc::new(fd),
