@@ -1,13 +1,13 @@
 use crate::common::InternalKeyComparator;
 use crate::memtable::Memtable;
 use crate::options::ColumnFamilyOptions;
-use crate::version::{MemtableList, SuperVersion, Version};
+use crate::version::{SuperVersion, Version};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{atomic::AtomicU64, Arc};
 
 pub struct ColumnFamily {
     mem: Arc<Memtable>,
-    imms: MemtableList,
+    imms: Vec<Arc<Memtable>>,
     super_version: Arc<SuperVersion>,
 
     // An ordinal representing the current SuperVersion. Updated by
@@ -17,9 +17,13 @@ pub struct ColumnFamily {
     version: Arc<Version>,
     comparator: InternalKeyComparator,
     id: u32,
-    log_number: u64,
+
     name: String,
     options: Arc<ColumnFamilyOptions>,
+
+    // The minimal log file which keep data of the memtable of this column family.
+    // So the log files whose number is less than this value could be removed safely.
+    log_number: u64,
 }
 
 impl ColumnFamily {
@@ -91,13 +95,15 @@ impl ColumnFamily {
     }
 
     pub fn install_version(&mut self, mems: Vec<u64>, new_version: Version) -> Arc<Version> {
-        let imms = self.imms.remove(mems);
+        if !mems.is_empty() {
+            self.remove(mems);
+        }
         self.super_version_number.fetch_add(1, Ordering::Release);
         let super_version_number = self.super_version_number.load(Ordering::Relaxed);
         let version = Arc::new(new_version);
         let super_version = Arc::new(SuperVersion::new(
             self.mem.clone(),
-            imms.clone(),
+            self.imms.clone(),
             version.clone(),
             self.options.clone(),
             super_version_number,
@@ -105,24 +111,25 @@ impl ColumnFamily {
         self.super_version.valid.store(false, Ordering::Release);
         self.super_version = super_version;
         self.version = version.clone();
-        self.imms = imms;
+        if version.get_log_number() > 0 {
+            self.log_number = version.get_log_number();
+        }
         version
     }
 
     pub fn switch_memtable(&mut self, mem: Arc<Memtable>) {
-        let imms = self.imms.add(self.mem.clone());
+        self.imms.push(self.mem.clone());
         self.super_version_number.fetch_add(1, Ordering::Release);
         let super_version_number = self.super_version_number.load(Ordering::Relaxed);
         let super_version = Arc::new(SuperVersion::new(
             mem.clone(),
-            imms.clone(),
+            self.imms.clone(),
             self.version.clone(),
             self.options.clone(),
             super_version_number,
         ));
         self.super_version.valid.store(false, Ordering::Release);
         self.super_version = super_version;
-        self.imms = imms;
         self.mem = mem;
     }
 
@@ -133,5 +140,21 @@ impl ColumnFamily {
             self.comparator.clone(),
             earliest_seq,
         )
+    }
+
+    fn remove(&mut self, dels: Vec<u64>) {
+        let mut imms = vec![];
+        for m in &self.imms {
+            let mut keep = true;
+            for del in &dels {
+                if *del == m.get_id() {
+                    keep = false;
+                }
+            }
+            if keep {
+                imms.push(m.clone());
+            }
+        }
+        self.imms = imms;
     }
 }

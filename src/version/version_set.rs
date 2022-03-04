@@ -187,17 +187,35 @@ impl VersionSet {
         mem
     }
 
+    pub fn set_log_number(&mut self, cf: u32, log_number: u64) {
+        let cf = self.column_family_set.get_mut(&cf).unwrap();
+        cf.set_log_number(log_number);
+    }
+
+    pub fn get_min_log_number_to_leep(&self) -> u64 {
+        let mut min_number = 0;
+        for (_, cf) in self.column_family_set.iter() {
+            let log_number = cf.get_log_number();
+            if log_number > 0 {
+                if min_number == 0 || min_number > log_number {
+                    min_number = log_number;
+                }
+            }
+        }
+        min_number
+    }
+
     pub fn schedule_immutable_memtables(&mut self, mems: &mut Vec<(u32, Arc<Memtable>)>) {
         for (id, cf) in self.column_family_set.iter() {
             let version = cf.get_super_version();
-            let l = version.imms.mems.len();
+            let l = version.imms.len();
             for i in 0..l {
-                if version.imms.mems[i].is_pending_schedule() {
+                if version.imms[i].is_pending_schedule() {
                     assert!(mems.is_empty());
                     continue;
                 }
-                version.imms.mems[i].mark_schedule_flush();
-                mems.push((*id, version.imms.mems[i].clone()));
+                version.imms[i].mark_schedule_flush();
+                mems.push((*id, version.imms[i].clone()));
             }
         }
     }

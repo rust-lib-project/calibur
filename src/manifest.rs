@@ -274,7 +274,8 @@ impl Manifest {
             let mut log_number = 0;
             for mut e in edits {
                 if e.has_log_number {
-                    log_number = std::cmp::max(log_number, e.log_number);
+                    assert!(e.log_number > log_number);
+                    log_number = e.log_number;
                 }
                 mems.append(&mut e.mems_deleted);
                 for m in e.deleted_files {

@@ -1,6 +1,7 @@
 use futures::channel::mpsc::UnboundedSender;
 use futures::channel::oneshot::{channel as once_channel, Sender as OnceSender};
 use futures::SinkExt;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -13,6 +14,8 @@ use crate::options::ImmutableDBOptions;
 use crate::version::{KernelNumberContext, VersionEdit, VersionSet};
 use crate::write_batch::ReadOnlyWriteBatch;
 use crate::{ColumnFamilyOptions, FileSystem, KeyComparator};
+
+const MAX_LOG_TO_KEEP: usize = 4;
 
 pub struct IngestFile {
     pub file: PathBuf,
@@ -69,7 +72,7 @@ pub struct WALContext {
 pub struct WALWriter {
     kernel: Arc<KernelNumberContext>,
     writer: Box<LogWriter>,
-    logs: Vec<Box<LogWriter>>,
+    logs: VecDeque<Box<LogWriter>>,
     mems: Vec<(u32, Arc<Memtable>)>,
     version_sets: Arc<Mutex<VersionSet>>,
     flush_scheduler: UnboundedSender<FlushRequest>,
@@ -101,7 +104,7 @@ impl WALWriter {
             writer,
             flush_scheduler,
             manifest_scheduler,
-            logs: vec![],
+            logs: VecDeque::new(),
             mems,
             version_sets,
             ctx: WALContext {
@@ -134,38 +137,83 @@ impl WALWriter {
             new_log_writer = true;
             switch_wal = true;
         }
-        // TODO: check atomic flush.
-        for (cf, mem) in &mut self.mems {
-            if (switch_wal && !mem.is_empty()) || mem.should_flush() {
+        for (_, mem) in &mut self.mems {
+            if mem.should_flush() {
                 // If this method returns false, it means that another write thread still hold this
                 // memtable. Maybe we shall also check the previous memtables has been flushed.
                 new_log_writer = true;
-                if self.writer.get_file_size() > 0 {
-                    self.writer.fsync().await?;
-                    let new_writer = Self::create_wal(
-                        &self.kernel,
-                        &self.immutation_options.db_path,
-                        self.immutation_options.fs.as_ref(),
-                    )?;
-                    let writer = std::mem::replace(&mut self.writer, new_writer);
-                    self.logs.push(writer);
-                }
-                mem.set_next_log_number(self.writer.get_log_number());
-                let mut vs = self.version_sets.lock().unwrap();
-                *mem = vs.switch_memtable(*cf, self.kernel.last_sequence());
             }
         }
-
-        let mut mems = vec![];
-        if new_log_writer {
-            let mut vs = self.version_sets.lock().unwrap();
-            vs.schedule_immutable_memtables(&mut mems);
+        if new_log_writer && self.writer.get_file_size() > 0 {
+            self.switch_wal().await?;
         }
-        if !mems.is_empty() {
-            let _ = self
-                .flush_scheduler
-                .send(FlushRequest::new(mems, self.ctx.last_sequence))
-                .await;
+        if new_log_writer {
+            let mems = self.switch_memtable(switch_wal)?;
+            if !mems.is_empty() {
+                let _ = self
+                    .flush_scheduler
+                    .send(FlushRequest::new(mems, self.ctx.last_sequence))
+                    .await;
+            }
+        } else if self.logs.len() > MAX_LOG_TO_KEEP {
+            let vs = self.version_sets.lock().unwrap();
+            let min_log_number = vs.get_min_log_number_to_leep();
+            drop(vs);
+            self.remove_log_file(min_log_number)?;
+        }
+        Ok(())
+    }
+
+    pub async fn switch_wal(&mut self) -> Result<()> {
+        // TODO: check atomic flush.
+        self.writer.fsync().await?;
+        let new_writer = Self::create_wal(
+            &self.kernel,
+            &self.immutation_options.db_path,
+            self.immutation_options.fs.as_ref(),
+        )?;
+        let writer = std::mem::replace(&mut self.writer, new_writer);
+        self.logs.push_back(writer);
+        Ok(())
+    }
+
+    pub fn switch_memtable(&mut self, switch_wal: bool) -> Result<Vec<(u32, Arc<Memtable>)>> {
+        let mut vs = self.version_sets.lock().unwrap();
+        for (cf, mem) in &mut self.mems {
+            if switch_wal || mem.should_flush() {
+                // If this method returns false, it means that another write thread still hold this
+                // memtable. Maybe we shall also check the previous memtables has been flushed.
+                if !mem.is_empty() {
+                    mem.set_next_log_number(self.writer.get_log_number());
+                    *mem = vs.switch_memtable(*cf, self.kernel.last_sequence());
+                } else if vs.get_superversion(*cf).unwrap().imms.len() == 0 {
+                    vs.set_log_number(*cf, self.writer.get_log_number());
+                }
+            }
+        }
+        let mut mems = vec![];
+        vs.schedule_immutable_memtables(&mut mems);
+        let mut min_log_number = 0;
+        if self.logs.len() > 1 {
+            min_log_number = vs.get_min_log_number_to_leep();
+        }
+        drop(vs);
+        if min_log_number > 0 {
+            self.remove_log_file(min_log_number)?;
+        }
+        Ok(mems)
+    }
+
+    fn remove_log_file(&mut self, min_log_number: u64) -> Result<()> {
+        while self
+            .logs
+            .front()
+            .map_or(false, |log| log.get_log_number() < min_log_number)
+        {
+            let log = self.logs.pop_front().unwrap();
+            let log_number = log.get_log_number();
+            let fname = make_log_file(&self.immutation_options.db_path, log_number);
+            self.immutation_options.fs.remove(fname)?;
         }
         Ok(())
     }
