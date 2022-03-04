@@ -145,12 +145,12 @@ impl VersionSet {
         versions
     }
 
-    pub fn get_column_family_memtables(&self) -> Vec<(u32, Arc<Memtable>)> {
+    pub fn get_column_family_superversion(&self) -> Vec<Arc<SuperVersion>> {
         let mut mems = vec![];
-        for (id, cf) in self.column_family_set.iter() {
-            mems.push((*id, cf.get_super_version().mem.clone()));
+        for (_, cf) in self.column_family_set.iter() {
+            mems.push(cf.get_super_version());
         }
-        mems.sort_by_key(|m| m.0);
+        mems.sort_by_key(|m| m.id);
         mems
     }
 
@@ -180,11 +180,11 @@ impl VersionSet {
         options
     }
 
-    pub fn switch_memtable(&mut self, cf: u32, earliest_seq: u64) -> Arc<Memtable> {
+    pub fn switch_memtable(&mut self, cf: u32, earliest_seq: u64) -> Arc<SuperVersion> {
         let cf = self.column_family_set.get_mut(&cf).unwrap();
         let mem = Arc::new(cf.create_memtable(self.kernel.new_memtable_number(), earliest_seq));
         cf.switch_memtable(mem.clone());
-        mem
+        cf.get_super_version()
     }
 
     pub fn set_log_number(&mut self, cf: u32, log_number: u64) {

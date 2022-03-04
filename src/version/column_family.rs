@@ -2,8 +2,8 @@ use crate::common::InternalKeyComparator;
 use crate::memtable::Memtable;
 use crate::options::ColumnFamilyOptions;
 use crate::version::{SuperVersion, Version};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{atomic::AtomicU64, Arc};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 pub struct ColumnFamily {
     mem: Arc<Memtable>,
@@ -42,12 +42,12 @@ impl ColumnFamily {
             mem: mem.clone(),
             imms: Default::default(),
             super_version: Arc::new(SuperVersion {
+                id,
                 mem,
                 imms: Default::default(),
                 current: version.clone(),
                 version_number: 0,
                 column_family_options: options.clone(),
-                valid: AtomicBool::new(true),
             }),
             super_version_number: Arc::new(AtomicU64::new(0)),
             version,
@@ -102,13 +102,13 @@ impl ColumnFamily {
         let super_version_number = self.super_version_number.load(Ordering::Relaxed);
         let version = Arc::new(new_version);
         let super_version = Arc::new(SuperVersion::new(
+            self.id,
             self.mem.clone(),
             self.imms.clone(),
             version.clone(),
             self.options.clone(),
             super_version_number,
         ));
-        self.super_version.valid.store(false, Ordering::Release);
         self.super_version = super_version;
         self.version = version.clone();
         if version.get_log_number() > 0 {
@@ -122,13 +122,13 @@ impl ColumnFamily {
         self.super_version_number.fetch_add(1, Ordering::Release);
         let super_version_number = self.super_version_number.load(Ordering::Relaxed);
         let super_version = Arc::new(SuperVersion::new(
+            self.id,
             mem.clone(),
             self.imms.clone(),
             self.version.clone(),
             self.options.clone(),
             super_version_number,
         ));
-        self.super_version.valid.store(false, Ordering::Release);
         self.super_version = super_version;
         self.mem = mem;
     }

@@ -11,7 +11,7 @@ use crate::log::LogWriter;
 use crate::manifest::ManifestScheduler;
 use crate::memtable::Memtable;
 use crate::options::ImmutableDBOptions;
-use crate::version::{KernelNumberContext, VersionEdit, VersionSet};
+use crate::version::{KernelNumberContext, SuperVersion, VersionEdit, VersionSet};
 use crate::write_batch::ReadOnlyWriteBatch;
 use crate::{ColumnFamilyOptions, FileSystem, KeyComparator};
 
@@ -24,26 +24,7 @@ pub struct IngestFile {
 
 pub struct WriteMemtableTask {
     pub wb: ReadOnlyWriteBatch,
-    pub mems: Vec<(u32, Arc<Memtable>)>,
-}
-
-impl WriteMemtableTask {
-    pub fn check_memtable_cf(&self, cf: u32) -> usize {
-        let mut idx = cf as usize;
-        if idx >= self.mems.len() || cf != self.mems[idx].0 {
-            idx = self.mems.len();
-            for i in 0..self.mems.len() {
-                if self.mems[i].0 == cf {
-                    idx = i;
-                    break;
-                }
-            }
-            if idx == self.mems.len() {
-                panic!("write miss column family");
-            }
-        }
-        idx
-    }
+    pub cfs: Vec<Arc<SuperVersion>>,
 }
 
 pub enum WALTask {
@@ -62,6 +43,9 @@ pub enum WALTask {
         opts: ColumnFamilyOptions,
         cb: OnceSender<Result<u32>>,
     },
+    CompactLog {
+        cf: u32,
+    },
 }
 
 pub struct WALContext {
@@ -73,7 +57,7 @@ pub struct WALWriter {
     kernel: Arc<KernelNumberContext>,
     writer: Box<LogWriter>,
     logs: VecDeque<Box<LogWriter>>,
-    mems: Vec<(u32, Arc<Memtable>)>,
+    cf_versions: Vec<Arc<SuperVersion>>,
     version_sets: Arc<Mutex<VersionSet>>,
     flush_scheduler: UnboundedSender<FlushRequest>,
     manifest_scheduler: ManifestScheduler,
@@ -97,7 +81,7 @@ impl WALWriter {
         let last_sequence = kernel.last_sequence();
         let mems = {
             let vs = version_sets.lock().unwrap();
-            vs.get_column_family_memtables()
+            vs.get_column_family_superversion()
         };
         let wal = WALWriter {
             kernel,
@@ -105,7 +89,7 @@ impl WALWriter {
             flush_scheduler,
             manifest_scheduler,
             logs: VecDeque::new(),
-            mems,
+            cf_versions: mems,
             version_sets,
             ctx: WALContext {
                 last_sequence,
@@ -137,8 +121,8 @@ impl WALWriter {
             new_log_writer = true;
             switch_wal = true;
         }
-        for (_, mem) in &mut self.mems {
-            if mem.should_flush() {
+        for v in &mut self.cf_versions {
+            if v.mem.should_flush() {
                 // If this method returns false, it means that another write thread still hold this
                 // memtable. Maybe we shall also check the previous memtables has been flushed.
                 new_log_writer = true;
@@ -164,6 +148,25 @@ impl WALWriter {
         Ok(())
     }
 
+    pub fn compact_log(&mut self, cf: u32) -> Result<()> {
+        let mut cf_versions = vec![];
+        let vs = self.version_sets.lock().unwrap();
+        for v in self.cf_versions.drain(..) {
+            if v.id == cf {
+                if let Some(v) = vs.get_superversion(cf) {
+                    cf_versions.push(v);
+                }
+            } else {
+                cf_versions.push(v);
+            }
+        }
+        self.cf_versions = cf_versions;
+        let min_log_number = vs.get_min_log_number_to_leep();
+        drop(vs);
+        self.remove_log_file(min_log_number)?;
+        Ok(())
+    }
+
     pub async fn switch_wal(&mut self) -> Result<()> {
         // TODO: check atomic flush.
         self.writer.fsync().await?;
@@ -179,15 +182,15 @@ impl WALWriter {
 
     pub fn switch_memtable(&mut self, switch_wal: bool) -> Result<Vec<(u32, Arc<Memtable>)>> {
         let mut vs = self.version_sets.lock().unwrap();
-        for (cf, mem) in &mut self.mems {
-            if switch_wal || mem.should_flush() {
+        for v in &mut self.cf_versions {
+            if switch_wal || v.mem.should_flush() {
                 // If this method returns false, it means that another write thread still hold this
                 // memtable. Maybe we shall also check the previous memtables has been flushed.
-                if !mem.is_empty() {
-                    mem.set_next_log_number(self.writer.get_log_number());
-                    *mem = vs.switch_memtable(*cf, self.kernel.last_sequence());
-                } else if vs.get_superversion(*cf).unwrap().imms.len() == 0 {
-                    vs.set_log_number(*cf, self.writer.get_log_number());
+                if !v.mem.is_empty() {
+                    v.mem.set_next_log_number(self.writer.get_log_number());
+                    *v = vs.switch_memtable(v.id, self.kernel.last_sequence());
+                } else if v.imms.len() == 0 {
+                    vs.set_log_number(v.id, self.writer.get_log_number());
                 }
             }
         }
@@ -242,8 +245,7 @@ impl WALWriter {
         edit.cf_options.options = Some(opts);
         self.manifest_scheduler.apply(vec![edit]).await?;
         let vs = self.version_sets.lock().unwrap();
-        self.mems
-            .push((new_id, vs.get_superversion(new_id).unwrap().mem.clone()));
+        self.cf_versions.push(vs.get_superversion(new_id).unwrap());
         Ok(new_id)
     }
 
@@ -255,7 +257,7 @@ impl WALWriter {
             bool,
         )>,
         sync_wal: bool,
-    ) -> Result<Vec<(u32, Arc<Memtable>)>> {
+    ) -> Result<Vec<Arc<SuperVersion>>> {
         if tasks.is_empty() {
             return Ok(vec![]);
         }
@@ -280,7 +282,7 @@ impl WALWriter {
         if sync_wal {
             self.writer.fsync().await?;
         }
-        Ok(self.mems.clone())
+        Ok(self.cf_versions.clone())
     }
 }
 

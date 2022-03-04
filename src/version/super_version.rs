@@ -5,20 +5,20 @@ use crate::memtable::Memtable;
 use crate::options::ReadOptions;
 use crate::version::Version;
 use crate::ColumnFamilyOptions;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 pub struct SuperVersion {
+    pub id: u32,
     pub mem: Arc<Memtable>,
     pub imms: Vec<Arc<Memtable>>,
     pub current: Arc<Version>,
     pub column_family_options: Arc<ColumnFamilyOptions>,
     pub version_number: u64,
-    pub valid: AtomicBool,
 }
 
 impl SuperVersion {
     pub fn new(
+        id: u32,
         mem: Arc<Memtable>,
         imms: Vec<Arc<Memtable>>,
         current: Arc<Version>,
@@ -26,12 +26,12 @@ impl SuperVersion {
         version_number: u64,
     ) -> SuperVersion {
         SuperVersion {
+            id,
             mem,
             imms,
             current,
             column_family_options,
             version_number,
-            valid: AtomicBool::new(true),
         }
     }
 

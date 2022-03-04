@@ -16,9 +16,8 @@ use crate::compaction::{
 use crate::iterator::DBIterator;
 use crate::log::LogReader;
 use crate::manifest::{Manifest, ManifestScheduler, ManifestWriter};
-use crate::memtable::Memtable;
 use crate::options::{ColumnFamilyDescriptor, DBOptions, ImmutableDBOptions, ReadOptions};
-use crate::version::{KernelNumberContext, VersionSet};
+use crate::version::{KernelNumberContext, SuperVersion, VersionSet};
 use crate::wal::{WALScheduler, WALTask, WALWriter, WriteMemtableTask};
 use crate::write_batch::{ReadOnlyWriteBatch, WriteBatch, WriteBatchItem};
 use crate::ColumnFamilyOptions;
@@ -103,7 +102,7 @@ impl Engine {
         let sequence = rwb.wb.get_sequence();
         let last_commit_sequence = sequence - 1;
         let commit_sequence = sequence + rwb.wb.count() as u64 - 1;
-        self.write_memtable(&rwb.wb, sequence, &rwb.mems)?;
+        self.write_memtable(&rwb.wb, sequence, 0, &rwb.cfs)?;
         let step3 = time::precise_time_ns();
         self.commit_queue
             .commit(last_commit_sequence, commit_sequence);
@@ -240,7 +239,7 @@ impl Engine {
             let version_set = self.version_set.lock().unwrap();
             (
                 version_set.get_column_family_versions(),
-                version_set.get_column_family_memtables(),
+                version_set.get_column_family_superversion(),
             )
         };
         for v in &versions {
@@ -260,7 +259,7 @@ impl Engine {
                 let wb = ReadOnlyWriteBatch::try_from(buf.clone())?;
                 let count = wb.count() as u64;
                 let sequence = wb.get_sequence();
-                self.write_memtable(&wb, sequence, &cf_mems)?;
+                self.write_memtable(&wb, sequence, log_number, &cf_mems)?;
                 next_seq = sequence + count - 1;
                 // TODO: flush if the memtable is full
             }
@@ -273,14 +272,15 @@ impl Engine {
         &mut self,
         wb: &ReadOnlyWriteBatch,
         mut sequence: u64,
-        cf_mems: &[(u32, Arc<Memtable>)],
+        log_number: u64,
+        cf_mems: &[Arc<SuperVersion>],
     ) -> Result<()> {
-        pub fn check_memtable_cf(mems: &[(u32, Arc<Memtable>)], cf: u32) -> usize {
+        pub fn check_memtable_cf(mems: &[Arc<SuperVersion>], cf: u32) -> usize {
             let mut idx = cf as usize;
-            if idx >= mems.len() || cf != mems[idx].0 {
+            if idx >= mems.len() || cf != mems[idx].id {
                 idx = mems.len();
                 for i in 0..mems.len() {
-                    if mems[i].0 == cf {
+                    if mems[i].id == cf {
                         idx = i;
                         break;
                     }
@@ -295,13 +295,19 @@ impl Engine {
             match item {
                 WriteBatchItem::Put { cf, key, value } => {
                     let idx = check_memtable_cf(cf_mems, cf);
+                    if log_number > 0 && cf_mems[idx].current.get_log_number() > log_number {
+                        continue;
+                    }
                     cf_mems[idx]
-                        .1
+                        .mem
                         .add(key, value, sequence, ValueType::TypeValue);
                 }
                 WriteBatchItem::Delete { cf, key } => {
                     let idx = check_memtable_cf(cf_mems, cf);
-                    cf_mems[idx].1.delete(key, sequence);
+                    if log_number > 0 && cf_mems[idx].current.get_log_number() > log_number {
+                        continue;
+                    }
+                    cf_mems[idx].mem.delete(key, sequence);
                 }
             }
             sequence += 1;
@@ -397,9 +403,11 @@ impl Engine {
                         unimplemented!();
                     }
                     WALTask::CreateColumnFamily { name, opts, cb } => {
-                        processor.flush().await?;
                         let ret = processor.writer.create_column_family(name, opts).await;
                         cb.send(ret).unwrap();
+                    }
+                    WALTask::CompactLog { cf } => {
+                        processor.writer.compact_log(cf)?;
                     }
                 }
                 while let Ok(x) = rx.try_next() {
@@ -422,6 +430,12 @@ impl Engine {
                         }
                         Some(WALTask::Ingest { .. }) => {
                             unimplemented!();
+                        }
+                        Some(WALTask::CompactLog { cf }) => {
+                            if processor.tasks.len() > 0 {
+                                processor.flush().await?;
+                            }
+                            processor.writer.compact_log(cf)?;
                         }
                         None => {
                             processor.flush().await?;
@@ -554,7 +568,7 @@ impl BatchWALProcessor {
                 Ok(mems) => {
                     let _ = cb.send(Ok(WriteMemtableTask {
                         wb,
-                        mems: mems.clone(),
+                        cfs: mems.clone(),
                     }));
                 }
             }
