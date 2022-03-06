@@ -252,7 +252,7 @@ impl Engine {
             }
             self.kernel.mark_file_number_used(log_number);
             let fname = make_log_file(&self.options.db_path, log_number);
-            let reader = self.options.fs.open_sequencial_file(fname)?;
+            let reader = self.options.fs.open_sequential_file(fname)?;
             let mut log_reader = LogReader::new(reader);
             let mut buf = vec![];
             let mut next_seq = self.kernel.last_sequence();

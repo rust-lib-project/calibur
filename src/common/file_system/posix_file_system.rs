@@ -318,7 +318,7 @@ impl PosixSequentialFile {
 
 #[async_trait]
 impl SequentialFile for PosixSequentialFile {
-    async fn read_sequencial(&mut self, data: &mut [u8]) -> Result<usize> {
+    async fn read_sequential(&mut self, data: &mut [u8]) -> Result<usize> {
         if self.offset >= self.file_size {
             return Ok(0);
         }
@@ -336,9 +336,9 @@ impl SequentialFile for PosixSequentialFile {
     }
 }
 
-pub struct SyncPoxisFileSystem {}
+pub struct SyncPosixFileSystem {}
 
-impl FileSystem for SyncPoxisFileSystem {
+impl FileSystem for SyncPosixFileSystem {
     fn open_writable_file_writer(&self, path: PathBuf) -> Result<Box<WritableFileWriter>> {
         let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
         let f = PosixWritableFile::create(&path).map_err(|e| Error::Io(Box::new(e)))?;
@@ -359,7 +359,7 @@ impl FileSystem for SyncPoxisFileSystem {
         Ok(Box::new(reader))
     }
 
-    fn open_sequencial_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>> {
+    fn open_sequential_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>> {
         let f = PosixSequentialFile::open(&path).map_err(|e| Error::Io(Box::new(e)))?;
         let reader = SequentialFileReader::new(
             Box::new(f),
@@ -400,7 +400,7 @@ mod tests {
             .prefix("test_write_file")
             .tempdir()
             .unwrap();
-        let fs = SyncPoxisFileSystem {};
+        let fs = SyncPosixFileSystem {};
         let mut f = fs
             .open_writable_file_writer(dir.path().join("sst"))
             .unwrap();
@@ -412,7 +412,7 @@ mod tests {
             f.sync().await.unwrap();
         });
 
-        let mut f = fs.open_sequencial_file(dir.path().join("sst")).unwrap();
+        let mut f = fs.open_sequential_file(dir.path().join("sst")).unwrap();
         r.block_on(async move {
             let mut v = vec![0; 7];
             let x = f.read(&mut v).await.unwrap();

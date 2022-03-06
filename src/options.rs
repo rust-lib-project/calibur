@@ -1,6 +1,6 @@
 use crate::common::{FileSystem, InternalKeyComparator, InternalKeySliceTransform};
 use crate::table::{BlockBasedTableFactory, TableFactory};
-use crate::{KeyComparator, SliceTransform, SyncPoxisFileSystem};
+use crate::{KeyComparator, SliceTransform, SyncPosixFileSystem};
 use std::sync::Arc;
 
 pub struct ImmutableDBOptions {
@@ -78,7 +78,7 @@ impl Default for DBOptions {
             max_total_wal_size: 128 * 1024 * 1024,     // 100MB
             create_if_missing: false,
             create_missing_column_families: false,
-            fs: Arc::new(SyncPoxisFileSystem {}),
+            fs: Arc::new(SyncPosixFileSystem {}),
             db_path: "db".to_string(),
             db_name: "db".to_string(),
             max_background_jobs: 2,

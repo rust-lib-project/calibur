@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use crate::common::Error;
 pub use async_file_system::AsyncFileSystem;
 use async_trait::async_trait;
-pub use posix_file_system::SyncPoxisFileSystem;
+pub use posix_file_system::SyncPosixFileSystem;
 pub use reader::RandomAccessFileReader;
 pub use reader::SequentialFileReader;
 pub use writer::WritableFileWriter;
@@ -30,7 +30,7 @@ pub trait RandomAccessFile: 'static + Send + Sync {
 
 #[async_trait]
 pub trait SequentialFile: 'static + Send + Sync {
-    async fn read_sequencial(&mut self, data: &mut [u8]) -> Result<usize>;
+    async fn read_sequential(&mut self, data: &mut [u8]) -> Result<usize>;
     fn get_file_size(&self) -> usize;
 }
 
@@ -87,10 +87,10 @@ pub trait FileSystem: Send + Sync {
 
     fn open_random_access_file(&self, p: PathBuf) -> Result<Box<RandomAccessFileReader>>;
 
-    fn open_sequencial_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>>;
+    fn open_sequential_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>>;
 
     async fn read_file_content(&self, path: PathBuf) -> Result<Vec<u8>> {
-        let mut reader = self.open_sequencial_file(path)?;
+        let mut reader = self.open_sequential_file(path)?;
         let sz = reader.file_size();
         let mut data = vec![0u8; sz];
         const BUFFER_SIZE: usize = 8192;
@@ -196,7 +196,7 @@ impl RandomAccessFile for InMemFile {
 
 #[async_trait]
 impl SequentialFile for InMemFile {
-    async fn read_sequencial(&mut self, data: &mut [u8]) -> Result<usize> {
+    async fn read_sequential(&mut self, data: &mut [u8]) -> Result<usize> {
         let x = self.read(self.offset, data).await?;
         self.offset += x;
         Ok(x)
@@ -239,7 +239,7 @@ impl FileSystem for InMemFileSystem {
         }
     }
 
-    fn open_sequencial_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>> {
+    fn open_sequential_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>> {
         let fs = self.inner.lock().unwrap();
         let filename = path.to_str().unwrap();
         match fs.files.get(filename) {

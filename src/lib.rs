@@ -17,7 +17,7 @@ mod write_batch;
 
 pub use common::{
     AsyncFileSystem, Error, FileSystem, InternalKeyComparator, KeyComparator, Result,
-    SliceTransform, SyncPoxisFileSystem,
+    SliceTransform, SyncPosixFileSystem,
 };
 pub use db::*;
 pub use iterator::DBIterator;
