@@ -1,5 +1,8 @@
 mod btree;
 pub mod hash;
+mod test_sync_point;
+pub use test_sync_point::*;
+
 pub use btree::{
     ComparableRecord as BtreeComparable, PageIterator, ThreeLevelBTree as BTree,
     ThreeLevelBTreeIterator as BTreeIter,

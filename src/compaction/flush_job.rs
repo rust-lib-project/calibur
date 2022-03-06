@@ -5,6 +5,7 @@ use crate::compaction::{CompactionEngine, FlushRequest};
 use crate::iterator::{InternalIterator, MergingIterator};
 use crate::memtable::Memtable;
 use crate::options::{ColumnFamilyOptions, ImmutableDBOptions};
+use crate::sync_point;
 use crate::table::TableBuilderOptions;
 use crate::version::{FileMetaData, KernelNumberContext, VersionEdit};
 use std::collections::HashMap;
@@ -141,6 +142,10 @@ pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
             let mut edit = VersionEdit::default();
             edit.prev_log_number = 0;
             edit.set_log_number(mems[i].last().unwrap().get_next_log_number());
+            sync_point!(
+                "run_flush_memtable_job",
+                edit.get_log_number() * 1000 + i as u64
+            );
             edit.add_file(
                 0,
                 file_number,

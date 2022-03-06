@@ -2,7 +2,7 @@ use crate::common::{
     make_current_file, make_descriptor_file_name, make_table_file_name, make_temp_plain_file_name,
     parse_file_name, DBFileType, Error, FileSystem, Result,
 };
-use futures::channel::mpsc::UnboundedSender;
+use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::channel::oneshot::{channel as once_channel, Sender as OnceSender};
 
 use crate::compaction::CompactionEngine;
@@ -14,10 +14,12 @@ use crate::version::{
     FileMetaData, KernelNumberContext, TableFile, Version, VersionEdit, VersionSet,
 };
 use crate::{ColumnFamilyOptions, KeyComparator};
-use futures::SinkExt;
+use futures::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use yatp::task::future::TaskCell;
+use yatp::ThreadPool;
 
 const MAX_BATCH_SIZE: usize = 128;
 
@@ -496,4 +498,33 @@ pub async fn get_current_manifest_path(
     }
     manifest_path.push_str(&fname);
     Ok((manifest_path, manifest_file_number))
+}
+
+pub fn start_manifest_job(
+    pool: &ThreadPool<TaskCell>,
+    manifest: Box<Manifest>,
+) -> Result<ManifestScheduler> {
+    let (tx, mut rx) = unbounded();
+    let mut writer = ManifestWriter::new(manifest);
+    pool.spawn(async move {
+        while let Some(x) = rx.next().await {
+            writer.batch(x);
+            while let Ok(x) = rx.try_next() {
+                match x {
+                    Some(msg) => {
+                        if writer.batch(msg) {
+                            break;
+                        }
+                    }
+                    None => {
+                        writer.apply().await;
+                        return;
+                    }
+                }
+            }
+            writer.apply().await;
+        }
+    });
+    let engine = ManifestScheduler::new(tx);
+    Ok(engine)
 }

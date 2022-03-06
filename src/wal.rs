@@ -11,6 +11,7 @@ use crate::log::LogWriter;
 use crate::manifest::ManifestScheduler;
 use crate::memtable::Memtable;
 use crate::options::ImmutableDBOptions;
+use crate::sync_point;
 use crate::version::{KernelNumberContext, SuperVersion, VersionEdit, VersionSet};
 use crate::write_batch::ReadOnlyWriteBatch;
 use crate::{ColumnFamilyOptions, FileSystem, KeyComparator};
@@ -123,8 +124,6 @@ impl WALWriter {
         }
         for v in &mut self.cf_versions {
             if v.mem.should_flush() {
-                // If this method returns false, it means that another write thread still hold this
-                // memtable. Maybe we shall also check the previous memtables has been flushed.
                 new_log_writer = true;
             }
         }
@@ -176,21 +175,31 @@ impl WALWriter {
             self.immutation_options.fs.as_ref(),
         )?;
         let writer = std::mem::replace(&mut self.writer, new_writer);
+        sync_point!("switch_wal", self.writer.get_log_number());
         self.logs.push_back(writer);
         Ok(())
     }
 
     pub fn switch_memtable(&mut self, switch_wal: bool) -> Result<Vec<(u32, Arc<Memtable>)>> {
         let mut vs = self.version_sets.lock().unwrap();
+        sync_point!("switch_memtable_with_wal", switch_wal);
         for v in &mut self.cf_versions {
             if switch_wal || v.mem.should_flush() {
                 // If this method returns false, it means that another write thread still hold this
                 // memtable. Maybe we shall also check the previous memtables has been flushed.
                 if !v.mem.is_empty() {
                     v.mem.set_next_log_number(self.writer.get_log_number());
+                    sync_point!(
+                        "switch_memtable",
+                        self.writer.get_log_number() * 1000 + v.id as u64
+                    );
                     *v = vs.switch_memtable(v.id, self.kernel.last_sequence());
                 } else if v.imms.len() == 0 {
                     vs.set_log_number(v.id, self.writer.get_log_number());
+                    sync_point!(
+                        "switch_empty_memtable",
+                        self.writer.get_log_number() * 1000 + v.id as u64
+                    );
                 }
             }
         }
@@ -216,6 +225,7 @@ impl WALWriter {
             let log = self.logs.pop_front().unwrap();
             let log_number = log.get_log_number();
             let fname = make_log_file(&self.immutation_options.db_path, log_number);
+            sync_point!("remove_log_file", log_number);
             self.immutation_options.fs.remove(fname)?;
         }
         Ok(())
@@ -249,29 +259,30 @@ impl WALWriter {
         Ok(new_id)
     }
 
+    pub fn assign_sequence(&mut self, wb: &mut ReadOnlyWriteBatch) -> Vec<Arc<SuperVersion>> {
+        let sequence = self.ctx.last_sequence + 1;
+        self.ctx.last_sequence = self.ctx.last_sequence + wb.count() as u64;
+        wb.set_sequence(sequence);
+        self.cf_versions.clone()
+    }
+
     pub async fn write(
         &mut self,
-        tasks: &mut Vec<(
-            ReadOnlyWriteBatch,
-            OnceSender<Result<WriteMemtableTask>>,
-            bool,
-        )>,
+        tasks: &mut Vec<(ReadOnlyWriteBatch, OnceSender<Result<WriteMemtableTask>>)>,
         sync_wal: bool,
     ) -> Result<Vec<Arc<SuperVersion>>> {
         if tasks.is_empty() {
             return Ok(vec![]);
         }
         let l = tasks.len();
-        for (wb, _, disable_wal) in tasks {
+        for (wb, _) in tasks {
             let sequence = self.ctx.last_sequence + 1;
             self.ctx.last_sequence = self.ctx.last_sequence + wb.count() as u64;
             wb.set_sequence(sequence);
-            if !*disable_wal {
-                if l == 1 {
-                    self.writer.add_record(wb.get_data()).await?;
-                } else {
-                    self.ctx.buf.extend_from_slice(wb.get_data());
-                }
+            if l == 1 {
+                self.writer.add_record(wb.get_data()).await?;
+            } else {
+                self.ctx.buf.extend_from_slice(wb.get_data());
             }
         }
         if !self.ctx.buf.is_empty() {
@@ -334,5 +345,12 @@ impl WALScheduler {
             .map_err(|_| Error::Cancel("wal"))?;
         let wb = rx.await.map_err(|_| Error::Cancel("wal"))?;
         wb
+    }
+
+    pub async fn schedule_compact_log(&mut self, cf: u32) -> Result<()> {
+        self.sender
+            .send(WALTask::CompactLog { cf })
+            .await
+            .map_err(|_| Error::Cancel("wal"))
     }
 }

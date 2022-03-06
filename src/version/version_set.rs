@@ -112,6 +112,34 @@ impl VersionSet {
                 ),
             );
         }
+        for (name, cf_opt) in cf_options {
+            let cf_id = kernel.next_column_family_id();
+            let version = Arc::new(Version::new(
+                cf_id,
+                name.clone(),
+                cf_opt.comparator.name().to_string(),
+                vec![],
+                0,
+                cf_opt.max_level,
+            ));
+            column_family_set_names.insert(name, cf_id);
+            column_family_set.insert(
+                cf_id,
+                ColumnFamily::new(
+                    cf_id,
+                    version.get_cf_name().to_string(),
+                    Memtable::new(
+                        kernel.new_memtable_number(),
+                        cf_opt.write_buffer_size,
+                        cf_opt.comparator.clone(),
+                        MAX_SEQUENCE_NUMBER,
+                    ),
+                    cf_opt.comparator.clone(),
+                    version,
+                    cf_opt,
+                ),
+            );
+        }
         VersionSet {
             kernel,
             column_family_set,
@@ -211,7 +239,6 @@ impl VersionSet {
             let l = version.imms.len();
             for i in 0..l {
                 if version.imms[i].is_pending_schedule() {
-                    assert!(mems.is_empty());
                     continue;
                 }
                 version.imms[i].mark_schedule_flush();
