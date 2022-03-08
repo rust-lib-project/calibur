@@ -159,7 +159,7 @@ impl Engine {
             }
         };
         let iter = version.new_iterator(opts)?;
-        let sequence = opts.snapshot.clone().unwrap_or(self.kernel.last_sequence());
+        let sequence = opts.snapshot.unwrap_or_else(|| self.kernel.last_sequence());
         Ok(DBIterator::new(
             iter,
             version
@@ -188,14 +188,9 @@ impl Engine {
             .list_files(PathBuf::from(immutable_options.db_path.clone()))?;
         let mut logs = vec![];
         for f in files {
-            let fname = f
-                .file_name()
-                .unwrap()
-                .to_str()
-                .ok_or(Error::InvalidFile(format!(
-                    "file {:?} can not convert to string",
-                    f
-                )))?;
+            let fname = f.file_name().unwrap().to_str().ok_or_else(|| {
+                Error::InvalidFile(format!("file {:?} can not convert to string", f))
+            })?;
             let (db_tp, file_number) = parse_file_name(fname)?;
             if db_tp == DBFileType::LogFile {
                 logs.push(file_number);
@@ -279,8 +274,8 @@ impl Engine {
             let mut idx = cf as usize;
             if idx >= mems.len() || cf != mems[idx].0 {
                 idx = mems.len();
-                for i in 0..mems.len() {
-                    if mems[i].0 == cf {
+                for (i, memtables) in mems.iter().enumerate() {
+                    if memtables.0 == cf {
                         idx = i;
                         break;
                     }

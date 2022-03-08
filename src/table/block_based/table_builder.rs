@@ -37,7 +37,7 @@ impl BuilderRep {
         let mut trailer: [u8; 5] = [0; 5];
         trailer[0] = CompressionType::NoCompression as u8;
         // todo: Add checksum for every block.
-        trailer[1..].copy_from_slice(&(0 as u32).to_le_bytes());
+        trailer[1..].copy_from_slice(&(0_u32).to_le_bytes());
         self.file.append(&trailer).await?;
         self.offset += block.len() as u64 + trailer.len() as u64;
         if self.options.block_align && is_data_block {

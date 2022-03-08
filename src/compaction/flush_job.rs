@@ -54,7 +54,7 @@ impl<E: CompactionEngine> FlushJob<E> {
 
     fn new_merging_iterator(&self, mems: &[Arc<Memtable>]) -> Box<dyn InternalIterator> {
         if mems.len() == 1 {
-            return mems[0].new_iterator();
+            mems[0].new_iterator()
         } else {
             let iters = mems.iter().map(|mem| mem.new_iterator()).collect();
             let iter = MergingIterator::new(iters, mems[0].get_comparator());
@@ -117,21 +117,21 @@ pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
         }
     }
     let mut edits = vec![];
-    for i in 0..mems.len() {
-        if !mems[i].is_empty() {
+    for (i, memtables) in mems.iter().enumerate() {
+        if !memtables.is_empty() {
             let file_number = kernel.new_file_number();
-            let memids = mems[i].iter().map(|mem| mem.get_id()).collect();
+            let memids = memtables.iter().map(|mem| mem.get_id()).collect();
             let idx = i as u32;
             let cf_opt = cf_options
                 .get(&idx)
                 .cloned()
-                .unwrap_or(Arc::new(ColumnFamilyOptions::default()));
+                .unwrap_or_else(|| Arc::new(ColumnFamilyOptions::default()));
             let comparator = cf_opt.comparator.clone();
             let mut job = FlushJob::new(
                 engine.clone(),
                 options.clone(),
                 cf_opt,
-                mems[i].clone(),
+                memtables.clone(),
                 comparator,
                 i as u32,
                 file_number,
@@ -140,7 +140,7 @@ pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
             let meta = job.run().await?;
             let mut edit = VersionEdit::default();
             edit.prev_log_number = 0;
-            edit.set_log_number(mems[i].last().unwrap().get_next_log_number());
+            edit.set_log_number(memtables.last().unwrap().get_next_log_number());
             edit.add_file(
                 0,
                 file_number,

@@ -3,7 +3,7 @@
 use std::fs::{read_dir, rename};
 use std::io::{Result as IoResult, Write};
 use std::os::unix::io::RawFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::common::file_system::{SequentialFile, WritableFile};
@@ -350,11 +350,9 @@ impl FileSystem for SyncPosixFileSystem {
         let f = PosixReadableFile::open(&p).map_err(|e| Error::Io(Box::new(e)))?;
         let filename = p
             .file_name()
-            .ok_or(Error::InvalidFile(format!("path has no file name")))?
+            .ok_or_else(|| Error::InvalidFile("path has no file name".to_string()))?
             .to_str()
-            .ok_or(Error::InvalidFile(format!(
-                "filename is not encode by utf8"
-            )))?;
+            .ok_or_else(|| Error::InvalidFile("filename is not encode by utf8".to_string()))?;
         let reader = RandomAccessFileReader::new(Box::new(f), filename.to_string());
         Ok(Box::new(reader))
     }
@@ -384,7 +382,7 @@ impl FileSystem for SyncPosixFileSystem {
         rename(origin, target).map_err(|e| Error::Io(Box::new(e)))
     }
 
-    fn file_exist(&self, path: &PathBuf) -> Result<bool> {
+    fn file_exist(&self, path: &Path) -> Result<bool> {
         Ok(path.exists())
     }
 }

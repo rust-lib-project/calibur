@@ -1,5 +1,5 @@
 use std::fs::{read_dir, rename};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -175,7 +175,7 @@ pub struct AsyncWritableFile {
 }
 
 impl AsyncWritableFile {
-    fn open(path: &PathBuf, ctx: Arc<AsyncContext>, high_priority: bool) -> Result<Self> {
+    fn open(path: &Path, ctx: Arc<AsyncContext>, high_priority: bool) -> Result<Self> {
         let fd = RawFile::create(path).map_err(|e| Error::Io(Box::new(e)))?;
         Ok(Self {
             inner: Arc::new(fd),
@@ -286,7 +286,7 @@ pub struct AsyncRandomAccessFile {
 }
 
 impl AsyncRandomAccessFile {
-    fn open(path: &PathBuf, ctx: Arc<AsyncContext>) -> Result<Self> {
+    fn open(path: &Path, ctx: Arc<AsyncContext>) -> Result<Self> {
         // TODO: support direct io with alignment buffer read.
         let fd = RawFile::open_for_read(path, false).map_err(|e| Error::Io(Box::new(e)))?;
         let file_size = fd.file_size().map_err(|e| Error::Io(Box::new(e)))?;
@@ -361,7 +361,7 @@ pub struct AsyncSequentialFile {
 }
 
 impl AsyncSequentialFile {
-    fn open(path: &PathBuf, ctx: Arc<AsyncContext>) -> Result<Self> {
+    fn open(path: &Path, ctx: Arc<AsyncContext>) -> Result<Self> {
         let inner = AsyncRandomAccessFile::open(path, ctx)?;
         Ok(Self { inner, offset: 0 })
     }
@@ -419,11 +419,9 @@ impl AsyncFileSystem {
     fn open_writable_file(&self, path: PathBuf, opts: &IOOption) -> Result<WritableFileWriter> {
         let file_name = path
             .file_name()
-            .ok_or(Error::InvalidFile(format!("path has no file name")))?
+            .ok_or_else(|| Error::InvalidFile("path has no file name".to_string()))?
             .to_str()
-            .ok_or(Error::InvalidFile(format!(
-                "filename is not encode by utf8"
-            )))?;
+            .ok_or_else(|| Error::InvalidFile("filename is not encode by utf8".to_string()))?;
         let f = AsyncWritableFile::open(&path, self.ctx.clone(), opts.high_priority)?;
         Ok(WritableFileWriter::new(
             Box::new(f),
@@ -460,11 +458,9 @@ impl FileSystem for AsyncFileSystem {
         let f = AsyncRandomAccessFile::open(&p, self.ctx.clone())?;
         let filename = p
             .file_name()
-            .ok_or(Error::InvalidFile(format!("path has no file name")))?
+            .ok_or_else(|| Error::InvalidFile("path has no file name".to_string()))?
             .to_str()
-            .ok_or(Error::InvalidFile(format!(
-                "filename is not encode by utf8"
-            )))?;
+            .ok_or_else(|| Error::InvalidFile("filename is not encode by utf8".to_string()))?;
         let reader = RandomAccessFileReader::new(Box::new(f), filename.to_string());
         Ok(Box::new(reader))
     }
@@ -494,7 +490,7 @@ impl FileSystem for AsyncFileSystem {
         Ok(files)
     }
 
-    fn file_exist(&self, path: &PathBuf) -> Result<bool> {
+    fn file_exist(&self, path: &Path) -> Result<bool> {
         Ok(path.exists())
     }
 }

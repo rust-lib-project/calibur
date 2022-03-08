@@ -142,15 +142,14 @@ impl DBIterator {
                     self.current_user_key.extend_from_slice(ikey.user_key());
                     return;
                 }
-            } else if ikey.tp == ValueType::TypeDeletion {
-                if self.current_user_key.is_empty()
+            } else if ikey.tp == ValueType::TypeDeletion
+                && (self.current_user_key.is_empty()
                     || !self
                         .user_comparator
-                        .same_key(&self.current_user_key, ikey.user_key())
-                {
-                    self.current_user_key.clear();
-                    self.current_user_key.extend_from_slice(ikey.user_key());
-                }
+                        .same_key(&self.current_user_key, ikey.user_key()))
+            {
+                self.current_user_key.clear();
+                self.current_user_key.extend_from_slice(ikey.user_key());
             }
             self.inner.next().await;
         }

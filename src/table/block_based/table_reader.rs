@@ -160,10 +160,8 @@ fn get_global_seqno(propertoes: &TableProperties, _largest_seqno: u64) -> Result
 #[async_trait]
 impl TableReader for BlockBasedTable {
     async fn get(&self, opts: &ReadOptions, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        if !opts.skip_filter {
-            if !self.full_filter_key_may_match(key) {
-                return Ok(None);
-            }
+        if !opts.skip_filter && !self.full_filter_key_may_match(key) {
+            return Ok(None);
         }
         let mut iter = self
             .rep

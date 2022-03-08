@@ -115,10 +115,8 @@ impl Manifest {
             } else if edit.is_column_family_drop {
                 edits.remove(&edit.column_family);
                 cf_names.remove(&edit.column_family);
-            } else {
-                if let Some(data) = edits.get_mut(&edit.column_family) {
-                    data.push(edit);
-                }
+            } else if let Some(data) = edits.get_mut(&edit.column_family) {
+                data.push(edit);
             }
         }
         let mut versions = HashMap::default();
@@ -133,9 +131,7 @@ impl Manifest {
         let mut files = HashMap::default();
         for (cf_id, edit) in edits {
             let cf_name = cf_names.get(&cf_id).unwrap();
-            let cf_opts = cf_options
-                .remove(cf_name)
-                .unwrap_or(ColumnFamilyOptions::default());
+            let cf_opts = cf_options.remove(cf_name).unwrap_or_default();
 
             let mut files_by_id: HashMap<u64, FileMetaData> = HashMap::new();
             let mut max_log_number = 0;
@@ -338,9 +334,9 @@ impl Manifest {
                 edit.set_comparator_name(version.get_comparator_name());
                 edit.set_log_number(version.get_log_number());
                 if !edit.encode_to(&mut record) {
-                    return Err(Error::CompactionError(format!(
-                        "write snapshot failed because encode failed"
-                    )));
+                    return Err(Error::CompactionError(
+                        "write snapshot failed because encode failed".to_string(),
+                    ));
                 }
                 writer.add_record(&record).await?;
                 record.clear();
@@ -469,14 +465,12 @@ pub async fn store_current_file(
 }
 
 pub async fn get_current_manifest_path(
-    dbname: &String,
+    dbname: &str,
     fs: Arc<dyn FileSystem>,
 ) -> Result<(String, u64)> {
-    let mut data = fs
-        .read_file_content(make_current_file(dbname.as_str()))
-        .await?;
+    let mut data = fs.read_file_content(make_current_file(dbname)).await?;
     if data.is_empty() || *data.last().unwrap() != b'\n' {
-        return Err(Error::InvalidFile(format!("CURRENT file corrupted")));
+        return Err(Error::InvalidFile("CURRENT file corrupted".to_string()));
     }
     data.pop();
     let fname = String::from_utf8(data).map_err(|e| {
@@ -487,10 +481,10 @@ pub async fn get_current_manifest_path(
     })?;
     let (tp, manifest_file_number) = parse_file_name(&fname)?;
     if tp != DBFileType::DescriptorFile {
-        return Err(Error::InvalidFile(format!("CURRENT file corrupted")));
+        return Err(Error::InvalidFile("CURRENT file corrupted".to_string()));
     }
-    let mut manifest_path = dbname.clone();
-    if !manifest_path.ends_with("/") {
+    let mut manifest_path = dbname.to_string();
+    if !manifest_path.ends_with('/') {
         manifest_path.push('/');
     }
     manifest_path.push_str(&fname);

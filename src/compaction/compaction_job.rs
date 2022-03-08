@@ -20,7 +20,7 @@ pub async fn run_compaction_job<Engine: CompactionEngine>(
     let mut level_tables: HashMap<u32, Vec<Arc<TableFile>>> = HashMap::default();
     for (level, f) in request.input.iter() {
         if *level > 0 {
-            if let Some(files) = level_tables.get_mut(&level) {
+            if let Some(files) = level_tables.get_mut(level) {
                 files.push(f.clone());
             } else {
                 level_tables.insert(*level, vec![f.clone()]);

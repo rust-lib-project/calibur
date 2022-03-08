@@ -112,9 +112,9 @@ impl LevelCompactionPriorityContext {
     fn pickup_high_priority_level(&mut self) -> Option<(u32, u32)> {
         self.level_and_scores.sort_by(|a, b| {
             if a.1 > b.1 {
-                return Ordering::Less;
+                Ordering::Less
             } else {
-                return Ordering::Greater;
+                Ordering::Greater
             }
         });
         let base_level = self.base_level;
@@ -204,8 +204,8 @@ impl LevelCompactionPriorityContext {
         }
 
         let mut expand_inputs = vec![];
-        let mut next_level_smallest = smallest.clone();
-        let mut next_level_largest = largest.clone();
+        let mut next_level_smallest = smallest;
+        let mut next_level_largest = largest;
         if !self.expand_input_files_from_level(
             version,
             &mut next_level_smallest,

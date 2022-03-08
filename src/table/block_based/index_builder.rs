@@ -90,11 +90,9 @@ impl IndexBuilder for ShortenedIndexBuilder {
             {
                 self.seperator_is_key_plus_seq = true;
             }
-        } else {
-            if self.shortening_mode == IndexShorteningMode::ShortenSeparatorsAndSuccessor {
-                self.comparator
-                    .find_short_successor(last_key_in_current_block);
-            }
+        } else if self.shortening_mode == IndexShorteningMode::ShortenSeparatorsAndSuccessor {
+            self.comparator
+                .find_short_successor(last_key_in_current_block);
         }
         let sep = last_key_in_current_block.as_slice();
         let entry = IndexValueRef::new(block_handle);

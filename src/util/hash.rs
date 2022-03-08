@@ -36,7 +36,7 @@ pub fn hash(data: &[u8], seed: u64) -> u32 {
         h = h.wrapping_mul(M);
         h ^= h >> R;
     }
-    return h;
+    h
 }
 
 pub fn key_hash(key: &[u8]) -> u32 {

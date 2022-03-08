@@ -5,7 +5,7 @@ mod writer;
 
 use super::Result;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::common::Error;
@@ -49,20 +49,11 @@ pub trait WritableFile: Send {
     }
 }
 
+#[derive(Default)]
 pub struct IOOption {
     pub direct: bool,
     pub high_priority: bool,
     pub buffer_size: usize,
-}
-
-impl Default for IOOption {
-    fn default() -> Self {
-        Self {
-            direct: false,
-            high_priority: false,
-            buffer_size: 0,
-        }
-    }
 }
 
 #[async_trait]
@@ -114,7 +105,7 @@ pub trait FileSystem: Send + Sync {
 
     fn list_files(&self, path: PathBuf) -> Result<Vec<PathBuf>>;
 
-    fn file_exist(&self, path: &PathBuf) -> Result<bool>;
+    fn file_exist(&self, path: &Path) -> Result<bool>;
 }
 
 #[derive(Default)]
@@ -262,20 +253,19 @@ impl FileSystem for InMemFileSystem {
     fn remove(&self, path: PathBuf) -> Result<()> {
         let filename = path.to_str().unwrap();
         let mut fs = self.inner.lock().unwrap();
-        fs.files.remove(filename).ok_or(Error::InvalidFile(format!(
-            "file [{}] not exists",
-            filename
-        )))?;
+        fs.files
+            .remove(filename)
+            .ok_or_else(|| Error::InvalidFile(format!("file [{}] not exists", filename)))?;
         Ok(())
     }
 
     fn rename(&self, origin: PathBuf, target: PathBuf) -> Result<()> {
         let filename = origin.to_str().unwrap();
         let mut fs = self.inner.lock().unwrap();
-        let f = fs.files.remove(filename).ok_or(Error::InvalidFile(format!(
-            "file [{}] not exists",
-            filename
-        )))?;
+        let f = fs
+            .files
+            .remove(filename)
+            .ok_or_else(|| Error::InvalidFile(format!("file [{}] not exists", filename)))?;
         let filename = target.to_str().unwrap();
         fs.files.insert(filename.to_string(), f);
         Ok(())
@@ -291,7 +281,7 @@ impl FileSystem for InMemFileSystem {
         Ok(files)
     }
 
-    fn file_exist(&self, path: &PathBuf) -> Result<bool> {
+    fn file_exist(&self, path: &Path) -> Result<bool> {
         let fs = self.inner.lock().unwrap();
         let filename = path.to_str().unwrap();
         Ok(fs.files.get(filename).is_some())

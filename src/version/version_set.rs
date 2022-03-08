@@ -91,9 +91,7 @@ impl VersionSet {
         let mut column_family_set = HashMap::default();
         let mut column_family_set_names = HashMap::default();
         for (cf_id, version) in versions {
-            let cf_opt = cf_options
-                .remove(version.get_cf_name())
-                .unwrap_or(ColumnFamilyOptions::default());
+            let cf_opt = cf_options.remove(version.get_cf_name()).unwrap_or_default();
             column_family_set_names.insert(version.get_cf_name().to_string(), cf_id);
             column_family_set.insert(
                 cf_id,
@@ -249,9 +247,9 @@ impl VersionSet {
         if let Some(cf) = self.column_family_set.get_mut(&cf_id) {
             Ok(cf.install_version(mems, version))
         } else {
-            Err(Error::CompactionError(format!(
-                "column faimly has been dropped"
-            )))
+            Err(Error::CompactionError(
+                "column family has been dropped".to_string(),
+            ))
         }
     }
 
