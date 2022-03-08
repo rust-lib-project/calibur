@@ -2,7 +2,7 @@ use super::version::MemtableList;
 use crate::common::format::pack_sequence_and_type;
 use crate::common::{Result, VALUE_TYPE_FOR_SEEK};
 use crate::iterator::{AsyncIterator, AsyncMergingIterator};
-use crate::memtable::Memtable;
+use crate::memtable::{Memtable, Memtable};
 use crate::options::ReadOptions;
 use crate::version::Version;
 use crate::ColumnFamilyOptions;

@@ -2,29 +2,25 @@ use std::cell::RefCell;
 use std::collections::hash_map::RandomState;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use crate::common::format::ValueType;
-use crate::common::{
-    make_current_file, make_log_file, parse_file_name, DBFileType, Error, Result,
-    MAX_SEQUENCE_NUMBER,
-};
+use crate::common::{make_log_file, parse_file_name, DBFileType, Error, Result};
 use crate::compaction::{
     run_compaction_job, run_flush_memtable_job, FlushRequest, LevelCompactionPicker,
 };
 use crate::iterator::DBIterator;
 use crate::log::LogReader;
-use crate::manifest::{Manifest, ManifestScheduler, ManifestWriter};
 use crate::memtable::Memtable;
-use crate::options::{ColumnFamilyDescriptor, DBOptions, ImmutableDBOptions, ReadOptions};
-use crate::version::{KernelNumberContext, VersionSet};
+use crate::options::{ColumnFamilyDescriptor, DBOptions, ReadOptions};
 use crate::wal::{WALScheduler, WALTask, WALWriter, WriteMemtableTask};
 use crate::write_batch::{ReadOnlyWriteBatch, WriteBatch, WriteBatchItem};
 use crate::ColumnFamilyOptions;
 
+use crate::core::Core;
 use crate::pipeline::PipelineCommitQueue;
-use crate::version::snapshot::{Snapshot, SnapshotList};
+use crate::version::snapshot::Snapshot;
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::channel::oneshot::Sender;
 use futures::{SinkExt, StreamExt};
@@ -43,15 +39,10 @@ thread_local! {
 
 #[derive(Clone)]
 pub struct Engine {
-    version_set: Arc<Mutex<VersionSet>>,
-    kernel: Arc<KernelNumberContext>,
+    core: Core,
     pool: Arc<ThreadPool<TaskCell>>,
-    options: Arc<ImmutableDBOptions>,
-    manifest_scheduler: ManifestScheduler,
     wal_scheduler: WALScheduler,
-    stopped: Arc<AtomicBool>,
     flush_scheduler: UnboundedSender<FlushRequest>,
-    snapshot_list: Arc<Mutex<SnapshotList>>,
     commit_queue: Arc<PipelineCommitQueue>,
 }
 
@@ -61,11 +52,54 @@ impl Engine {
         cfs: Vec<ColumnFamilyDescriptor>,
         other_pool: Option<Arc<ThreadPool<TaskCell>>>,
     ) -> Result<Self> {
+        let pool = other_pool.unwrap_or_else(|| {
+            let mut builder = PoolBuilder::new("rocksdb");
+            let pool = builder
+                .max_thread_count(db_options.max_background_jobs + 1)
+                .stack_size(8 * 1024 * 1024)
+                .build_multilevel_future_pool();
+            Arc::new(pool)
+        });
         let immutable_options = Arc::new(db_options.into());
-        let mut engine = Self::recover(immutable_options, &cfs, other_pool).await?;
+        let core = Core::recover(immutable_options, &cfs, &pool).await?;
+        let (tx, rx) = unbounded();
+        let (flush_tx, flush_rx) = unbounded();
+        let (compaction_tx, compaction_rx) = unbounded();
+        let wal_scheduler = WALScheduler::new(tx);
+        let mut engine = Engine {
+            commit_queue: Arc::new(PipelineCommitQueue::new(core.ctx.clone())),
+            pool,
+            flush_scheduler: flush_tx.clone(),
+            wal_scheduler,
+            core,
+        };
+        let files = engine
+            .core
+            .options
+            .fs
+            .list_files(PathBuf::from(engine.core.options.db_path.clone()))?;
+        let mut logs = vec![];
+        for f in files {
+            let fname = f
+                .file_name()
+                .unwrap()
+                .to_str()
+                .ok_or(Error::InvalidFile(format!(
+                    "file {:?} can not convert to string",
+                    f
+                )))?;
+            let (db_tp, file_number) = parse_file_name(fname)?;
+            if db_tp == DBFileType::LogFile {
+                logs.push(file_number);
+            }
+        }
+        engine.recover_log(logs).await?;
+        engine.run_wal_job(flush_tx, rx)?;
+        engine.run_flush_job(flush_rx, compaction_tx)?;
+        engine.run_compaction_job(compaction_rx)?;
         let mut created_cfs: HashSet<String, RandomState> = HashSet::default();
         {
-            let mut vs = engine.version_set.lock().unwrap();
+            let mut vs = engine.core.version_set.lock().unwrap();
             for desc in &cfs {
                 if vs.mut_column_family_by_name(&desc.name).is_some() {
                     created_cfs.insert(desc.name.clone());
@@ -129,115 +163,25 @@ impl Engine {
     }
 
     pub async fn get(&self, opts: &ReadOptions, cf: u32, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        let version = {
-            let vs = self.version_set.lock().unwrap();
-            match vs.get_superversion(cf) {
-                Some(v) => v,
-                None => return Err(Error::InvalidColumnFamily(cf)),
-            }
-        };
-        version.get(opts, key, MAX_SEQUENCE_NUMBER).await
+        self.core.get(opts, cf, key).await
     }
 
     pub fn get_snapshot(&self) -> Box<Snapshot> {
-        let mut snapshot_list = self.snapshot_list.lock().unwrap();
-        let sequence = self.kernel.last_sequence();
-        snapshot_list.new_snapshot(sequence)
+        self.core.get_snapshot()
     }
 
     pub fn release_snapshot(&self, snapshot: Box<Snapshot>) {
-        let mut snapshot_list = self.snapshot_list.lock().unwrap();
-        snapshot_list.release_snapshot(snapshot)
+        self.core.release_snapshot(snapshot)
     }
 
     pub fn new_iterator(&self, opts: &ReadOptions, cf: u32) -> Result<DBIterator> {
-        let version = {
-            let vs = self.version_set.lock().unwrap();
-            match vs.get_superversion(cf) {
-                Some(v) => v,
-                None => return Err(Error::InvalidColumnFamily(cf)),
-            }
-        };
-        let iter = version.new_iterator(opts)?;
-        let sequence = opts.snapshot.clone().unwrap_or(self.kernel.last_sequence());
-        Ok(DBIterator::new(
-            iter,
-            version
-                .column_family_options
-                .comparator
-                .get_user_comparator()
-                .clone(),
-            sequence,
-        ))
-    }
-
-    async fn recover(
-        immutable_options: Arc<ImmutableDBOptions>,
-        cfs: &[ColumnFamilyDescriptor],
-        other_pool: Option<Arc<ThreadPool<TaskCell>>>,
-    ) -> Result<Self> {
-        let current = make_current_file(&immutable_options.db_path);
-        let manifest = if !immutable_options.fs.file_exist(&current)? {
-            Manifest::create(cfs, &immutable_options).await?
-        } else {
-            Manifest::recover(cfs, &immutable_options).await?
-        };
-        let version_set = manifest.get_version_set();
-        let files = immutable_options
-            .fs
-            .list_files(PathBuf::from(immutable_options.db_path.clone()))?;
-        let mut logs = vec![];
-        for f in files {
-            let fname = f
-                .file_name()
-                .unwrap()
-                .to_str()
-                .ok_or(Error::InvalidFile(format!(
-                    "file {:?} can not convert to string",
-                    f
-                )))?;
-            let (db_tp, file_number) = parse_file_name(fname)?;
-            if db_tp == DBFileType::LogFile {
-                logs.push(file_number);
-            }
-        }
-        let kernel = version_set.lock().unwrap().get_kernel();
-        let pool = other_pool.unwrap_or_else(|| {
-            let mut builder = PoolBuilder::new("rocksdb");
-            let pool = builder
-                .max_thread_count(immutable_options.max_background_jobs)
-                .stack_size(8 * 1024 * 1024)
-                .build_multilevel_future_pool();
-            Arc::new(pool)
-        });
-        let (tx, rx) = unbounded();
-        let (flush_tx, flush_rx) = unbounded();
-        let (compaction_tx, compaction_rx) = unbounded();
-        let manifest_scheduler = Self::start_manifest_job(&pool, Box::new(manifest))?;
-        let wal_scheduler = WALScheduler::new(tx);
-        let mut engine = Engine {
-            version_set,
-            commit_queue: Arc::new(PipelineCommitQueue::new(kernel.clone())),
-            kernel,
-            pool,
-            options: immutable_options,
-            flush_scheduler: flush_tx.clone(),
-            manifest_scheduler,
-            wal_scheduler,
-            stopped: Arc::new(AtomicBool::new(false)),
-            snapshot_list: Arc::new(Mutex::new(SnapshotList::new())),
-        };
-        engine.recover_log(logs).await?;
-        engine.run_wal_job(flush_tx, rx)?;
-        engine.run_flush_job(flush_rx, compaction_tx)?;
-        engine.run_compaction_job(compaction_rx)?;
-        Ok(engine)
+        self.core.new_iterator(opts, cf)
     }
 
     async fn recover_log(&mut self, logs: Vec<u64>) -> Result<()> {
         let mut min_log_number = u64::MAX;
         let (versions, cf_mems) = {
-            let version_set = self.version_set.lock().unwrap();
+            let version_set = self.core.version_set.lock().unwrap();
             (
                 version_set.get_column_family_versions(),
                 version_set.get_column_family_memtables(),
@@ -250,12 +194,12 @@ impl Engine {
             if log_number < min_log_number {
                 continue;
             }
-            self.kernel.mark_file_number_used(log_number);
-            let fname = make_log_file(&self.options.db_path, log_number);
-            let reader = self.options.fs.open_sequencial_file(fname)?;
+            self.core.ctx.mark_file_number_used(log_number);
+            let fname = make_log_file(&self.core.options.db_path, log_number);
+            let reader = self.core.options.fs.open_sequencial_file(fname)?;
             let mut log_reader = LogReader::new(reader);
             let mut buf = vec![];
-            let mut next_seq = self.kernel.last_sequence();
+            let mut next_seq = self.core.ctx.last_sequence();
             while log_reader.read_record(&mut buf).await? {
                 let wb = ReadOnlyWriteBatch::try_from(buf.clone())?;
                 let count = wb.count() as u64;
@@ -264,7 +208,7 @@ impl Engine {
                 next_seq = sequence + count - 1;
                 // TODO: flush if the memtable is full
             }
-            self.kernel.set_last_sequence(next_seq);
+            self.core.ctx.set_last_sequence(next_seq);
         }
         Ok(())
     }
@@ -311,14 +255,14 @@ impl Engine {
 
     fn run_compaction_job(&self, mut rx: UnboundedReceiver<u32>) -> Result<()> {
         let cf_opts = {
-            let vs = self.version_set.lock().unwrap();
+            let vs = self.core.version_set.lock().unwrap();
             vs.get_column_family_options()
         };
-        let picker = LevelCompactionPicker::new(cf_opts, self.options.clone());
+        let picker = LevelCompactionPicker::new(cf_opts, self.core.options.clone());
         let remote = self.pool.remote().clone();
-        let version_set = self.version_set.clone();
-        let manifest_scheduler = self.manifest_scheduler.clone();
-        let kernel = self.kernel.clone();
+        let version_set = self.core.version_set.clone();
+        let manifest_scheduler = self.core.manifest_scheduler.clone();
+        let kernel = self.core.ctx.clone();
         self.pool.spawn(async move {
             while let Some(cf) = rx.next().await {
                 let version = {
@@ -338,46 +282,17 @@ impl Engine {
         Ok(())
     }
 
-    fn start_manifest_job(
-        pool: &ThreadPool<TaskCell>,
-        manifest: Box<Manifest>,
-    ) -> Result<ManifestScheduler> {
-        let (tx, mut rx) = unbounded();
-        let mut writer = ManifestWriter::new(manifest);
-        pool.spawn(async move {
-            while let Some(x) = rx.next().await {
-                writer.batch(x);
-                while let Ok(x) = rx.try_next() {
-                    match x {
-                        Some(msg) => {
-                            if writer.batch(msg) {
-                                break;
-                            }
-                        }
-                        None => {
-                            writer.apply().await;
-                            return;
-                        }
-                    }
-                }
-                writer.apply().await;
-            }
-        });
-        let engine = ManifestScheduler::new(tx);
-        Ok(engine)
-    }
-
     fn run_wal_job(
         &self,
         flush_scheduler: UnboundedSender<FlushRequest>,
         mut rx: UnboundedReceiver<WALTask>,
     ) -> Result<()> {
         let writer = WALWriter::new(
-            self.kernel.clone(),
-            self.version_set.clone(),
-            self.options.clone(),
+            self.core.ctx.clone(),
+            self.core.version_set.clone(),
+            self.core.options.clone(),
             flush_scheduler,
-            self.manifest_scheduler.clone(),
+            self.core.manifest_scheduler.clone(),
         )?;
         let mut processor = BatchWALProcessor::new(writer);
 
@@ -433,8 +348,8 @@ impl Engine {
             }
             Ok(())
         };
-        let version_set = self.version_set.clone();
-        let stopped = self.stopped.clone();
+        let version_set = self.core.version_set.clone();
+        let stopped = self.core.stopped.clone();
         self.pool.spawn(async move {
             if let Err(e) = f.await {
                 if !stopped.load(Ordering::Acquire) {
@@ -451,12 +366,12 @@ impl Engine {
         mut rx: UnboundedReceiver<FlushRequest>,
         mut compaction_scheduler: UnboundedSender<u32>,
     ) -> Result<()> {
-        let engine = self.manifest_scheduler.clone();
-        let kernel = self.kernel.clone();
-        let options = self.options.clone();
-        let stopped = self.stopped.clone();
-        let version_set = self.version_set.clone();
-        let snapshot_list = self.snapshot_list.clone();
+        let engine = self.core.manifest_scheduler.clone();
+        let kernel = self.core.ctx.clone();
+        let options = self.core.options.clone();
+        let stopped = self.core.stopped.clone();
+        let version_set = self.core.version_set.clone();
+        let snapshot_list = self.core.snapshot_list.clone();
         let cf_options = version_set.lock().unwrap().get_column_family_options();
         let commit_queue = self.commit_queue.clone();
 
@@ -497,7 +412,7 @@ impl Engine {
     }
 
     pub fn close(&mut self) -> Result<()> {
-        self.stopped.store(true, Ordering::Release);
+        self.core.stopped.store(true, Ordering::Release);
         self.pool.shutdown();
         Ok(())
     }
@@ -602,7 +517,7 @@ mod tests {
         let mut engine = r
             .block_on(Engine::open(db_options.clone(), vec![], None))
             .unwrap();
-        let vs = engine.version_set.lock().unwrap();
+        let vs = engine.core.version_set.lock().unwrap();
         assert_eq!(vs.get_column_family_versions().len(), 1);
         drop(vs);
         engine.close().unwrap();
@@ -616,7 +531,7 @@ mod tests {
         let mut engine = r
             .block_on(Engine::open(db_options.clone(), cfs.clone(), None))
             .unwrap();
-        let vs = engine.version_set.lock().unwrap();
+        let vs = engine.core.version_set.lock().unwrap();
         assert_eq!(vs.get_column_family_versions().len(), 2);
         drop(vs);
         let mut wb = WriteBatch::new();
@@ -670,7 +585,7 @@ mod tests {
         }
         sleep(Duration::from_secs(2));
         {
-            let vs = engine.version_set.lock().unwrap();
+            let vs = engine.core.version_set.lock().unwrap();
             let v = vs.get_superversion(0).unwrap();
             assert_eq!(v.current.get_storage_info().get_level0_file_num(), 2);
             assert_eq!(

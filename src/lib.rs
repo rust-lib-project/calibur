@@ -2,13 +2,15 @@
 
 mod common;
 mod compaction;
-mod db;
+mod core;
+mod engine;
 mod iterator;
 mod log;
 mod manifest;
 mod memtable;
 mod options;
 mod pipeline;
+mod region_engine;
 mod table;
 mod util;
 mod version;
@@ -19,7 +21,7 @@ pub use common::{
     AsyncFileSystem, Error, FileSystem, InternalKeyComparator, KeyComparator, Result,
     SliceTransform, SyncPoxisFileSystem,
 };
-pub use db::*;
+pub use engine::*;
 pub use iterator::DBIterator;
 pub use options::*;
 pub use table::{

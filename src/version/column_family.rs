@@ -1,5 +1,5 @@
 use crate::common::InternalKeyComparator;
-use crate::memtable::Memtable;
+use crate::memtable::{Memtable, Memtable};
 use crate::options::ColumnFamilyOptions;
 use crate::version::{MemtableList, SuperVersion, Version};
 use std::sync::atomic::{AtomicBool, Ordering};

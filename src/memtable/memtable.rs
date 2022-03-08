@@ -4,8 +4,11 @@ use crate::common::InternalKeyComparator;
 use crate::iterator::{AsyncIterator, InternalIterator};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-pub struct Memtable {
+pub struct SkipListRep {
     list: Skiplist,
+}
+
+pub struct Memtable {
     mem_next_logfile_number: AtomicU64,
     id: u64,
     comparator: InternalKeyComparator,
