@@ -1,4 +1,6 @@
 mod arena;
+mod concurrent_arena;
+mod inline_skiplist;
 mod list;
 mod memtable;
 
