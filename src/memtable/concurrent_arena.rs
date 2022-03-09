@@ -1,14 +1,9 @@
 use spin::Mutex;
-use std::cell::RefCell;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
 const BLOCK_DATA_SIZE: usize = 2 * 1024 * 1024;
 const PAGE_DATA_SIZE: usize = 8 * 1024;
-
-thread_local! {
-    pub static CACHE_ID: RefCell<usize> = RefCell::new(0);
-}
 
 struct Block {
     data: Vec<u8>,
@@ -35,6 +30,9 @@ impl ArenaContent {
 pub trait Arena {
     fn mem_size(&self) -> usize;
     unsafe fn allocate(&self, alloc_size: usize) -> *mut u8;
+    unsafe fn allocate_in_thread(&self, _: usize, alloc_size: usize) -> *mut u8 {
+        self.allocate(alloc_size)
+    }
 }
 
 pub struct ArenaShard {
@@ -118,6 +116,8 @@ impl Arena for ConcurrentArena {
     }
 }
 
+const ARENA_COUNT: usize = 4;
+
 pub struct SharedArena {
     arenas: Vec<ArenaShard>,
     mem_size: AtomicUsize,
@@ -127,7 +127,7 @@ pub struct SharedArena {
 impl SharedArena {
     pub fn new() -> Self {
         let mut arenas = vec![];
-        for _ in 0..4 {
+        for _ in 0..ARENA_COUNT {
             arenas.push(ArenaShard::default());
         }
         SharedArena {
@@ -145,14 +145,17 @@ impl Arena for SharedArena {
 
     unsafe fn allocate(&self, alloc_size: usize) -> *mut u8 {
         let data_size = ((alloc_size - 1) | (std::mem::size_of::<*mut u8>() - 1)) + 1;
-        let idx: usize = CACHE_ID.with(|x| {
-            if *x.borrow() != 0 {
-                return *x.borrow();
-            }
-            *x.borrow_mut() = self.id.fetch_add(1, Ordering::SeqCst);
-            *x.borrow()
-        });
-        let arena = &self.arenas[idx % 4];
+        let arena = &self.arenas[0];
+        let addr = arena.allocate_from_current_block(data_size);
+        if !addr.is_null() {
+            return addr;
+        }
+        arena.allocate_heap(data_size, &self.mem_size)
+    }
+
+    unsafe fn allocate_in_thread(&self, idx: usize, alloc_size: usize) -> *mut u8 {
+        let data_size = ((alloc_size - 1) | (std::mem::size_of::<*mut u8>() - 1)) + 1;
+        let arena = &self.arenas[idx % ARENA_COUNT];
         let addr = arena.allocate_from_current_block(data_size);
         if !addr.is_null() {
             return addr;

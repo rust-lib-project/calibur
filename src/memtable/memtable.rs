@@ -51,12 +51,12 @@ impl Memtable {
 
     pub fn add(&self, ctx: &mut MemTableContext, key: &[u8], value: &[u8], sequence: u64) {
         self.update_first_sequence(sequence);
-        self.rep.add(&mut ctx.splice, key, value, sequence);
+        self.rep.add(ctx, key, value, sequence);
     }
 
     pub fn delete(&self, ctx: &mut MemTableContext, key: &[u8], sequence: u64) {
         self.update_first_sequence(sequence);
-        self.rep.delete(&mut ctx.splice, key, sequence);
+        self.rep.delete(ctx, key, sequence);
     }
 
     pub fn get_id(&self) -> u64 {

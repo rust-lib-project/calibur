@@ -1,7 +1,8 @@
 use criterion::{criterion_group, Criterion};
 use rand::{thread_rng, Rng, RngCore};
 use rocksdb_rs::{
-    InlineSkipListMemtableRep, InternalKeyComparator, MemtableRep, SkipListMemtableRep,
+    InlineSkipListMemtableRep, InternalKeyComparator, MemTableContext, MemtableRep,
+    SkipListMemtableRep,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -23,7 +24,7 @@ fn bench_skiplist<M: MemtableRep + 'static>(
             let mut rng = thread_rng();
             let mut v: [u8; 256] = [0u8; 256];
             rng.fill(&mut v);
-            let mut splice = M::Splice::default();
+            let mut ctx = MemTableContext::default();
             let mut data_size = 0;
             for _ in 0..10000 {
                 let last_sequence = sequence.fetch_add(100, Ordering::SeqCst);
@@ -40,12 +41,7 @@ fn bench_skiplist<M: MemtableRep + 'static>(
                     key.resize(l, 0);
                     key.extend_from_slice(&j.to_le_bytes());
                     data_size += key.len() + 8 + i as usize + 20;
-                    m.add(
-                        &mut splice,
-                        &key,
-                        &v[..(i as usize + 20)],
-                        last_sequence + i,
-                    );
+                    m.add(&mut ctx, &key, &v[..(i as usize + 20)], last_sequence + i);
                     if m.mem_size() + 1000 > max_write_buffer_size {
                         break;
                     }

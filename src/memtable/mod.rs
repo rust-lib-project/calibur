@@ -15,10 +15,8 @@ pub use skiplist_rep::{InlineSkipListMemtableRep, SkipListMemtableRep};
 const MAX_HEIGHT: usize = 20;
 
 pub trait MemtableRep: Send + Sync {
-    type Splice: Sized + Default;
-
     fn new_iterator(&self) -> Box<dyn InternalIterator>;
-    fn add(&self, splice: &mut Self::Splice, key: &[u8], value: &[u8], sequence: u64);
-    fn delete(&self, splice: &mut Self::Splice, key: &[u8], sequence: u64);
+    fn add(&self, splice: &mut MemTableContext, key: &[u8], value: &[u8], sequence: u64);
+    fn delete(&self, splice: &mut MemTableContext, key: &[u8], sequence: u64);
     fn mem_size(&self) -> usize;
 }

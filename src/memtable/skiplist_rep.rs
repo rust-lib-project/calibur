@@ -5,7 +5,7 @@ use crate::iterator::InternalIterator;
 use crate::memtable::concurrent_arena::SharedArena;
 use crate::memtable::inline_skiplist::{InlineSkipList, SkipListIterator};
 use crate::memtable::skiplist::{IterRef, Skiplist};
-use crate::memtable::MemtableRep;
+use crate::memtable::{MemTableContext, MemtableRep};
 use crate::util::{encode_var_uint32, get_var_uint32};
 use crate::{InternalKeyComparator, KeyComparator};
 use std::cmp::Ordering;
@@ -182,8 +182,6 @@ impl InlineSkipListMemtableRep {
 }
 
 impl MemtableRep for InlineSkipListMemtableRep {
-    type Splice = super::inline_skiplist::Splice;
-
     fn new_iterator(&self) -> Box<dyn InternalIterator> {
         Box::new(InlineSkipListMemtableIter {
             iter: SkipListIterator::new(&self.list),
@@ -193,12 +191,12 @@ impl MemtableRep for InlineSkipListMemtableRep {
         })
     }
 
-    fn add(&self, splice: &mut Self::Splice, key: &[u8], value: &[u8], sequence: u64) {
-        self.list.add(splice, key, value, sequence)
+    fn add(&self, ctx: &mut MemTableContext, key: &[u8], value: &[u8], sequence: u64) {
+        self.list.add(ctx, key, value, sequence)
     }
 
-    fn delete(&self, splice: &mut Self::Splice, key: &[u8], sequence: u64) {
-        self.list.delete(splice, key, sequence)
+    fn delete(&self, ctx: &mut MemTableContext, key: &[u8], sequence: u64) {
+        self.list.delete(ctx, key, sequence)
     }
 
     fn mem_size(&self) -> usize {
@@ -261,15 +259,13 @@ impl InternalIterator for MemIterator {
 }
 
 impl MemtableRep for SkipListMemtableRep {
-    type Splice = ();
-
     fn new_iterator(&self) -> Box<dyn InternalIterator> {
         Box::new(MemIterator {
             inner: self.list.iter(),
         })
     }
 
-    fn add(&self, _: &mut (), key: &[u8], value: &[u8], sequence: u64) {
+    fn add(&self, _: &mut MemTableContext, key: &[u8], value: &[u8], sequence: u64) {
         let mut ukey = Vec::with_capacity(key.len() + 8);
         ukey.extend_from_slice(key);
         ukey.extend_from_slice(
@@ -278,7 +274,7 @@ impl MemtableRep for SkipListMemtableRep {
         self.list.put(ukey, value.to_vec());
     }
 
-    fn delete(&self, _: &mut (), key: &[u8], sequence: u64) {
+    fn delete(&self, _: &mut MemTableContext, key: &[u8], sequence: u64) {
         let mut ukey = Vec::with_capacity(key.len() + 8);
         ukey.extend_from_slice(key);
         ukey.extend_from_slice(

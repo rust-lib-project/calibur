@@ -1,6 +1,7 @@
 use crate::common::format::pack_sequence_and_type;
 use crate::common::ValueType;
 use crate::memtable::concurrent_arena::Arena;
+use crate::memtable::MemTableContext;
 use crate::util::{encode_var_uint32, get_var_uint32, varint_length};
 use rand::{thread_rng, RngCore};
 use std::ptr::null_mut;
@@ -113,19 +114,31 @@ impl<C: Comparator, A: Arena> InlineSkipList<C, A> {
         height
     }
 
-    pub fn add(&self, splice: &mut Splice, key: &[u8], value: &[u8], sequence: u64) {
+    pub fn add(&self, ctx: &mut MemTableContext, key: &[u8], value: &[u8], sequence: u64) {
         unsafe {
-            let (height, node) = self.encode_key_value(key, value, sequence, ValueType::TypeValue);
-            splice.height = height;
-            self.insert(splice, node);
+            let (height, node) = self.encode_key_value(
+                ctx.get_thread_id(),
+                key,
+                value,
+                sequence,
+                ValueType::TypeValue,
+            );
+            ctx.splice.height = height;
+            self.insert(&mut ctx.splice, node);
         }
     }
 
-    pub fn delete(&self, splice: &mut Splice, key: &[u8], sequence: u64) {
+    pub fn delete(&self, ctx: &mut MemTableContext, key: &[u8], sequence: u64) {
         unsafe {
-            let (height, node) = self.encode_key_value(key, &[], sequence, ValueType::TypeDeletion);
-            splice.height = height;
-            self.insert(splice, node);
+            let (height, node) = self.encode_key_value(
+                ctx.get_thread_id(),
+                key,
+                &[],
+                sequence,
+                ValueType::TypeDeletion,
+            );
+            ctx.splice.height = height;
+            self.insert(&mut ctx.splice, node);
         }
     }
 
@@ -217,6 +230,7 @@ impl<C: Comparator, A: Arena> InlineSkipList<C, A> {
     #[inline(always)]
     unsafe fn encode_key_value(
         &self,
+        thread_id: usize,
         key: &[u8],
         value: &[u8],
         sequence: u64,
@@ -229,9 +243,10 @@ impl<C: Comparator, A: Arena> InlineSkipList<C, A> {
             + value.len();
         let h = self.random_height();
         let prefix = std::mem::size_of::<AtomicPtr<Node>>() * (h - 1);
-        let addr = self
-            .arena
-            .allocate(prefix + std::mem::size_of::<Node>() + encoded_len);
+        let addr = self.arena.allocate_in_thread(
+            thread_id,
+            prefix + std::mem::size_of::<Node>() + encoded_len,
+        );
         let key_addr = addr.add(prefix + std::mem::size_of::<Node>());
         let data = std::slice::from_raw_parts_mut(key_addr, encoded_len);
         let offset = encode_var_uint32(data, internal_key_size as u32);
@@ -339,11 +354,11 @@ mod tests {
     fn test_find_near() {
         let comp = InternalKeyComparator::default();
         let list = InlineSkipList::new(SharedArena::new(), DefaultComparator::new(comp));
-        let mut splice = Splice::default();
+        let mut ctx = MemTableContext::default();
         let v = vec![1u8; 100];
         for i in 0..10000 {
             let k = i.to_string().into_bytes();
-            list.add(&mut splice, &k, &v, i);
+            list.add(&mut ctx, &k, &v, i);
         }
         let mut tmp: [u8; 5] = [0u8; 5];
         let mut buf = vec![];
