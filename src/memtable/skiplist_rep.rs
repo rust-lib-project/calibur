@@ -2,7 +2,7 @@ use super::inline_skiplist::Comparator;
 use crate::common::format::pack_sequence_and_type;
 use crate::common::ValueType;
 use crate::iterator::InternalIterator;
-use crate::memtable::concurrent_arena::ConcurrentArena;
+use crate::memtable::concurrent_arena::{ConcurrentArena, SharedArena};
 use crate::memtable::inline_skiplist::{InlineSkipList, SkipListIterator};
 use crate::memtable::skiplist::{IterRef, Skiplist};
 use crate::memtable::MemtableRep;
@@ -56,11 +56,11 @@ impl Comparator for DefaultComparator {
 
 // TODO: support in memory bloom filter
 pub struct InlineSkipListMemtableRep {
-    list: InlineSkipList<DefaultComparator>,
+    list: InlineSkipList<DefaultComparator, SharedArena>,
 }
 
 pub struct InlineSkipListMemtableIter {
-    iter: SkipListIterator<DefaultComparator>,
+    iter: SkipListIterator<DefaultComparator, SharedArena>,
     current_offset: usize,
     current_key_size: usize,
     buf: Vec<u8>,
@@ -165,7 +165,7 @@ impl InternalIterator for InlineSkipListMemtableIter {
 impl InlineSkipListMemtableRep {
     pub fn new(comparator: InternalKeyComparator) -> Self {
         Self {
-            list: InlineSkipList::new(ConcurrentArena::new(), DefaultComparator { comparator }),
+            list: InlineSkipList::new(SharedArena::new(), DefaultComparator { comparator }),
         }
     }
 }

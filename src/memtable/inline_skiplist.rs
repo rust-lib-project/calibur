@@ -1,6 +1,6 @@
 use crate::common::format::pack_sequence_and_type;
 use crate::common::ValueType;
-use crate::memtable::concurrent_arena::ConcurrentArena;
+use crate::memtable::concurrent_arena::Arena;
 use crate::util::{encode_var_uint32, get_var_uint32, varint_length};
 use rand::{thread_rng, RngCore};
 use std::ptr::null_mut;
@@ -66,15 +66,15 @@ pub trait Comparator: Sync {
     unsafe fn compare_key(&self, k1: *const u8, k2: &[u8]) -> std::cmp::Ordering;
 }
 
-pub struct InlineSkipList<C: Comparator> {
-    arena: ConcurrentArena,
+pub struct InlineSkipList<C: Comparator, A: Arena> {
+    arena: A,
     head: *mut Node,
     max_height: AtomicUsize,
     cmp: C,
 }
 
-impl<C: Comparator> InlineSkipList<C> {
-    pub fn new(arena: ConcurrentArena, cmp: C) -> Self {
+impl<C: Comparator, A: Arena> InlineSkipList<C, A> {
+    pub fn new(arena: A, cmp: C) -> Self {
         let head = unsafe {
             let head = Self::allocate_key_value(&arena, 0, MAX_HEIGHT);
             for i in 0..MAX_HEIGHT {
@@ -198,11 +198,7 @@ impl<C: Comparator> InlineSkipList<C> {
     }
 
     #[inline(always)]
-    unsafe fn allocate_key_value(
-        arena: &ConcurrentArena,
-        key_size: usize,
-        height: usize,
-    ) -> *mut Node {
+    unsafe fn allocate_key_value(arena: &A, key_size: usize, height: usize) -> *mut Node {
         let prefix = std::mem::size_of::<AtomicPtr<Node>>() * (height - 1);
         let addr = arena.allocate(prefix + std::mem::size_of::<Node>() + key_size);
         addr.add(prefix) as _
@@ -264,13 +260,13 @@ impl<C: Comparator> InlineSkipList<C> {
     }
 }
 
-pub struct SkipListIterator<C: Comparator> {
-    list: *const InlineSkipList<C>,
+pub struct SkipListIterator<C: Comparator, A: Arena> {
+    list: *const InlineSkipList<C, A>,
     node: *mut Node,
 }
 
-impl<C: Comparator> SkipListIterator<C> {
-    fn new(list: *const InlineSkipList<C>) -> Self {
+impl<C: Comparator, A: Arena> SkipListIterator<C, A> {
+    fn new(list: *const InlineSkipList<C, A>) -> Self {
         Self {
             list,
             node: null_mut(),
@@ -306,20 +302,22 @@ impl<C: Comparator> SkipListIterator<C> {
 mod tests {
     use super::*;
     use crate::common::{InternalKeyComparator, VALUE_TYPE_FOR_SEEK};
+    use crate::memtable::concurrent_arena::{ConcurrentArena, SharedArena};
     use crate::memtable::skiplist_rep::DefaultComparator;
 
     #[test]
     fn test_find_near() {
         let comp = InternalKeyComparator::default();
-        let list = InlineSkipList::new(ConcurrentArena::new(), DefaultComparator::new(comp));
+        let list = InlineSkipList::new(SharedArena::new(), DefaultComparator::new(comp));
         let mut splice = Splice::default();
-        for i in 0..1000 {
+        let v = vec![1u8; 100];
+        for i in 0..10000 {
             let k = i.to_string().into_bytes();
-            list.add(&mut splice, &k, b"abcd", i);
+            list.add(&mut splice, &k, &v, i);
         }
         let mut tmp: [u8; 5] = [0u8; 5];
         let mut buf = vec![];
-        for i in 0..1000 {
+        for i in 0..10000 {
             let k = i.to_string().into_bytes();
             let offset = encode_var_uint32(&mut tmp, k.len() as u32 + 8);
             buf.clear();
