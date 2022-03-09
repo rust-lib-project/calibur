@@ -18,7 +18,7 @@ pub use memtable::{InlineSkipListMemtableRep, MemtableRep, SkipListMemtableRep, 
 
 pub use common::{
     AsyncFileSystem, Error, FileSystem, InternalKeyComparator, KeyComparator, Result,
-    SliceTransform, SyncPoxisFileSystem, ValueType,
+    SliceTransform, SyncPosixFileSystem,
 };
 pub use db::*;
 pub use iterator::DBIterator;

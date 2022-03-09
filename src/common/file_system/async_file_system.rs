@@ -369,7 +369,7 @@ impl AsyncSequentialFile {
 
 #[async_trait]
 impl SequentialFile for AsyncSequentialFile {
-    async fn read_sequencial(&mut self, data: &mut [u8]) -> Result<usize> {
+    async fn read_sequential(&mut self, data: &mut [u8]) -> Result<usize> {
         let (cb, rc) = once_channel();
         let task = ReadTask {
             fd: self.inner.fd.clone(),
@@ -469,7 +469,7 @@ impl FileSystem for AsyncFileSystem {
         Ok(Box::new(reader))
     }
 
-    fn open_sequencial_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>> {
+    fn open_sequential_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>> {
         let f = AsyncSequentialFile::open(&path, self.ctx.clone())?;
         let reader = SequentialFileReader::new(
             Box::new(f),

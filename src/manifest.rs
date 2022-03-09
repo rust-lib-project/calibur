@@ -61,11 +61,11 @@ impl Manifest {
             get_current_manifest_path(&db_options.db_path, db_options.fs.clone()).await?;
         let reader = db_options
             .fs
-            .open_sequencial_file(PathBuf::from(manifest_path))?;
+            .open_sequential_file(PathBuf::from(manifest_path))?;
         let log_reader = LogReader::new(reader);
         let (files_by_id, version_set) =
             Self::recover_version(cfs, Box::new(log_reader), db_options).await?;
-        let kernal = version_set.get_kernel();
+        let kernel = version_set.get_kernel();
 
         let cf_versions = version_set.get_column_family_versions();
         let mut versions = HashMap::default();
@@ -80,7 +80,7 @@ impl Manifest {
             version_set: Arc::new(Mutex::new(version_set)),
             manifest_file_number,
             versions,
-            kernel: kernal,
+            kernel,
             options: db_options.clone(),
             cf_options,
             files_by_id,
