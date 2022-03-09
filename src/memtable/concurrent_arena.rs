@@ -71,10 +71,11 @@ impl ConcurrentArena {
                 block_size += PAGE_DATA_SIZE;
             }
         }
-        let block = Box::new(Block {
+        let mut block = Box::new(Block {
             data: Vec::with_capacity(block_size),
             offset: AtomicUsize::new(data_size),
         });
+        self.current.store(block.as_mut(), Ordering::Release);
         let old = std::mem::replace(&mut arena.current, block);
         self.mem_size
             .fetch_add(old.data.capacity(), Ordering::Relaxed);

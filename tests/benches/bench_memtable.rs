@@ -3,8 +3,7 @@ use rand::{thread_rng, Rng, RngCore};
 use rocksdb_rs::{
     InlineSkipListMemtableRep, InternalKeyComparator, MemtableRep, SkipListMemtableRep,
 };
-use std::cmp::Ordering;
-use std::sync::atomic::{AtomicU64, AtomicUsize};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::time::Instant;
 
@@ -59,7 +58,8 @@ fn bench_skiplist<M: MemtableRep + 'static>(
 
     let cost = now.elapsed();
     println!(
-        "write {} keys cost time: {:?}",
+        "memtable size: {}, write {} keys cost time: {:?}",
+        memtable.mem_size(),
         global_sequence.load(std::sync::atomic::Ordering::Acquire),
         cost
     );
