@@ -1,11 +1,12 @@
-use super::list::{IterRef, Skiplist};
-use crate::common::format::{extract_user_key, pack_sequence_and_type, ValueType};
+use crate::common::format::extract_user_key;
 use crate::common::InternalKeyComparator;
 use crate::iterator::{AsyncIterator, InternalIterator};
+use crate::memtable::skiplist_rep::SkipListMemtableRep;
+use crate::memtable::MemtableRep;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub struct Memtable {
-    list: Skiplist,
+    rep: Box<dyn MemtableRep>,
     mem_next_logfile_number: AtomicU64,
     id: u64,
     comparator: InternalKeyComparator,
@@ -13,10 +14,6 @@ pub struct Memtable {
     first_seqno: AtomicU64,
     earliest_seqno: AtomicU64,
     max_write_buffer_size: usize,
-}
-
-pub struct MemIterator {
-    inner: IterRef<Skiplist>,
 }
 
 impl Memtable {
@@ -27,7 +24,10 @@ impl Memtable {
         earliest_seq: u64,
     ) -> Self {
         Self {
-            list: Skiplist::with_capacity(comparator.clone(), 4 * 1024 * 1024),
+            rep: Box::new(SkipListMemtableRep::new(
+                comparator.clone(),
+                max_write_buffer_size,
+            )),
             comparator,
             mem_next_logfile_number: AtomicU64::new(0),
             id,
@@ -39,12 +39,11 @@ impl Memtable {
     }
 
     pub fn new_iterator(&self) -> Box<dyn InternalIterator> {
-        let iter = self.list.iter();
-        Box::new(MemIterator { inner: iter })
+        self.rep.new_iterator()
     }
 
     pub fn new_async_iterator(&self) -> Box<dyn AsyncIterator> {
-        let iter = self.list.iter();
+        let iter = self.rep.new_iterator();
         Box::new(MemIteratorWrapper { inner: iter })
     }
 
@@ -52,30 +51,14 @@ impl Memtable {
         self.comparator.clone()
     }
 
-    pub fn add(&self, key: &[u8], value: &[u8], sequence: u64, tp: ValueType) {
+    pub fn add(&self, key: &[u8], value: &[u8], sequence: u64) {
         self.update_first_sequence(sequence);
-        let mut ukey = Vec::with_capacity(key.len() + 8);
-        ukey.extend_from_slice(key);
-        ukey.extend_from_slice(&pack_sequence_and_type(sequence, tp as u8).to_le_bytes());
-        self.insert_to(ukey.into(), value.into());
+        self.rep.add(key, value, sequence);
     }
 
     pub fn delete(&self, key: &[u8], sequence: u64) {
         self.update_first_sequence(sequence);
-        let mut ukey = Vec::with_capacity(key.len() + 8);
-        ukey.extend_from_slice(key);
-        ukey.extend_from_slice(
-            &pack_sequence_and_type(sequence, ValueType::TypeDeletion as u8).to_le_bytes(),
-        );
-        self.insert_to(ukey.into(), vec![]);
-    }
-
-    pub fn insert(&self, key: &[u8], value: &[u8]) {
-        self.insert_to(key.into(), value.into());
-    }
-
-    pub fn insert_to(&self, key: Vec<u8>, value: Vec<u8>) {
-        self.list.put(key, value);
+        self.rep.delete(key, sequence);
     }
 
     pub fn get_id(&self) -> u64 {
@@ -83,7 +66,7 @@ impl Memtable {
     }
 
     pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
-        let mut iter = self.list.iter();
+        let mut iter = self.rep.new_iterator();
         iter.seek(key);
         if iter.valid()
             && self
@@ -106,11 +89,11 @@ impl Memtable {
 
     // TODO: support write buffer manager
     pub fn should_flush(&self) -> bool {
-        self.list.mem_size() as usize > self.max_write_buffer_size
+        self.rep.mem_size() as usize > self.max_write_buffer_size
     }
 
     pub fn get_mem_size(&self) -> usize {
-        self.list.mem_size() as usize
+        self.rep.mem_size() as usize
     }
 
     pub fn is_empty(&self) -> bool {
@@ -153,46 +136,8 @@ impl Memtable {
     }
 }
 
-impl InternalIterator for MemIterator {
-    fn valid(&self) -> bool {
-        self.inner.valid()
-    }
-
-    fn seek(&mut self, key: &[u8]) {
-        self.inner.seek(key)
-    }
-
-    fn seek_to_first(&mut self) {
-        self.inner.seek_to_first();
-    }
-
-    fn seek_to_last(&mut self) {
-        self.inner.seek_to_last()
-    }
-
-    fn seek_for_prev(&mut self, key: &[u8]) {
-        self.inner.seek_for_prev(key)
-    }
-
-    fn next(&mut self) {
-        self.inner.next()
-    }
-
-    fn prev(&mut self) {
-        self.inner.prev()
-    }
-
-    fn key(&self) -> &[u8] {
-        self.inner.key().as_ref()
-    }
-
-    fn value(&self) -> &[u8] {
-        self.inner.value().as_ref()
-    }
-}
-
 pub struct MemIteratorWrapper {
-    inner: IterRef<Skiplist>,
+    inner: Box<dyn InternalIterator>,
 }
 
 #[async_trait::async_trait]

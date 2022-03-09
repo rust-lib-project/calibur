@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::common::format::ValueType;
 use crate::common::{
     make_current_file, make_log_file, parse_file_name, DBFileType, Error, Result,
     MAX_SEQUENCE_NUMBER,
@@ -295,9 +294,7 @@ impl Engine {
             match item {
                 WriteBatchItem::Put { cf, key, value } => {
                     let idx = check_memtable_cf(cf_mems, cf);
-                    cf_mems[idx]
-                        .1
-                        .add(key, value, sequence, ValueType::TypeValue);
+                    cf_mems[idx].1.add(key, value, sequence);
                 }
                 WriteBatchItem::Delete { cf, key } => {
                     let idx = check_memtable_cf(cf_mems, cf);

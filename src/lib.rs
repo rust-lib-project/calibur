@@ -14,10 +14,11 @@ mod util;
 mod version;
 mod wal;
 mod write_batch;
+pub use memtable::{InlineSkipListMemtableRep, MemtableRep, SkipListMemtableRep};
 
 pub use common::{
     AsyncFileSystem, Error, FileSystem, InternalKeyComparator, KeyComparator, Result,
-    SliceTransform, SyncPoxisFileSystem,
+    SliceTransform, SyncPoxisFileSystem, ValueType,
 };
 pub use db::*;
 pub use iterator::DBIterator;

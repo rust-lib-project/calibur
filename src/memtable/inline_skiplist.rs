@@ -62,8 +62,8 @@ impl Default for Splice {
 }
 
 pub trait Comparator: Sync {
-    unsafe fn compare_raw_key(&self, k1: *const u8, k2: *const u8) -> i32;
-    unsafe fn compare_key(&self, k1: *const u8, k2: &[u8]) -> i32;
+    unsafe fn compare_raw_key(&self, k1: *const u8, k2: *const u8) -> std::cmp::Ordering;
+    unsafe fn compare_key(&self, k1: *const u8, k2: &[u8]) -> std::cmp::Ordering;
 }
 
 pub struct InlineSkipList<C: Comparator> {
@@ -74,6 +74,23 @@ pub struct InlineSkipList<C: Comparator> {
 }
 
 impl<C: Comparator> InlineSkipList<C> {
+    pub fn new(arena: ConcurrentArena, cmp: C) -> Self {
+        let head = unsafe {
+            let head = Self::allocate_key_value(&arena, 0, MAX_HEIGHT);
+            for i in 0..MAX_HEIGHT {
+                (*head).set_next(i, null_mut());
+            }
+            head
+        };
+
+        Self {
+            head,
+            arena,
+            max_height: AtomicUsize::new(1),
+            cmp,
+        }
+    }
+
     pub fn random_height(&self) -> usize {
         let mut height = 1;
         let mut rng = thread_rng();
@@ -104,6 +121,10 @@ impl<C: Comparator> InlineSkipList<C> {
         }
     }
 
+    pub fn mem_size(&self) -> usize {
+        self.arena.mem_size()
+    }
+
     unsafe fn insert(&self, splice: &mut Splice, x: *mut Node) {
         let mut max_height = self.max_height.load(Ordering::Acquire);
         while splice.height > max_height {
@@ -113,8 +134,8 @@ impl<C: Comparator> InlineSkipList<C> {
                 Ordering::SeqCst,
                 Ordering::SeqCst,
             ) {
-                Ok(v) => {
-                    max_height = v;
+                Ok(_) => {
+                    max_height = splice.height;
                     break;
                 }
                 Err(v) => {
@@ -129,9 +150,9 @@ impl<C: Comparator> InlineSkipList<C> {
         for i in 0..max_height {
             let idx = max_height - i - 1;
             let (prev, next) =
-                self.find_splice_for_level(key, splice.prev[idx + 1], splice.next[idx + 1], i);
-            splice.prev[i] = prev;
-            splice.next[i] = next;
+                self.find_splice_for_level(key, splice.prev[idx + 1], splice.next[idx + 1], idx);
+            splice.prev[idx] = prev;
+            splice.next[idx] = next;
         }
         for i in 0..splice.height {
             loop {
@@ -162,7 +183,7 @@ impl<C: Comparator> InlineSkipList<C> {
     ) -> (*mut Node, *mut Node) {
         loop {
             let next = (*before).get_next(level);
-            if std::ptr::eq(next, after) || !self.key_is_after_node(key, before) {
+            if std::ptr::eq(next, after) || !self.key_is_after_node(key, next) {
                 return (before, next);
             }
             before = next;
@@ -170,10 +191,23 @@ impl<C: Comparator> InlineSkipList<C> {
     }
 
     unsafe fn key_is_after_node(&self, key: &[u8], x: *const Node) -> bool {
-        !std::ptr::eq(x, null_mut()) && self.cmp.compare_key((*x).key(), key) < 0
+        !std::ptr::eq(x, null_mut())
+            && self.cmp.compare_key((*x).key(), key) == std::cmp::Ordering::Less
     }
     unsafe fn raw_key_is_after_node(&self, key: *const u8, x: *const Node) -> bool {
-        !std::ptr::eq(x, null_mut()) && self.cmp.compare_raw_key((*x).key(), key) < 0
+        !std::ptr::eq(x, null_mut())
+            && self.cmp.compare_raw_key((*x).key(), key) == std::cmp::Ordering::Less
+    }
+
+    #[inline(always)]
+    unsafe fn allocate_key_value(
+        arena: &ConcurrentArena,
+        key_size: usize,
+        height: usize,
+    ) -> *mut Node {
+        let prefix = std::mem::size_of::<AtomicPtr<Node>>() * (height - 1);
+        let addr = arena.allocate(prefix + std::mem::size_of::<Node>() + key_size);
+        addr.add(prefix) as _
     }
 
     #[inline(always)]
@@ -216,13 +250,13 @@ impl<C: Comparator> InlineSkipList<C> {
         loop {
             let next = (*x).get_next(level);
             let cmp = if std::ptr::eq(next, null_mut()) || std::ptr::eq(next, last_bigger) {
-                1
+                std::cmp::Ordering::Greater
             } else {
                 self.cmp.compare_key((*next).key(), key_decoded)
             };
-            if cmp == 0 || (cmp > 0 && level == 0) {
+            if cmp.is_eq() || (cmp.is_gt() && level == 0) {
                 return next;
-            } else if cmp < 0 {
+            } else if cmp.is_lt() {
                 x = next;
             } else {
                 last_bigger = next;
@@ -267,6 +301,22 @@ impl<C: Comparator> SkipListIterator<C> {
     pub fn seek_to_first(&mut self) {
         unsafe {
             self.node = (*(*self.list).head).get_next(0);
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::InternalKeyComparator;
+    use crate::memtable::skiplist_rep::DefaultComparator;
+
+    #[test]
+    fn test_find_near() {
+        let comp = InternalKeyComparator::default();
+        let list = InlineSkipList::new(ConcurrentArena::new(), DefaultComparator::new(comp));
+        for i in 0..1000 {
+            let k = i.to_string().into_bytes();
+            list.add(&k, b"abcd", i);
         }
     }
 }

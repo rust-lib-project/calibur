@@ -239,7 +239,6 @@ async fn inner_next(inner: &mut InnerIterator) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::format::pack_sequence_and_type;
     use crate::common::InternalKeyComparator;
     use crate::memtable::Memtable;
     use tokio::runtime::Runtime;
@@ -299,18 +298,12 @@ mod tests {
 
         for i in 0..1000u64 {
             let key = format!("test_compaction-{}", i);
-            let mut k1 = key.into_bytes();
-            let l = k1.len();
+            let k1 = key.into_bytes();
 
-            let v0 = pack_sequence_and_type(10, ValueType::TypeValue as u8);
-            k1.extend_from_slice(&v0.to_le_bytes());
-            memtable.insert(&k1, b"v0");
+            memtable.add(&k1, b"v0", 10);
             expected_ret4.push((k1.clone(), b"v0".to_vec()));
-            k1.resize(l, 0);
 
-            let v1 = pack_sequence_and_type(12, ValueType::TypeValue as u8);
-            k1.extend_from_slice(&v1.to_le_bytes());
-            memtable.insert(&k1, b"v1");
+            memtable.add(&k1, b"v1", 12);
             if i % 2 != 0 {
                 expected_ret1.push((k1.clone(), b"v1".to_vec()));
                 expected_ret3.push((k1.clone(), b"v1".to_vec()));
@@ -319,24 +312,17 @@ mod tests {
             }
             expected_ret2.push((k1.clone(), b"v1".to_vec()));
 
-            k1.resize(l, 0);
-
             if i % 2 == 0 {
-                let v2 = pack_sequence_and_type(14, ValueType::TypeDeletion as u8);
-                k1.extend_from_slice(&v2.to_le_bytes());
-                memtable.insert(&k1, b"");
+                memtable.delete(&k1, 14);
                 if i % 4 != 0 {
                     expected_ret1.push((k1.clone(), vec![]));
                     expected_ret2.push((k1.clone(), vec![]));
                 }
                 expected_ret3.push((k1.clone(), vec![]));
                 expected_ret4.push((k1.clone(), vec![]));
-                k1.resize(l, 0);
             }
             if i % 4 == 0 {
-                let v3 = pack_sequence_and_type(16, ValueType::TypeValue as u8);
-                k1.extend_from_slice(&v3.to_le_bytes());
-                memtable.insert(&k1, b"v3");
+                memtable.add(&k1, b"v3", 16);
                 expected_ret1.push((k1.clone(), b"v3".to_vec()));
                 expected_ret2.push((k1.clone(), b"v3".to_vec()));
                 expected_ret3.push((k1.clone(), b"v3".to_vec()));

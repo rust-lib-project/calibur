@@ -29,6 +29,7 @@ impl Arena {
 pub struct ConcurrentArena {
     arena: Mutex<Arena>,
     current: AtomicPtr<Block>,
+    mem_size: AtomicUsize,
 }
 
 impl ConcurrentArena {
@@ -37,7 +38,12 @@ impl ConcurrentArena {
         ConcurrentArena {
             current: AtomicPtr::new(arena.current.as_mut()),
             arena: Mutex::new(arena),
+            mem_size: AtomicUsize::new(0),
         }
+    }
+
+    pub fn mem_size(&self) -> usize {
+        self.mem_size.load(Ordering::Relaxed)
     }
 
     pub unsafe fn allocate(&self, alloc_size: usize) -> *mut u8 {
@@ -70,6 +76,8 @@ impl ConcurrentArena {
             offset: AtomicUsize::new(data_size),
         });
         let old = std::mem::replace(&mut arena.current, block);
+        self.mem_size
+            .fetch_add(old.data.capacity(), Ordering::Relaxed);
         arena.blocks.push(old);
         return arena.current.data.as_mut_ptr();
     }
