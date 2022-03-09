@@ -6,9 +6,9 @@ mod skiplist;
 mod skiplist_rep;
 
 use crate::iterator::InternalIterator;
+pub use inline_skiplist::Splice;
 pub use memtable::Memtable;
 pub use skiplist_rep::{InlineSkipListMemtableRep, SkipListMemtableRep};
-pub use inline_skiplist::Splice;
 
 const MAX_HEIGHT: usize = 20;
 

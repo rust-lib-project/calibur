@@ -181,7 +181,7 @@ impl MemtableRep for InlineSkipListMemtableRep {
         self.list.add(splice, key, value, sequence)
     }
 
-    fn delete(&self,splice: &mut Self::Splice, key: &[u8], sequence: u64) {
+    fn delete(&self, splice: &mut Self::Splice, key: &[u8], sequence: u64) {
         self.list.delete(splice, key, sequence)
     }
 
