@@ -307,7 +307,7 @@ impl<C: Comparator> SkipListIterator<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::InternalKeyComparator;
+    use crate::common::{InternalKeyComparator, VALUE_TYPE_FOR_SEEK};
     use crate::memtable::skiplist_rep::DefaultComparator;
 
     #[test]
@@ -317,6 +317,32 @@ mod tests {
         for i in 0..1000 {
             let k = i.to_string().into_bytes();
             list.add(&k, b"abcd", i);
+        }
+        let mut tmp: [u8; 5] = [0u8; 5];
+        let mut buf = vec![];
+        for i in 0..1000 {
+            let k = i.to_string().into_bytes();
+            let offset = encode_var_uint32(&mut tmp, k.len() as u32 + 8);
+            buf.clear();
+            buf.extend_from_slice(&tmp[..offset]);
+            buf.extend_from_slice(&k);
+            buf.extend_from_slice(
+                &pack_sequence_and_type(10000, VALUE_TYPE_FOR_SEEK).to_le_bytes(),
+            );
+            unsafe {
+                let mut iter = SkipListIterator::new(&list);
+                iter.seek(buf.as_ptr());
+                assert!(iter.valid());
+                let mut current_offset = 0;
+                let current_key_size = get_var_uint32(
+                    std::slice::from_raw_parts(iter.key(), 5),
+                    &mut current_offset,
+                )
+                .unwrap() as usize;
+                let key =
+                    std::slice::from_raw_parts(iter.key().add(current_offset), current_key_size);
+                assert_eq!(key[..(key.len() - 8)].to_vec(), k);
+            }
         }
     }
 }
