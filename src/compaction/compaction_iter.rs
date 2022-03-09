@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn test_compaction_iterator() {
         let comparator = InternalKeyComparator::default();
-        let memtable = Memtable::new(10, 10, comparator.clone(), MAX_SEQUENCE_NUMBER);
+        let memtable = Memtable::new(10, 10000000, comparator.clone(), MAX_SEQUENCE_NUMBER);
 
         // no pending snapshot
         let mut expected_ret1 = vec![];

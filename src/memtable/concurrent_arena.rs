@@ -55,22 +55,18 @@ impl Default for ArenaShard {
 impl ArenaShard {
     unsafe fn allocate_from_current_block(&self, data_size: usize) -> *mut u8 {
         let current = self.current.load(Ordering::Acquire);
-        if (*current).offset.load(Ordering::Acquire) + data_size < BLOCK_DATA_SIZE {
-            let offset = (*current).offset.fetch_add(data_size, Ordering::SeqCst);
-            if offset + data_size < BLOCK_DATA_SIZE {
-                return (*current).data.as_mut_ptr().add(offset) as _;
-            }
+        let offset = (*current).offset.fetch_add(data_size, Ordering::SeqCst);
+        if offset + data_size < BLOCK_DATA_SIZE {
+            return (*current).data.as_mut_ptr().add(offset) as _;
         }
         return null_mut();
     }
 
     unsafe fn allocate_heap(&self, data_size: usize, mem_size: &AtomicUsize) -> *mut u8 {
         let mut arena = self.arena.lock();
-        if arena.current.offset.load(Ordering::Acquire) + data_size < BLOCK_DATA_SIZE {
-            let offset = arena.current.offset.fetch_add(data_size, Ordering::SeqCst);
-            if offset + data_size < BLOCK_DATA_SIZE {
-                return arena.current.data.as_mut_ptr().add(offset) as _;
-            }
+        let offset = arena.current.offset.fetch_add(data_size, Ordering::SeqCst);
+        if offset + data_size < BLOCK_DATA_SIZE {
+            return arena.current.data.as_mut_ptr().add(offset) as _;
         }
 
         let mut block_size = BLOCK_DATA_SIZE;
@@ -131,7 +127,7 @@ pub struct SharedArena {
 impl SharedArena {
     pub fn new() -> Self {
         let mut arenas = vec![];
-        for _ in 0..8 {
+        for _ in 0..4 {
             arenas.push(ArenaShard::default());
         }
         SharedArena {
@@ -156,7 +152,7 @@ impl Arena for SharedArena {
             *x.borrow_mut() = self.id.fetch_add(1, Ordering::SeqCst);
             *x.borrow()
         });
-        let arena = &self.arenas[idx % 8];
+        let arena = &self.arenas[idx % 4];
         let addr = arena.allocate_from_current_block(data_size);
         if !addr.is_null() {
             return addr;
