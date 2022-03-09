@@ -16,7 +16,7 @@ fn bench_skiplist<M: MemtableRep + 'static>(
 ) {
     let now = Instant::now();
     let mut pools = vec![];
-    let mut global_sequence = Arc::new(AtomicU64::new(0));
+    let global_sequence = Arc::new(AtomicU64::new(0));
     for _ in 0..4 {
         let sequence = global_sequence.clone();
         let m = memtable.clone();
@@ -24,6 +24,7 @@ fn bench_skiplist<M: MemtableRep + 'static>(
             let mut rng = thread_rng();
             let mut v: [u8; 256] = [0u8; 256];
             rng.fill(&mut v);
+            let mut splice = M::Splice::default();
             for _ in 0..10000 {
                 let last_sequence = sequence.fetch_add(100, std::sync::atomic::Ordering::SeqCst);
                 if m.mem_size() + 1000 > max_write_buffer_size || last_sequence > max_key_count {
@@ -37,7 +38,12 @@ fn bench_skiplist<M: MemtableRep + 'static>(
                     let j = k + i * gap as u64;
                     key.resize(l, 0);
                     key.extend_from_slice(&j.to_le_bytes());
-                    m.add(&key, &v[..(i as usize + 20)], last_sequence + i);
+                    m.add(
+                        &mut splice,
+                        &key,
+                        &v[..(i as usize + 20)],
+                        last_sequence + i,
+                    );
                     if m.mem_size() + 1000 > max_write_buffer_size {
                         break;
                     }
@@ -53,8 +59,7 @@ fn bench_skiplist<M: MemtableRep + 'static>(
 
     let cost = now.elapsed();
     println!(
-        "exepcted keys: {}, write {} keys cost time: {:?}",
-        max_key_count,
+        "write {} keys cost time: {:?}",
         global_sequence.load(std::sync::atomic::Ordering::Acquire),
         cost
     );
@@ -62,15 +67,21 @@ fn bench_skiplist<M: MemtableRep + 'static>(
 
 fn bench_memtable(c: &mut Criterion) {
     let comparator = InternalKeyComparator::default();
-    let write_buffer_size: usize = 512 * 1024 * 1024;
-    let max_key_count = 2 * 1024 * 1024;
+    let write_buffer_size: usize = 256 * 1024 * 1024;
+    let max_key_count = 1 * 1024 * 1024;
     {
+        let now = Instant::now();
         let memtable = SkipListMemtableRep::new(comparator.clone(), write_buffer_size);
         bench_skiplist(c, Arc::new(memtable), write_buffer_size, max_key_count);
+        let cost = now.elapsed();
+        println!("cost time: {:?}", cost);
     }
     {
+        let now = Instant::now();
         let memtable = InlineSkipListMemtableRep::new(comparator);
         bench_skiplist(c, Arc::new(memtable), write_buffer_size, max_key_count);
+        let cost = now.elapsed();
+        println!("cost time: {:?}", cost);
     }
 }
 
