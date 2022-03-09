@@ -6,7 +6,7 @@ use crate::memtable::MemtableRep;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub struct Memtable {
-    rep: Box<dyn MemtableRep>,
+    rep: Box<dyn MemtableRep<Splice=()>>,
     mem_next_logfile_number: AtomicU64,
     id: u64,
     comparator: InternalKeyComparator,
@@ -53,12 +53,12 @@ impl Memtable {
 
     pub fn add(&self, key: &[u8], value: &[u8], sequence: u64) {
         self.update_first_sequence(sequence);
-        self.rep.add(key, value, sequence);
+        self.rep.add(&mut (), key, value, sequence);
     }
 
     pub fn delete(&self, key: &[u8], sequence: u64) {
         self.update_first_sequence(sequence);
-        self.rep.delete(key, sequence);
+        self.rep.delete(&mut (),key, sequence);
     }
 
     pub fn get_id(&self) -> u64 {

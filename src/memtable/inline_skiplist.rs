@@ -45,7 +45,7 @@ impl Node {
     }
 }
 
-struct Splice {
+pub struct Splice {
     height: usize,
     prev: [*mut Node; MAX_POSSIBLE_HEIGHT],
     next: [*mut Node; MAX_POSSIBLE_HEIGHT],
@@ -103,21 +103,19 @@ impl<C: Comparator> InlineSkipList<C> {
         height
     }
 
-    pub fn add<'a>(&self, key: &[u8], value: &[u8], sequence: u64) {
-        let mut splice = Splice::default();
+    pub fn add(&self, splice: &mut Splice, key: &[u8], value: &[u8], sequence: u64) {
         unsafe {
             let (height, node) = self.encode_key_value(key, value, sequence, ValueType::TypeValue);
             splice.height = height;
-            self.insert(&mut splice, node);
+            self.insert(splice, node);
         }
     }
 
-    pub fn delete(&self, key: &[u8], sequence: u64) {
-        let mut splice = Splice::default();
+    pub fn delete(&self, splice: &mut Splice, key: &[u8], sequence: u64) {
         unsafe {
             let (height, node) = self.encode_key_value(key, &[], sequence, ValueType::TypeDeletion);
             splice.height = height;
-            self.insert(&mut splice, node);
+            self.insert(splice, node);
         }
     }
 
@@ -314,9 +312,10 @@ mod tests {
     fn test_find_near() {
         let comp = InternalKeyComparator::default();
         let list = InlineSkipList::new(ConcurrentArena::new(), DefaultComparator::new(comp));
+        let mut splice = Splice::default();
         for i in 0..1000 {
             let k = i.to_string().into_bytes();
-            list.add(&k, b"abcd", i);
+            list.add(&mut splice, &k, b"abcd", i);
         }
         let mut tmp: [u8; 5] = [0u8; 5];
         let mut buf = vec![];

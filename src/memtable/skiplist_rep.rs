@@ -171,16 +171,18 @@ impl InlineSkipListMemtableRep {
 }
 
 impl MemtableRep for InlineSkipListMemtableRep {
+    type Splice = super::inline_skiplist::Splice;
+
     fn new_iterator(&self) -> Box<dyn InternalIterator> {
         todo!()
     }
 
-    fn add(&self, key: &[u8], value: &[u8], sequence: u64) {
-        self.list.add(key, value, sequence)
+    fn add(&self, splice: &mut Self::Splice, key: &[u8], value: &[u8], sequence: u64) {
+        self.list.add(splice, key, value, sequence)
     }
 
-    fn delete(&self, key: &[u8], sequence: u64) {
-        self.list.delete(key, sequence)
+    fn delete(&self,splice: &mut Self::Splice, key: &[u8], sequence: u64) {
+        self.list.delete(splice, key, sequence)
     }
 
     fn mem_size(&self) -> usize {
@@ -243,13 +245,15 @@ impl InternalIterator for MemIterator {
 }
 
 impl MemtableRep for SkipListMemtableRep {
+    type Splice = ();
+
     fn new_iterator(&self) -> Box<dyn InternalIterator> {
         Box::new(MemIterator {
             inner: self.list.iter(),
         })
     }
 
-    fn add(&self, key: &[u8], value: &[u8], sequence: u64) {
+    fn add(&self, _: &mut (), key: &[u8], value: &[u8], sequence: u64) {
         let mut ukey = Vec::with_capacity(key.len() + 8);
         ukey.extend_from_slice(key);
         ukey.extend_from_slice(
@@ -258,7 +262,7 @@ impl MemtableRep for SkipListMemtableRep {
         self.list.put(ukey, value.to_vec());
     }
 
-    fn delete(&self, key: &[u8], sequence: u64) {
+    fn delete(&self, _: &mut (), key: &[u8], sequence: u64) {
         let mut ukey = Vec::with_capacity(key.len() + 8);
         ukey.extend_from_slice(key);
         ukey.extend_from_slice(

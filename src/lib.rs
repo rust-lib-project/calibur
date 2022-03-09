@@ -14,7 +14,7 @@ mod util;
 mod version;
 mod wal;
 mod write_batch;
-pub use memtable::{InlineSkipListMemtableRep, MemtableRep, SkipListMemtableRep};
+pub use memtable::{InlineSkipListMemtableRep, MemtableRep, SkipListMemtableRep, Splice};
 
 pub use common::{
     AsyncFileSystem, Error, FileSystem, InternalKeyComparator, KeyComparator, Result,
