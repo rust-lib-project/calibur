@@ -1,11 +1,13 @@
 mod arena;
 mod concurrent_arena;
+mod context;
 mod inline_skiplist;
 mod memtable;
 mod skiplist;
 mod skiplist_rep;
 
 use crate::iterator::InternalIterator;
+pub use context::MemTableContext;
 pub use inline_skiplist::Splice;
 pub use memtable::Memtable;
 pub use skiplist_rep::{InlineSkipListMemtableRep, SkipListMemtableRep};

@@ -239,8 +239,9 @@ async fn inner_next(inner: &mut InnerIterator) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::format::pack_sequence_and_type_to_key;
     use crate::common::InternalKeyComparator;
-    use crate::memtable::Memtable;
+    use crate::memtable::{MemTableContext, Memtable};
     use tokio::runtime::Runtime;
 
     fn test_compaction_with_snapshot(
@@ -250,6 +251,7 @@ mod tests {
         expected_ret: Vec<(Vec<u8>, Vec<u8>)>,
         bottommost_level: bool,
     ) {
+        println!("test snapshots: {:?}", snapshots);
         let iter = memtable.new_iterator();
         let mut compaction_iter = CompactionIter::new(
             iter,
@@ -272,7 +274,7 @@ mod tests {
         let ret = r.block_on(f);
         assert_eq!(ret.len(), expected_ret.len());
         for i in 0..ret.len() {
-            assert_eq!(ret[i], expected_ret[i]);
+            assert_eq!(ret[i], expected_ret[i], "the {}th case failed", i);
         }
     }
 
@@ -280,6 +282,7 @@ mod tests {
     fn test_compaction_iterator() {
         let comparator = InternalKeyComparator::default();
         let memtable = Memtable::new(10, 10000000, comparator.clone(), MAX_SEQUENCE_NUMBER);
+        let mut ctx = MemTableContext::default();
 
         // no pending snapshot
         let mut expected_ret1 = vec![];
@@ -300,34 +303,40 @@ mod tests {
             let key = format!("test_compaction-{}", i);
             let k1 = key.into_bytes();
 
-            memtable.add(&k1, b"v0", 10);
-            expected_ret4.push((k1.clone(), b"v0".to_vec()));
+            memtable.add(&mut ctx, &k1, b"v0", 10);
+            expected_ret4.push((
+                pack_sequence_and_type_to_key(&k1, 10, ValueType::TypeValue),
+                b"v0".to_vec(),
+            ));
 
-            memtable.add(&k1, b"v1", 12);
+            memtable.add(&mut ctx, &k1, b"v1", 12);
+            let key = pack_sequence_and_type_to_key(&k1, 12, ValueType::TypeValue);
             if i % 2 != 0 {
-                expected_ret1.push((k1.clone(), b"v1".to_vec()));
-                expected_ret3.push((k1.clone(), b"v1".to_vec()));
-                expected_ret4.push((k1.clone(), b"v1".to_vec()));
-                expected_ret5.push((k1.clone(), b"v1".to_vec()));
+                expected_ret1.push((key.clone(), b"v1".to_vec()));
+                expected_ret3.push((key.clone(), b"v1".to_vec()));
+                expected_ret4.push((key.clone(), b"v1".to_vec()));
+                expected_ret5.push((key.clone(), b"v1".to_vec()));
             }
-            expected_ret2.push((k1.clone(), b"v1".to_vec()));
+            expected_ret2.push((key.clone(), b"v1".to_vec()));
 
             if i % 2 == 0 {
-                memtable.delete(&k1, 14);
+                memtable.delete(&mut ctx, &k1, 14);
+                let key = pack_sequence_and_type_to_key(&k1, 14, ValueType::TypeDeletion);
                 if i % 4 != 0 {
-                    expected_ret1.push((k1.clone(), vec![]));
-                    expected_ret2.push((k1.clone(), vec![]));
+                    expected_ret1.push((key.clone(), vec![]));
+                    expected_ret2.push((key.clone(), vec![]));
                 }
-                expected_ret3.push((k1.clone(), vec![]));
-                expected_ret4.push((k1.clone(), vec![]));
+                expected_ret3.push((key.clone(), vec![]));
+                expected_ret4.push((key.clone(), vec![]));
             }
             if i % 4 == 0 {
-                memtable.add(&k1, b"v3", 16);
-                expected_ret1.push((k1.clone(), b"v3".to_vec()));
-                expected_ret2.push((k1.clone(), b"v3".to_vec()));
-                expected_ret3.push((k1.clone(), b"v3".to_vec()));
-                expected_ret4.push((k1.clone(), b"v3".to_vec()));
-                expected_ret5.push((k1, b"v3".to_vec()));
+                memtable.add(&mut ctx, &k1, b"v3", 16);
+                let key = pack_sequence_and_type_to_key(&k1, 16, ValueType::TypeValue);
+                expected_ret1.push((key.clone(), b"v3".to_vec()));
+                expected_ret2.push((key.clone(), b"v3".to_vec()));
+                expected_ret3.push((key.clone(), b"v3".to_vec()));
+                expected_ret4.push((key.clone(), b"v3".to_vec()));
+                expected_ret5.push((key, b"v3".to_vec()));
             }
         }
         expected_ret1.sort_by(|a, b| comparator.compare_key(&a.0, &b.0));

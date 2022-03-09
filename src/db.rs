@@ -20,7 +20,7 @@ use crate::options::{ColumnFamilyDescriptor, DBOptions, ImmutableDBOptions, Read
 use crate::version::{KernelNumberContext, VersionSet};
 use crate::wal::{WALScheduler, WALTask, WALWriter, WriteMemtableTask};
 use crate::write_batch::{ReadOnlyWriteBatch, WriteBatch, WriteBatchItem};
-use crate::ColumnFamilyOptions;
+use crate::{ColumnFamilyOptions, WriteOptions};
 
 use crate::pipeline::PipelineCommitQueue;
 use crate::version::snapshot::{Snapshot, SnapshotList};
@@ -83,26 +83,21 @@ impl Engine {
     }
 
     pub async fn write(&mut self, wb: &mut WriteBatch) -> Result<()> {
-        self.write_opt(wb, false, false).await
+        self.write_opt(wb, &mut WriteOptions::default()).await
     }
 
-    pub async fn write_opt(
-        &mut self,
-        wb: &mut WriteBatch,
-        disable_wal: bool,
-        sync: bool,
-    ) -> Result<()> {
+    pub async fn write_opt(&mut self, wb: &mut WriteBatch, opts: &mut WriteOptions) -> Result<()> {
         let step1 = time::precise_time_ns();
         let rwb = wb.to_raw();
         let rwb = self
             .wal_scheduler
-            .schedule_writebatch(rwb, sync, disable_wal)
+            .schedule_writebatch(rwb, opts.sync, opts.disable_wal)
             .await?;
         let step2 = time::precise_time_ns();
         let sequence = rwb.wb.get_sequence();
         let last_commit_sequence = sequence - 1;
         let commit_sequence = sequence + rwb.wb.count() as u64 - 1;
-        self.write_memtable(&rwb.wb, sequence, &rwb.mems)?;
+        self.write_memtable(&rwb.wb, opts, sequence, &rwb.mems)?;
         let step3 = time::precise_time_ns();
         self.commit_queue
             .commit(last_commit_sequence, commit_sequence);
@@ -255,11 +250,12 @@ impl Engine {
             let mut log_reader = LogReader::new(reader);
             let mut buf = vec![];
             let mut next_seq = self.kernel.last_sequence();
+            let mut write_opts = WriteOptions::default();
             while log_reader.read_record(&mut buf).await? {
                 let wb = ReadOnlyWriteBatch::try_from(buf.clone())?;
                 let count = wb.count() as u64;
                 let sequence = wb.get_sequence();
-                self.write_memtable(&wb, sequence, &cf_mems)?;
+                self.write_memtable(&wb, &mut write_opts, sequence, &cf_mems)?;
                 next_seq = sequence + count - 1;
                 // TODO: flush if the memtable is full
             }
@@ -271,6 +267,7 @@ impl Engine {
     fn write_memtable(
         &mut self,
         wb: &ReadOnlyWriteBatch,
+        opts: &mut WriteOptions,
         mut sequence: u64,
         cf_mems: &[(u32, Arc<Memtable>)],
     ) -> Result<()> {
@@ -294,11 +291,11 @@ impl Engine {
             match item {
                 WriteBatchItem::Put { cf, key, value } => {
                     let idx = check_memtable_cf(cf_mems, cf);
-                    cf_mems[idx].1.add(key, value, sequence);
+                    cf_mems[idx].1.add(&mut opts.ctx, key, value, sequence);
                 }
                 WriteBatchItem::Delete { cf, key } => {
                     let idx = check_memtable_cf(cf_mems, cf);
-                    cf_mems[idx].1.delete(key, sequence);
+                    cf_mems[idx].1.delete(&mut opts.ctx, key, sequence);
                 }
             }
             sequence += 1;
@@ -565,7 +562,7 @@ mod tests {
     use super::*;
     use crate::common::AsyncFileSystem;
     use std::thread::sleep;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     use tempfile::TempDir;
     use tokio::runtime::Runtime;
 
@@ -637,28 +634,18 @@ mod tests {
             .unwrap();
         let mut engine = build_small_write_buffer_db(&dir);
         let r = Runtime::new().unwrap();
-        let mut bench_ret = vec![0; 10000];
+        let bench_ret = vec![0; 10000];
         let mut wb = WriteBatch::new();
         const TOTAL_CASES: usize = 100;
-        let mut prev_perf = 0;
-        let total_time = Instant::now();
+        // let total_time = Instant::now();
         for i in 0..TOTAL_CASES {
             for j in 0..100 {
                 let k = (i * 100 + j).to_string();
                 wb.put_cf(0, k.as_bytes(), b"v00000000000001");
             }
-            r.block_on(engine.write_opt(&mut wb, false, false)).unwrap();
+            r.block_on(engine.write(&mut wb)).unwrap();
             wb.clear();
-            let now = PERF_CTX.with(|ctx| ctx.borrow().write_wal);
-            let c = now - prev_perf;
-            prev_perf = now;
-            if c / 100 >= 10000 {
-                println!("tail latency: {:?}ns", c);
-            } else {
-                bench_ret[(c / 100) as usize] += 1;
-            }
         }
-        println!("total cost time: {:?}", total_time.elapsed());
         for i in 0..10000 {
             if bench_ret[i] > 0 {
                 let f = (bench_ret[i] * 100) as f64 / TOTAL_CASES as f64;
@@ -706,7 +693,7 @@ mod tests {
             let k = (100 + j).to_string();
             wb.put_cf(0, k.as_bytes(), b"v00000000000001");
         }
-        r.block_on(engine.write_opt(&mut wb, false, false)).unwrap();
+        r.block_on(engine.write(&mut wb)).unwrap();
         wb.clear();
         let snapshot = engine.get_snapshot();
         for j in 100..200 {
@@ -719,8 +706,8 @@ mod tests {
         r.block_on(iter.seek_to_first());
         for j in 0..100 {
             let k = (100 + j).to_string();
-            assert_eq!(k.as_bytes(), iter.key());
-            assert_eq!(b"v00000000000001", iter.value());
+            assert_eq!(k.as_bytes(), iter.key(), "{} case", j);
+            assert_eq!(b"v00000000000001", iter.value(), "{} case", j);
             r.block_on(iter.next());
         }
         assert!(!iter.valid());

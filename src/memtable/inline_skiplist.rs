@@ -61,6 +61,16 @@ impl Default for Splice {
     }
 }
 
+impl Clone for Splice {
+    fn clone(&self) -> Self {
+        Self {
+            height: 0,
+            prev: [null_mut(); MAX_POSSIBLE_HEIGHT],
+            next: [null_mut(); MAX_POSSIBLE_HEIGHT],
+        }
+    }
+}
+
 pub trait Comparator: Sync {
     unsafe fn compare_raw_key(&self, k1: *const u8, k2: *const u8) -> std::cmp::Ordering;
     unsafe fn compare_key(&self, k1: *const u8, k2: &[u8]) -> std::cmp::Ordering;
@@ -266,7 +276,7 @@ pub struct SkipListIterator<C: Comparator, A: Arena> {
 }
 
 impl<C: Comparator, A: Arena> SkipListIterator<C, A> {
-    fn new(list: *const InlineSkipList<C, A>) -> Self {
+    pub fn new(list: *const InlineSkipList<C, A>) -> Self {
         Self {
             list,
             node: null_mut(),
@@ -292,9 +302,29 @@ impl<C: Comparator, A: Arena> SkipListIterator<C, A> {
         unimplemented!()
     }
 
-    pub fn seek_to_first(&mut self) {
-        unsafe {
-            self.node = (*(*self.list).head).get_next(0);
+    pub unsafe fn seek_to_first(&mut self) {
+        self.node = (*(*self.list).head).get_next(0);
+    }
+
+    pub unsafe fn seek_to_last(&mut self) {
+        let mut x = (*self.list).head;
+        let mut level = (*self.list).max_height.load(Ordering::Acquire) - 1;
+        loop {
+            let nxt = (*x).get_next(level);
+            if nxt.is_null() {
+                if level == 0 {
+                    break;
+                } else {
+                    level -= 1;
+                }
+            } else {
+                x = nxt;
+            }
+        }
+        if !std::ptr::eq(x, (*self.list).head) {
+            self.node = x;
+        } else {
+            self.node = null_mut();
         }
     }
 }
@@ -302,7 +332,7 @@ impl<C: Comparator, A: Arena> SkipListIterator<C, A> {
 mod tests {
     use super::*;
     use crate::common::{InternalKeyComparator, VALUE_TYPE_FOR_SEEK};
-    use crate::memtable::concurrent_arena::{ConcurrentArena, SharedArena};
+    use crate::memtable::concurrent_arena::SharedArena;
     use crate::memtable::skiplist_rep::DefaultComparator;
 
     #[test]

@@ -1,12 +1,13 @@
 use crate::common::format::extract_user_key;
 use crate::common::InternalKeyComparator;
 use crate::iterator::{AsyncIterator, InternalIterator};
-use crate::memtable::skiplist_rep::SkipListMemtableRep;
+use crate::memtable::context::MemTableContext;
 use crate::memtable::MemtableRep;
+use crate::InlineSkipListMemtableRep;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub struct Memtable {
-    rep: Box<dyn MemtableRep<Splice = ()>>,
+    rep: Box<InlineSkipListMemtableRep>,
     mem_next_logfile_number: AtomicU64,
     id: u64,
     comparator: InternalKeyComparator,
@@ -24,10 +25,7 @@ impl Memtable {
         earliest_seq: u64,
     ) -> Self {
         Self {
-            rep: Box::new(SkipListMemtableRep::new(
-                comparator.clone(),
-                max_write_buffer_size,
-            )),
+            rep: Box::new(InlineSkipListMemtableRep::new(comparator.clone())),
             comparator,
             mem_next_logfile_number: AtomicU64::new(0),
             id,
@@ -51,14 +49,14 @@ impl Memtable {
         self.comparator.clone()
     }
 
-    pub fn add(&self, key: &[u8], value: &[u8], sequence: u64) {
+    pub fn add(&self, ctx: &mut MemTableContext, key: &[u8], value: &[u8], sequence: u64) {
         self.update_first_sequence(sequence);
-        self.rep.add(&mut (), key, value, sequence);
+        self.rep.add(&mut ctx.splice, key, value, sequence);
     }
 
-    pub fn delete(&self, key: &[u8], sequence: u64) {
+    pub fn delete(&self, ctx: &mut MemTableContext, key: &[u8], sequence: u64) {
         self.update_first_sequence(sequence);
-        self.rep.delete(&mut (), key, sequence);
+        self.rep.delete(&mut ctx.splice, key, sequence);
     }
 
     pub fn get_id(&self) -> u64 {

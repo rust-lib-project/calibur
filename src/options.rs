@@ -1,4 +1,5 @@
 use crate::common::{FileSystem, InternalKeyComparator, InternalKeySliceTransform};
+use crate::memtable::MemTableContext;
 use crate::table::{BlockBasedTableFactory, TableFactory};
 use crate::{KeyComparator, SliceTransform, SyncPoxisFileSystem};
 use std::sync::Arc;
@@ -111,4 +112,11 @@ pub struct ReadOptions {
     pub total_order_seek: bool,
     pub prefix_same_as_start: bool,
     pub skip_filter: bool,
+}
+
+#[derive(Default, Clone)]
+pub struct WriteOptions {
+    pub ctx: MemTableContext,
+    pub disable_wal: bool,
+    pub sync: bool,
 }

@@ -2,7 +2,7 @@ use super::inline_skiplist::Comparator;
 use crate::common::format::pack_sequence_and_type;
 use crate::common::ValueType;
 use crate::iterator::InternalIterator;
-use crate::memtable::concurrent_arena::{ConcurrentArena, SharedArena};
+use crate::memtable::concurrent_arena::SharedArena;
 use crate::memtable::inline_skiplist::{InlineSkipList, SkipListIterator};
 use crate::memtable::skiplist::{IterRef, Skiplist};
 use crate::memtable::MemtableRep;
@@ -80,16 +80,14 @@ pub fn encode_key<'a>(buf: &'a mut Vec<u8>, target: &[u8]) -> &'a [u8] {
     buf.as_slice()
 }
 
-impl InternalIterator for InlineSkipListMemtableIter {
-    fn valid(&self) -> bool {
-        self.iter.valid()
-    }
-
-    fn seek(&mut self, key: &[u8]) {
-        let target = encode_key(&mut self.buf, key);
-        unsafe {
-            self.iter.seek(target.as_ptr());
-            if self.iter.valid() {
+impl InlineSkipListMemtableIter {
+    #[inline(always)]
+    unsafe fn init_offset(&mut self) {
+        if self.iter.valid() {
+            self.current_key_size = *(self.iter.key()) as usize;
+            if self.current_key_size < 128 {
+                self.current_offset = 1;
+            } else {
                 self.current_offset = 0;
                 self.current_key_size = get_var_uint32(
                     std::slice::from_raw_parts(self.iter.key(), 5),
@@ -99,13 +97,33 @@ impl InternalIterator for InlineSkipListMemtableIter {
             }
         }
     }
+}
+
+impl InternalIterator for InlineSkipListMemtableIter {
+    fn valid(&self) -> bool {
+        self.iter.valid()
+    }
+
+    fn seek(&mut self, key: &[u8]) {
+        let target = encode_key(&mut self.buf, key);
+        unsafe {
+            self.iter.seek(target.as_ptr());
+            self.init_offset();
+        }
+    }
 
     fn seek_to_first(&mut self) {
-        self.iter.seek_to_first();
+        unsafe {
+            self.iter.seek_to_first();
+            self.init_offset();
+        }
     }
 
     fn seek_to_last(&mut self) {
-        unimplemented!()
+        unsafe {
+            self.iter.seek_to_last();
+            self.init_offset();
+        }
     }
 
     fn seek_for_prev(&mut self, _key: &[u8]) {
@@ -115,14 +133,7 @@ impl InternalIterator for InlineSkipListMemtableIter {
     fn next(&mut self) {
         unsafe {
             self.iter.next();
-            if self.iter.valid() {
-                self.current_offset = 0;
-                self.current_key_size = get_var_uint32(
-                    std::slice::from_raw_parts(self.iter.key(), 5),
-                    &mut self.current_offset,
-                )
-                .unwrap() as usize;
-            }
+            self.init_offset();
         }
     }
 
@@ -174,7 +185,12 @@ impl MemtableRep for InlineSkipListMemtableRep {
     type Splice = super::inline_skiplist::Splice;
 
     fn new_iterator(&self) -> Box<dyn InternalIterator> {
-        todo!()
+        Box::new(InlineSkipListMemtableIter {
+            iter: SkipListIterator::new(&self.list),
+            current_offset: 0,
+            current_key_size: 0,
+            buf: vec![],
+        })
     }
 
     fn add(&self, splice: &mut Self::Splice, key: &[u8], value: &[u8], sequence: u64) {
