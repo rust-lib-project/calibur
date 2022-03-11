@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::hash_map::RandomState;
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -185,7 +185,7 @@ impl Engine {
         let version_set = manifest.get_version_set();
         let files = immutable_options
             .fs
-            .list_files(PathBuf::from(immutable_options.db_path.clone()))?;
+            .list_files(Path::new(immutable_options.db_path.as_str()))?;
         let mut logs = vec![];
         for f in files {
             let fname = f.file_name().unwrap().to_str().ok_or_else(|| {
@@ -247,7 +247,7 @@ impl Engine {
             }
             self.kernel.mark_file_number_used(log_number);
             let fname = make_log_file(&self.options.db_path, log_number);
-            let reader = self.options.fs.open_sequential_file(fname)?;
+            let reader = self.options.fs.open_sequential_file(&fname)?;
             let mut log_reader = LogReader::new(reader);
             let mut buf = vec![];
             let mut next_seq = self.kernel.last_sequence();

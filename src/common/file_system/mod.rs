@@ -60,27 +60,27 @@ pub struct IOOption {
 pub trait FileSystem: Send + Sync {
     fn open_writable_file_in(
         &self,
-        path: PathBuf,
+        path: &Path,
         file_name: String,
     ) -> Result<Box<WritableFileWriter>> {
         let f = path.join(file_name);
-        self.open_writable_file_writer(f)
+        self.open_writable_file_writer(&f)
     }
 
-    fn open_writable_file_writer(&self, file_name: PathBuf) -> Result<Box<WritableFileWriter>>;
+    fn open_writable_file_writer(&self, file_name: &Path) -> Result<Box<WritableFileWriter>>;
     fn open_writable_file_writer_opt(
         &self,
-        file_name: PathBuf,
+        file_name: &Path,
         _opts: &IOOption,
     ) -> Result<Box<WritableFileWriter>> {
         self.open_writable_file_writer(file_name)
     }
 
-    fn open_random_access_file(&self, p: PathBuf) -> Result<Box<RandomAccessFileReader>>;
+    fn open_random_access_file(&self, p: &Path) -> Result<Box<RandomAccessFileReader>>;
 
-    fn open_sequential_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>>;
+    fn open_sequential_file(&self, path: &Path) -> Result<Box<SequentialFileReader>>;
 
-    async fn read_file_content(&self, path: PathBuf) -> Result<Vec<u8>> {
+    async fn read_file_content(&self, path: &Path) -> Result<Vec<u8>> {
         let mut reader = self.open_sequential_file(path)?;
         let sz = reader.file_size();
         let mut data = vec![0u8; sz];
@@ -100,10 +100,10 @@ pub trait FileSystem: Send + Sync {
         Ok(data)
     }
 
-    fn remove(&self, path: PathBuf) -> Result<()>;
-    fn rename(&self, origin: PathBuf, target: PathBuf) -> Result<()>;
+    fn remove(&self, path: &Path) -> Result<()>;
+    fn rename(&self, origin: &Path, target: &Path) -> Result<()>;
 
-    fn list_files(&self, path: PathBuf) -> Result<Vec<PathBuf>>;
+    fn list_files(&self, path: &Path) -> Result<Vec<PathBuf>>;
 
     fn file_exist(&self, path: &Path) -> Result<bool>;
 }
@@ -199,7 +199,7 @@ impl SequentialFile for InMemFile {
 }
 
 impl FileSystem for InMemFileSystem {
-    fn open_writable_file_writer(&self, filename: PathBuf) -> Result<Box<WritableFileWriter>> {
+    fn open_writable_file_writer(&self, filename: &Path) -> Result<Box<WritableFileWriter>> {
         let f = InMemFile {
             fs: self.inner.clone(),
             buf: vec![],
@@ -213,7 +213,7 @@ impl FileSystem for InMemFileSystem {
         )))
     }
 
-    fn open_random_access_file(&self, filename: PathBuf) -> Result<Box<RandomAccessFileReader>> {
+    fn open_random_access_file(&self, filename: &Path) -> Result<Box<RandomAccessFileReader>> {
         let filename = filename.to_str().unwrap().to_string();
         let fs = self.inner.lock().unwrap();
         match fs.files.get(&filename) {
@@ -230,7 +230,7 @@ impl FileSystem for InMemFileSystem {
         }
     }
 
-    fn open_sequential_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>> {
+    fn open_sequential_file(&self, path: &Path) -> Result<Box<SequentialFileReader>> {
         let fs = self.inner.lock().unwrap();
         let filename = path.to_str().unwrap();
         match fs.files.get(filename) {
@@ -250,7 +250,7 @@ impl FileSystem for InMemFileSystem {
         }
     }
 
-    fn remove(&self, path: PathBuf) -> Result<()> {
+    fn remove(&self, path: &Path) -> Result<()> {
         let filename = path.to_str().unwrap();
         let mut fs = self.inner.lock().unwrap();
         fs.files
@@ -259,7 +259,7 @@ impl FileSystem for InMemFileSystem {
         Ok(())
     }
 
-    fn rename(&self, origin: PathBuf, target: PathBuf) -> Result<()> {
+    fn rename(&self, origin: &Path, target: &Path) -> Result<()> {
         let filename = origin.to_str().unwrap();
         let mut fs = self.inner.lock().unwrap();
         let f = fs
@@ -271,7 +271,7 @@ impl FileSystem for InMemFileSystem {
         Ok(())
     }
 
-    fn list_files(&self, _: PathBuf) -> Result<Vec<PathBuf>> {
+    fn list_files(&self, _: &Path) -> Result<Vec<PathBuf>> {
         let fs = self.inner.lock().unwrap();
         let files = fs
             .files

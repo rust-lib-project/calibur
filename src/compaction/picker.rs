@@ -253,7 +253,7 @@ mod tests {
     use crate::table::InMemTableReader;
     use crate::version::FileMetaData;
     use crate::{DBOptions, KeyComparator};
-    use std::path::PathBuf;
+    use std::path::Path;
 
     fn generate_version(
         opts: &ColumnFamilyOptions,
@@ -270,7 +270,7 @@ mod tests {
                     m,
                     Box::new(reader),
                     fs.clone(),
-                    PathBuf::from(id.to_string()),
+                    Path::new(id.to_string().as_str()),
                 ))
             })
             .collect();

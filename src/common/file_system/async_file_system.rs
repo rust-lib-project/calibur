@@ -416,7 +416,7 @@ impl AsyncFileSystem {
         }
     }
 
-    fn open_writable_file(&self, path: PathBuf, opts: &IOOption) -> Result<WritableFileWriter> {
+    fn open_writable_file(&self, path: &Path, opts: &IOOption) -> Result<WritableFileWriter> {
         let file_name = path
             .file_name()
             .ok_or_else(|| Error::InvalidFile("path has no file name".to_string()))?
@@ -440,21 +440,21 @@ impl AsyncFileSystem {
 }
 
 impl FileSystem for AsyncFileSystem {
-    fn open_writable_file_writer(&self, path: PathBuf) -> Result<Box<WritableFileWriter>> {
+    fn open_writable_file_writer(&self, path: &Path) -> Result<Box<WritableFileWriter>> {
         let f = self.open_writable_file(path, &IOOption::default())?;
         Ok(Box::new(f))
     }
 
     fn open_writable_file_writer_opt(
         &self,
-        path: PathBuf,
+        path: &Path,
         opts: &IOOption,
     ) -> Result<Box<WritableFileWriter>> {
         let f = self.open_writable_file(path, opts)?;
         Ok(Box::new(f))
     }
 
-    fn open_random_access_file(&self, p: PathBuf) -> Result<Box<RandomAccessFileReader>> {
+    fn open_random_access_file(&self, p: &Path) -> Result<Box<RandomAccessFileReader>> {
         let f = AsyncRandomAccessFile::open(&p, self.ctx.clone())?;
         let filename = p
             .file_name()
@@ -465,7 +465,7 @@ impl FileSystem for AsyncFileSystem {
         Ok(Box::new(reader))
     }
 
-    fn open_sequential_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>> {
+    fn open_sequential_file(&self, path: &Path) -> Result<Box<SequentialFileReader>> {
         let f = AsyncSequentialFile::open(&path, self.ctx.clone())?;
         let reader = SequentialFileReader::new(
             Box::new(f),
@@ -474,15 +474,15 @@ impl FileSystem for AsyncFileSystem {
         Ok(Box::new(reader))
     }
 
-    fn remove(&self, path: PathBuf) -> Result<()> {
+    fn remove(&self, path: &Path) -> Result<()> {
         std::fs::remove_file(path).map_err(|e| Error::Io(Box::new(e)))
     }
 
-    fn rename(&self, origin: PathBuf, target: PathBuf) -> Result<()> {
+    fn rename(&self, origin: &Path, target: &Path) -> Result<()> {
         rename(origin, target).map_err(|e| Error::Io(Box::new(e)))
     }
 
-    fn list_files(&self, path: PathBuf) -> Result<Vec<PathBuf>> {
+    fn list_files(&self, path: &Path) -> Result<Vec<PathBuf>> {
         let mut files = vec![];
         for f in read_dir(path).map_err(|e| Error::Io(Box::new(e)))? {
             files.push(f?.path());

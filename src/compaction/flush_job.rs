@@ -64,7 +64,7 @@ impl<E: CompactionEngine> FlushJob<E> {
 
     pub async fn run(&mut self) -> Result<FileMetaData> {
         let fname = make_table_file_name(&self.options.db_path, self.meta.id());
-        let file = self.options.fs.open_writable_file_writer(fname)?;
+        let file = self.options.fs.open_writable_file_writer(&fname)?;
         let mut build_opts = TableBuilderOptions::default();
         build_opts.skip_filter = false;
         build_opts.column_family_id = self.cf_id;

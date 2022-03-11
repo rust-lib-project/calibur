@@ -182,7 +182,7 @@ mod tests {
         println!("block_size: {}, record_size: {}", BLOCK_SIZE, record_size);
         let fs = SyncPosixFileSystem {};
         let writer = fs
-            .open_writable_file_writer(dir.path().join("sst"))
+            .open_writable_file_writer(&dir.path().join("sst"))
             .unwrap();
         let mut writer = LogWriter::new(writer, 0);
         let mut rng = thread_rng();
@@ -203,7 +203,7 @@ mod tests {
                 left -= cur;
             }
         });
-        let reader = fs.open_sequential_file(dir.path().join("sst")).unwrap();
+        let reader = fs.open_sequential_file(&dir.path().join("sst")).unwrap();
         let mut reader = LogReader::new(reader);
         r.block_on(async move {
             let mut record = vec![];

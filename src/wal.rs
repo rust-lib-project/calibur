@@ -121,7 +121,7 @@ impl WALWriter {
         let log_number = kernel.new_file_number();
         let fname = make_log_file(path, log_number);
         let writer = fs.open_writable_file_writer_opt(
-            fname,
+            &fname,
             &IOOption {
                 direct: false,
                 high_priority: true,
