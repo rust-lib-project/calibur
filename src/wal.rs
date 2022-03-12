@@ -69,7 +69,7 @@ pub struct WALContext {
 pub struct WALWriter {
     kernel: Arc<KernelNumberContext>,
     writer: Box<LogWriter>,
-    logs: Vec<Box<LogWriter>>,
+    logs: Vec<LogWriter>,
     mems: Vec<(u32, Arc<Memtable>)>,
     version_sets: Arc<Mutex<VersionSet>>,
     flush_scheduler: UnboundedSender<FlushRequest>,
@@ -120,10 +120,14 @@ impl WALWriter {
     ) -> Result<Box<LogWriter>> {
         let log_number = kernel.new_file_number();
         let fname = make_log_file(path, log_number);
-        let mut opts = IOOption::default();
-        opts.high_priority = true;
-        opts.buffer_size = 1024 * 64;
-        let writer = fs.open_writable_file_writer_opt(fname, &opts)?;
+        let writer = fs.open_writable_file_writer_opt(
+            &fname,
+            &IOOption {
+                direct: false,
+                high_priority: true,
+                buffer_size: 1024 * 64,
+            },
+        )?;
         Ok(Box::new(LogWriter::new(writer, log_number)))
     }
 
@@ -148,7 +152,7 @@ impl WALWriter {
                         self.immutation_options.fs.as_ref(),
                     )?;
                     let writer = std::mem::replace(&mut self.writer, new_writer);
-                    self.logs.push(writer);
+                    self.logs.push(*writer);
                 }
                 mem.set_next_log_number(self.writer.get_log_number());
                 let mut vs = self.version_sets.lock().unwrap();
@@ -214,7 +218,7 @@ impl WALWriter {
         let l = tasks.len();
         for (wb, _, disable_wal) in tasks {
             let sequence = self.ctx.last_sequence + 1;
-            self.ctx.last_sequence = self.ctx.last_sequence + wb.count() as u64;
+            self.ctx.last_sequence += wb.count() as u64;
             wb.set_sequence(sequence);
             if !*disable_wal {
                 if l == 1 {

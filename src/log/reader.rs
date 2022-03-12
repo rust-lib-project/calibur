@@ -68,7 +68,7 @@ impl LogReader {
                         return Ok(true);
                     }
                     _ => {
-                        return Err(Error::LogRead(format!("not support open recycle log")));
+                        return Err(Error::LogRead("not support open recycle log".to_string()));
                     }
                 }
             } else {
@@ -116,14 +116,14 @@ impl LogReader {
             let b = (header[5] as u32) & 0xff;
             let tp = header[6];
             if tp >= RecordType::RecyclableFullType as u8 {
-                return Err(Error::LogRead(format!("not support open recycle log")));
+                return Err(Error::LogRead("not support open recycle log".to_string()));
             }
             let l = (a | (b << 8)) as usize;
             if l + HEADER_SIZE > self.data.len() {
                 self.data.limit = 0;
                 self.data.offset = 0;
                 if !self.eof {
-                    return Err(Error::LogRead(format!("read log header error")));
+                    return Err(Error::LogRead("read log header error".to_string()));
                 } else {
                     return Ok((fragment, RecordError::Eof as u8));
                 }
@@ -182,7 +182,7 @@ mod tests {
         println!("block_size: {}, record_size: {}", BLOCK_SIZE, record_size);
         let fs = SyncPosixFileSystem {};
         let writer = fs
-            .open_writable_file_writer(dir.path().join("sst"))
+            .open_writable_file_writer(&dir.path().join("sst"))
             .unwrap();
         let mut writer = LogWriter::new(writer, 0);
         let mut rng = thread_rng();
@@ -203,7 +203,7 @@ mod tests {
                 left -= cur;
             }
         });
-        let reader = fs.open_sequential_file(dir.path().join("sst")).unwrap();
+        let reader = fs.open_sequential_file(&dir.path().join("sst")).unwrap();
         let mut reader = LogReader::new(reader);
         r.block_on(async move {
             let mut record = vec![];
