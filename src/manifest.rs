@@ -269,17 +269,15 @@ impl Manifest {
             }
             let opts = self.cf_options.get(&cf).unwrap();
             let version = self.versions.get(&cf).unwrap();
-            let mut mems = vec![];
             let mut to_add = vec![];
             let mut to_delete = vec![];
             // Do not apply version edits with holding a mutex.
             let mut log_number = 0;
-            for mut e in edits {
+            for e in edits {
                 if e.has_log_number {
                     assert!(e.log_number > log_number);
                     log_number = e.log_number;
                 }
-                mems.append(&mut e.mems_deleted);
                 for m in e.deleted_files {
                     if let Some(f) = self.files_by_id.remove(&m.fd.get_number()) {
                         to_delete.push(f);
@@ -312,7 +310,7 @@ impl Manifest {
                 opts.max_bytes_for_level_multiplier,
             );
             let mut version_set = self.version_set.lock().unwrap();
-            let version = version_set.install_version(cf, mems, new_version)?;
+            let version = version_set.install_version(cf, log_number, new_version)?;
             self.versions.insert(cf, version);
         }
         self.log.as_mut().unwrap().fsync().await?;

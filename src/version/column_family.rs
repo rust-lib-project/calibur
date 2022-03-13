@@ -94,12 +94,9 @@ impl ColumnFamily {
         self.super_version.clone()
     }
 
-    pub fn install_version(&mut self, mems: Vec<u64>, new_version: Version) -> Arc<Version> {
-        if !mems.is_empty() {
-            self.remove(mems);
-        }
-        self.super_version_number.fetch_add(1, Ordering::Release);
-        let super_version_number = self.super_version_number.load(Ordering::Relaxed);
+    pub fn install_version(&mut self, next_log_number: u64, new_version: Version) -> Arc<Version> {
+        self.remove(next_log_number);
+        let super_version_number = self.super_version_number.fetch_add(1, Ordering::SeqCst) + 1;
         let version = Arc::new(new_version);
         let super_version = Arc::new(SuperVersion::new(
             self.id,
@@ -119,8 +116,7 @@ impl ColumnFamily {
 
     pub fn switch_memtable(&mut self, mem: Arc<Memtable>) {
         self.imms.push(self.mem.clone());
-        self.super_version_number.fetch_add(1, Ordering::Release);
-        let super_version_number = self.super_version_number.load(Ordering::Relaxed);
+        let super_version_number = self.super_version_number.fetch_add(1, Ordering::SeqCst) + 1;
         let super_version = Arc::new(SuperVersion::new(
             self.id,
             mem.clone(),
@@ -133,25 +129,19 @@ impl ColumnFamily {
         self.mem = mem;
     }
 
-    pub fn create_memtable(&self, id: u64, earliest_seq: u64) -> Memtable {
+    pub fn create_memtable(&self, cf_id: u32, earliest_seq: u64) -> Memtable {
         Memtable::new(
-            id,
+            cf_id,
             self.options.write_buffer_size,
             self.comparator.clone(),
             earliest_seq,
         )
     }
 
-    fn remove(&mut self, dels: Vec<u64>) {
+    fn remove(&mut self, next_log_number: u64) {
         let mut imms = vec![];
         for m in &self.imms {
-            let mut keep = true;
-            for del in &dels {
-                if *del == m.get_id() {
-                    keep = false;
-                }
-            }
-            if keep {
+            if next_log_number > 0 && m.get_next_log_number() > next_log_number {
                 imms.push(m.clone());
             }
         }

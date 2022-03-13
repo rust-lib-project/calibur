@@ -22,6 +22,7 @@ use crate::wal::{WALScheduler, WALTask, WALWriter, WriteMemtableTask};
 use crate::write_batch::{ReadOnlyWriteBatch, WriteBatch, WriteBatchItem};
 use crate::ColumnFamilyOptions;
 
+use crate::memtable::Memtable;
 use crate::pipeline::PipelineCommitQueue;
 use crate::version::snapshot::{Snapshot, SnapshotList};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
@@ -102,7 +103,7 @@ impl Engine {
         let sequence = rwb.wb.get_sequence();
         let last_commit_sequence = sequence - 1;
         let commit_sequence = sequence + rwb.wb.count() as u64 - 1;
-        self.write_memtable(&rwb.wb, sequence, 0, &rwb.cfs)?;
+        self.write_memtable(&rwb.wb, sequence, &rwb.cfs)?;
         let step3 = time::precise_time_ns();
         self.commit_queue
             .commit(last_commit_sequence, commit_sequence);
@@ -234,8 +235,25 @@ impl Engine {
     }
 
     async fn recover_log(&mut self, logs: Vec<u64>) -> Result<()> {
+        pub fn check_memtable_cf(cfs: &[Arc<SuperVersion>], cf: u32) -> usize {
+            let mut idx = cf as usize;
+            if idx >= cfs.len() || cf != cfs[idx].id {
+                idx = cfs.len();
+                for i in 0..cfs.len() {
+                    if cfs[i].id == cf {
+                        idx = i;
+                        break;
+                    }
+                }
+                if idx == cfs.len() {
+                    panic!("write miss column family, {}, cf size: {}", cf, cfs.len());
+                }
+            }
+            idx
+        }
+
         let mut min_log_number = u64::MAX;
-        let (versions, cf_mems) = {
+        let (versions, column_families) = {
             let version_set = self.version_set.lock().unwrap();
             (
                 version_set.get_column_family_versions(),
@@ -258,8 +276,35 @@ impl Engine {
             while log_reader.read_record(&mut buf).await? {
                 let wb = ReadOnlyWriteBatch::try_from(buf.clone())?;
                 let count = wb.count() as u64;
-                let sequence = wb.get_sequence();
-                self.write_memtable(&wb, sequence, log_number, &cf_mems)?;
+                let mut sequence = wb.get_sequence();
+                for item in wb.iter() {
+                    match item {
+                        WriteBatchItem::Put { cf, key, value } => {
+                            let idx = check_memtable_cf(&column_families, cf);
+                            if log_number > 0
+                                && column_families[idx].current.get_log_number() > log_number
+                            {
+                                continue;
+                            }
+                            column_families[idx].mem.add(
+                                key,
+                                value,
+                                sequence,
+                                ValueType::TypeValue,
+                            );
+                        }
+                        WriteBatchItem::Delete { cf, key } => {
+                            let idx = check_memtable_cf(&column_families, cf);
+                            if log_number > 0
+                                && column_families[idx].current.get_log_number() > log_number
+                            {
+                                continue;
+                            }
+                            column_families[idx].mem.delete(key, sequence);
+                        }
+                    }
+                    sequence += 1;
+                }
                 next_seq = sequence + count - 1;
                 // TODO: flush if the memtable is full
             }
@@ -272,15 +317,14 @@ impl Engine {
         &mut self,
         wb: &ReadOnlyWriteBatch,
         mut sequence: u64,
-        log_number: u64,
-        cf_mems: &[Arc<SuperVersion>],
+        cf_mems: &[Arc<Memtable>],
     ) -> Result<()> {
-        pub fn check_memtable_cf(mems: &[Arc<SuperVersion>], cf: u32) -> usize {
+        pub fn check_memtable_cf(mems: &[Arc<Memtable>], cf: u32) -> usize {
             let mut idx = cf as usize;
-            if idx >= mems.len() || cf != mems[idx].id {
+            if idx >= mems.len() || cf != mems[idx].get_column_family_id() {
                 idx = mems.len();
                 for i in 0..mems.len() {
-                    if mems[i].id == cf {
+                    if mems[i].get_column_family_id() == cf {
                         idx = i;
                         break;
                     }
@@ -295,19 +339,11 @@ impl Engine {
             match item {
                 WriteBatchItem::Put { cf, key, value } => {
                     let idx = check_memtable_cf(cf_mems, cf);
-                    if log_number > 0 && cf_mems[idx].current.get_log_number() > log_number {
-                        continue;
-                    }
-                    cf_mems[idx]
-                        .mem
-                        .add(key, value, sequence, ValueType::TypeValue);
+                    cf_mems[idx].add(key, value, sequence, ValueType::TypeValue);
                 }
                 WriteBatchItem::Delete { cf, key } => {
                     let idx = check_memtable_cf(cf_mems, cf);
-                    if log_number > 0 && cf_mems[idx].current.get_log_number() > log_number {
-                        continue;
-                    }
-                    cf_mems[idx].mem.delete(key, sequence);
+                    cf_mems[idx].delete(key, sequence);
                 }
             }
             sequence += 1;
@@ -816,8 +852,12 @@ mod tests {
         });
         let flush_memtable_count_wal = Arc::new(AtomicU64::new(0));
         let flush_memtable_count = flush_memtable_count_wal.clone();
+        let total_flush_memtable_count = Arc::new(AtomicU64::new(0));
+        let count1 = total_flush_memtable_count.clone();
         let switch_wal_number = first_switch_wal_number.clone();
         let cfs = flush_cf.clone();
+        let (cb, rc) = std::sync::mpsc::channel();
+        let block_point = Arc::new(Mutex::new(Option::Some(rc)));
         util::set_callback("run_flush_memtable_job", move |v| {
             let v = v.unwrap().parse::<u64>().unwrap();
             if switch_wal_number.load(Ordering::Acquire) != 0 {
@@ -828,6 +868,10 @@ mod tests {
                         flush_memtable_count.fetch_add(1, Ordering::Relaxed);
                     }
                 }
+            }
+            if count1.fetch_add(1, Ordering::SeqCst) == 0 {
+                let rc = block_point.lock().unwrap().take().unwrap();
+                rc.recv().unwrap();
             }
             None
         });
@@ -842,8 +886,22 @@ mod tests {
             r.block_on(engine.write_opt(&mut wb, false, false)).unwrap();
             wb.clear();
         }
+        {
+            let vs = engine.version_set.lock().unwrap();
+            let v = vs.get_superversion(0).unwrap();
+            assert_eq!(2, v.imms.len());
+        }
+        let _ = cb.send(());
+        while flush_memtable_count_wal.load(Ordering::Relaxed) < 2 {
+            std::thread::sleep(Duration::from_millis(100));
+        }
         assert_eq!(flush_memtable_count_wal.load(Ordering::Relaxed), 2);
         let x = { *flush_cf.lock().unwrap().get(&2).unwrap() };
         assert_eq!(x, 0);
+        {
+            let vs = engine.version_set.lock().unwrap();
+            let v = vs.get_superversion(0).unwrap();
+            assert_eq!(0, v.imms.len());
+        }
     }
 }

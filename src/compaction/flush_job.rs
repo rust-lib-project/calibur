@@ -36,7 +36,6 @@ impl<E: CompactionEngine> FlushJob<E> {
     ) -> Self {
         let mut version_edit = VersionEdit::default();
         version_edit.column_family = cf_id;
-        version_edit.mems_deleted = mems.iter().map(|m| m.get_id()).collect();
         version_edit.prev_log_number = 0;
         version_edit.set_log_number(mems.last().unwrap().get_next_log_number());
         let meta = FileMetaData::new(file_number, 0, vec![], vec![]);
@@ -121,7 +120,6 @@ pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
     for i in 0..mems.len() {
         if !mems[i].is_empty() {
             let file_number = kernel.new_file_number();
-            let memids = mems[i].iter().map(|mem| mem.get_id()).collect();
             let idx = i as u32;
             let cf_opt = cf_options
                 .get(&idx)
@@ -155,7 +153,6 @@ pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
                 meta.fd.smallest_seqno,
                 meta.fd.largest_seqno,
             );
-            edit.mems_deleted = memids;
             edit.column_family = i as u32;
             edits.push(edit);
         }

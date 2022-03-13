@@ -24,9 +24,6 @@ pub struct VersionEdit {
     pub add_files: Vec<FileMetaData>,
     pub deleted_files: Vec<FileMetaData>,
 
-    // memtable to be deleted does not need to be persisted in manifest
-    pub mems_deleted: Vec<u64>,
-
     // only for create column family in manual
     pub cf_options: ColumnFamilyOptionsWrapper,
 

@@ -101,7 +101,7 @@ impl VersionSet {
                     cf_id,
                     version.get_cf_name().to_string(),
                     Memtable::new(
-                        kernel.new_memtable_number(),
+                        cf_id,
                         cf_opt.write_buffer_size,
                         cf_opt.comparator.clone(),
                         MAX_SEQUENCE_NUMBER,
@@ -129,7 +129,7 @@ impl VersionSet {
                     cf_id,
                     version.get_cf_name().to_string(),
                     Memtable::new(
-                        kernel.new_memtable_number(),
+                        cf_id,
                         cf_opt.write_buffer_size,
                         cf_opt.comparator.clone(),
                         MAX_SEQUENCE_NUMBER,
@@ -208,11 +208,11 @@ impl VersionSet {
         options
     }
 
-    pub fn switch_memtable(&mut self, cf: u32, earliest_seq: u64) -> Arc<SuperVersion> {
+    pub fn switch_memtable(&mut self, cf: u32, earliest_seq: u64) -> Arc<Memtable> {
         let cf = self.column_family_set.get_mut(&cf).unwrap();
-        let mem = Arc::new(cf.create_memtable(self.kernel.new_memtable_number(), earliest_seq));
+        let mem = Arc::new(cf.create_memtable(cf.get_id(), earliest_seq));
         cf.switch_memtable(mem.clone());
-        cf.get_super_version()
+        mem
     }
 
     pub fn set_log_number(&mut self, cf: u32, log_number: u64) {
@@ -252,7 +252,7 @@ impl VersionSet {
         let id = edit.column_family;
         let name = edit.column_family_name.clone();
         let m = Memtable::new(
-            self.kernel.new_memtable_number(),
+            id,
             cf_opt.write_buffer_size,
             cf_opt.comparator.clone(),
             self.kernel.last_sequence(),
@@ -288,11 +288,11 @@ impl VersionSet {
     pub fn install_version(
         &mut self,
         cf_id: u32,
-        mems: Vec<u64>,
+        next_log_number: u64,
         version: Version,
     ) -> Result<Arc<Version>> {
         if let Some(cf) = self.column_family_set.get_mut(&cf_id) {
-            Ok(cf.install_version(mems, version))
+            Ok(cf.install_version(next_log_number, version))
         } else {
             Err(Error::CompactionError(format!(
                 "column faimly has been dropped"
