@@ -20,7 +20,7 @@ pub async fn run_compaction_job<Engine: CompactionEngine>(
     let mut level_tables: HashMap<u32, Vec<Arc<TableFile>>> = HashMap::default();
     for (level, f) in request.input.iter() {
         if *level > 0 {
-            if let Some(files) = level_tables.get_mut(&level) {
+            if let Some(files) = level_tables.get_mut(level) {
                 files.push(f.clone());
             } else {
                 level_tables.insert(*level, vec![f.clone()]);
@@ -52,7 +52,7 @@ pub async fn run_compaction_job<Engine: CompactionEngine>(
         vec![],
     );
     let fname = make_table_file_name(&request.options.db_path, meta.id());
-    let file = request.options.fs.open_writable_file_writer(fname)?;
+    let file = request.options.fs.open_writable_file_writer(&fname)?;
     let mut build_opts = TableBuilderOptions::default();
     build_opts.skip_filter = false;
     build_opts.column_family_id = request.cf;
@@ -79,7 +79,7 @@ pub async fn run_compaction_job<Engine: CompactionEngine>(
                 vec![],
             );
             let fname = make_table_file_name(&request.options.db_path, meta.id());
-            let file = request.options.fs.open_writable_file_writer(fname)?;
+            let file = request.options.fs.open_writable_file_writer(&fname)?;
             builder = request.cf_options.factory.new_builder(&build_opts, file)?;
         } else if builder.should_flush() {
             builder.flush().await?;

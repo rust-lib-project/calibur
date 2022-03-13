@@ -57,7 +57,7 @@ impl Memtable {
         let mut ukey = Vec::with_capacity(key.len() + 8);
         ukey.extend_from_slice(key);
         ukey.extend_from_slice(&pack_sequence_and_type(sequence, tp as u8).to_le_bytes());
-        self.insert_to(ukey.into(), value.into());
+        self.insert_to(ukey, value.into());
     }
 
     pub fn delete(&self, key: &[u8], sequence: u64) {
@@ -67,7 +67,7 @@ impl Memtable {
         ukey.extend_from_slice(
             &pack_sequence_and_type(sequence, ValueType::TypeDeletion as u8).to_le_bytes(),
         );
-        self.insert_to(ukey.into(), vec![]);
+        self.insert_to(ukey, vec![]);
     }
 
     pub fn insert(&self, key: &[u8], value: &[u8]) {

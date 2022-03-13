@@ -106,6 +106,12 @@ impl WriteBatch {
     }
 }
 
+impl Default for WriteBatch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct WriteBatchIter<'a> {
     batch: &'a ReadOnlyWriteBatch,
     sequence: u64,
@@ -206,7 +212,6 @@ impl<'a> WriteBatchIter<'a> {
                     });
                 }
             }
-            return None;
         } else if tag == ValueType::TypeDeletion as u8
             || tag == ValueType::TypeColumnFamilyDeletion as u8
         {
@@ -220,11 +225,8 @@ impl<'a> WriteBatchIter<'a> {
                 let key = &self.batch.data[key_pos..self.offset];
                 return Some(WriteBatchItem::Delete { cf, key });
             }
-
-            return None;
-        } else {
-            None
         }
+        None
     }
 }
 

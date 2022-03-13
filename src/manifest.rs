@@ -16,7 +16,7 @@ use crate::version::{
 use crate::{ColumnFamilyOptions, KeyComparator};
 use futures::{SinkExt, StreamExt};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use yatp::task::future::TaskCell;
 use yatp::ThreadPool;
@@ -45,7 +45,9 @@ impl Manifest {
         new_db.set_next_file(2);
         new_db.set_last_sequence(0);
         let descrip_file_name = make_descriptor_file_name(&db_options.db_path, 1);
-        let writer = db_options.fs.open_writable_file_writer(descrip_file_name)?;
+        let writer = db_options
+            .fs
+            .open_writable_file_writer(&descrip_file_name)?;
         let mut writer = LogWriter::new(writer, 0);
         let mut buf = vec![];
         new_db.encode_to(&mut buf);
@@ -63,11 +65,11 @@ impl Manifest {
             get_current_manifest_path(&db_options.db_path, db_options.fs.clone()).await?;
         let reader = db_options
             .fs
-            .open_sequencial_file(PathBuf::from(manifest_path))?;
+            .open_sequential_file(Path::new(manifest_path.as_str()))?;
         let log_reader = LogReader::new(reader);
         let (files_by_id, version_set) =
             Self::recover_version(cfs, Box::new(log_reader), db_options).await?;
-        let kernal = version_set.get_kernel();
+        let kernel = version_set.get_kernel();
 
         let cf_versions = version_set.get_column_family_versions();
         let mut versions = HashMap::default();
@@ -82,7 +84,7 @@ impl Manifest {
             version_set: Arc::new(Mutex::new(version_set)),
             manifest_file_number,
             versions,
-            kernel: kernal,
+            kernel,
             options: db_options.clone(),
             cf_options,
             files_by_id,
@@ -117,10 +119,8 @@ impl Manifest {
             } else if edit.is_column_family_drop {
                 edits.remove(&edit.column_family);
                 cf_names.remove(&edit.column_family);
-            } else {
-                if let Some(data) = edits.get_mut(&edit.column_family) {
-                    data.push(edit);
-                }
+            } else if let Some(data) = edits.get_mut(&edit.column_family) {
+                data.push(edit);
             }
         }
         let mut versions = HashMap::default();
@@ -135,9 +135,7 @@ impl Manifest {
         let mut files = HashMap::default();
         for (cf_id, edit) in edits {
             let cf_name = cf_names.get(&cf_id).unwrap();
-            let cf_opts = cf_options
-                .remove(cf_name)
-                .unwrap_or(ColumnFamilyOptions::default());
+            let cf_opts = cf_options.remove(cf_name).unwrap_or_default();
 
             let mut files_by_id: HashMap<u64, FileMetaData> = HashMap::new();
             let mut max_log_number = 0;
@@ -169,7 +167,7 @@ impl Manifest {
             let mut tables = vec![];
             for (_, m) in files_by_id {
                 let fname = make_table_file_name(&options.db_path, m.id());
-                let file = options.fs.open_random_access_file(fname.clone())?;
+                let file = options.fs.open_random_access_file(&fname)?;
                 let mut read_opts = TableReaderOptions::default();
                 read_opts.file_size = m.fd.file_size as usize;
                 read_opts.level = m.level;
@@ -177,7 +175,7 @@ impl Manifest {
                 read_opts.internal_comparator = cf_opts.comparator.clone();
                 read_opts.prefix_extractor = cf_opts.prefix_extractor.clone();
                 let table_reader = cf_opts.factory.open_reader(&read_opts, file).await?;
-                let table = Arc::new(TableFile::new(m, table_reader, options.fs.clone(), fname));
+                let table = Arc::new(TableFile::new(m, table_reader, options.fs.clone(), &fname));
                 files.insert(table.meta.id(), table.clone());
                 tables.push(table);
             }
@@ -230,7 +228,7 @@ impl Manifest {
             let writer = self
                 .options
                 .fs
-                .open_writable_file_writer(descrip_file_name)?;
+                .open_writable_file_writer(&descrip_file_name)?;
             let mut writer = LogWriter::new(writer, 0);
             self.write_snapshot(&mut writer).await?;
             self.log = Some(Box::new(writer));
@@ -285,7 +283,7 @@ impl Manifest {
                 }
                 for m in e.add_files {
                     let fname = make_table_file_name(&self.options.db_path, m.id());
-                    let file = self.options.fs.open_random_access_file(fname.clone())?;
+                    let file = self.options.fs.open_random_access_file(&fname)?;
                     let mut read_opts = TableReaderOptions::default();
                     read_opts.file_size = m.fd.file_size as usize;
                     read_opts.level = m.level;
@@ -297,7 +295,7 @@ impl Manifest {
                         m,
                         table_reader,
                         self.options.fs.clone(),
-                        fname,
+                        &fname,
                     ));
                     self.files_by_id.insert(table.id(), table.clone());
                     to_add.push(table);
@@ -339,9 +337,9 @@ impl Manifest {
                 edit.set_comparator_name(version.get_comparator_name());
                 edit.set_log_number(version.get_log_number());
                 if !edit.encode_to(&mut record) {
-                    return Err(Error::CompactionError(format!(
-                        "write snapshot failed because encode failed"
-                    )));
+                    return Err(Error::CompactionError(
+                        "write snapshot failed because encode failed".to_string(),
+                    ));
                 }
                 writer.add_record(&record).await?;
                 record.clear();
@@ -462,22 +460,20 @@ pub async fn store_current_file(
     let mut ret = contents.trim_start_matches(&prefix).to_string();
     ret.push('\n');
     let tmp = make_temp_plain_file_name(dbpath, descriptor_number);
-    let mut writer = fs.open_writable_file_writer(tmp.clone())?;
+    let mut writer = fs.open_writable_file_writer(&tmp)?;
     let data = ret.into_bytes();
     writer.append(&data).await?;
     writer.sync().await?;
-    fs.rename(tmp, make_current_file(dbpath))
+    fs.rename(&tmp, &make_current_file(dbpath))
 }
 
 pub async fn get_current_manifest_path(
-    dbname: &String,
+    dbname: &str,
     fs: Arc<dyn FileSystem>,
 ) -> Result<(String, u64)> {
-    let mut data = fs
-        .read_file_content(make_current_file(dbname.as_str()))
-        .await?;
+    let mut data = fs.read_file_content(&make_current_file(dbname)).await?;
     if data.is_empty() || *data.last().unwrap() != b'\n' {
-        return Err(Error::InvalidFile(format!("CURRENT file corrupted")));
+        return Err(Error::InvalidFile("CURRENT file corrupted".to_string()));
     }
     data.pop();
     let fname = String::from_utf8(data).map_err(|e| {
@@ -488,10 +484,10 @@ pub async fn get_current_manifest_path(
     })?;
     let (tp, manifest_file_number) = parse_file_name(&fname)?;
     if tp != DBFileType::DescriptorFile {
-        return Err(Error::InvalidFile(format!("CURRENT file corrupted")));
+        return Err(Error::InvalidFile("CURRENT file corrupted".to_string()));
     }
-    let mut manifest_path = dbname.clone();
-    if !manifest_path.ends_with("/") {
+    let mut manifest_path = dbname.to_string();
+    if !manifest_path.ends_with('/') {
         manifest_path.push('/');
     }
     manifest_path.push_str(&fname);

@@ -4,7 +4,7 @@ use crate::common::MAX_SEQUENCE_NUMBER;
 use crate::table::TableReader;
 use crate::util::BtreeComparable;
 use bytes::Bytes;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 
 const FILE_NUMBER_MASK: u64 = 0x3FFFFFFFFFFFFFFF;
@@ -92,12 +92,12 @@ impl TableFile {
         meta: FileMetaData,
         table: Box<dyn TableReader>,
         fs: Arc<dyn FileSystem>,
-        path: PathBuf,
+        path: &Path,
     ) -> Self {
         let smallest = extract_user_key(meta.smallest.as_ref()).to_vec();
         let largest = extract_user_key(meta.largest.as_ref()).to_vec();
         TableFile {
-            path,
+            path: path.to_path_buf(),
             fs,
             reader: table,
             meta,
@@ -125,7 +125,7 @@ impl Drop for TableFile {
     fn drop(&mut self) {
         if self.deleted.load(Ordering::Acquire) {
             println!("delete file {:?}", self.path);
-            let _ = self.fs.remove(self.path.clone());
+            let _ = self.fs.remove(&self.path);
             // TODO: log error here.
         }
     }

@@ -111,10 +111,14 @@ impl WALWriter {
     ) -> Result<Box<LogWriter>> {
         let log_number = kernel.new_file_number();
         let fname = make_log_file(path, log_number);
-        let mut opts = IOOption::default();
-        opts.high_priority = true;
-        opts.buffer_size = 1024 * 64;
-        let writer = fs.open_writable_file_writer_opt(fname, &opts)?;
+        let writer = fs.open_writable_file_writer_opt(
+            &fname,
+            &IOOption {
+                direct: false,
+                high_priority: true,
+                buffer_size: 1024 * 64,
+            },
+        )?;
         Ok(Box::new(LogWriter::new(writer, log_number)))
     }
 
@@ -221,7 +225,7 @@ impl WALWriter {
             let log_number = log.get_log_number();
             let fname = make_log_file(&self.immutation_options.db_path, log_number);
             sync_point!("remove_log_file", log_number);
-            self.immutation_options.fs.remove(fname)?;
+            self.immutation_options.fs.remove(&fname)?;
         }
         Ok(())
     }
@@ -273,7 +277,7 @@ impl WALWriter {
         let l = tasks.len();
         for (wb, _) in tasks {
             let sequence = self.ctx.last_sequence + 1;
-            self.ctx.last_sequence = self.ctx.last_sequence + wb.count() as u64;
+            self.ctx.last_sequence += wb.count() as u64;
             wb.set_sequence(sequence);
             if l == 1 {
                 self.writer.add_record(wb.get_data()).await?;

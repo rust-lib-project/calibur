@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::hash_map::RandomState;
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -159,7 +159,7 @@ impl Engine {
             }
         };
         let iter = version.new_iterator(opts)?;
-        let sequence = opts.snapshot.clone().unwrap_or(self.kernel.last_sequence());
+        let sequence = opts.snapshot.unwrap_or_else(|| self.kernel.last_sequence());
         Ok(DBIterator::new(
             iter,
             version
@@ -185,17 +185,12 @@ impl Engine {
         let version_set = manifest.get_version_set();
         let files = immutable_options
             .fs
-            .list_files(PathBuf::from(immutable_options.db_path.clone()))?;
+            .list_files(Path::new(immutable_options.db_path.as_str()))?;
         let mut logs = vec![];
         for f in files {
-            let fname = f
-                .file_name()
-                .unwrap()
-                .to_str()
-                .ok_or(Error::InvalidFile(format!(
-                    "file {:?} can not convert to string",
-                    f
-                )))?;
+            let fname = f.file_name().unwrap().to_str().ok_or_else(|| {
+                Error::InvalidFile(format!("file {:?} can not convert to string", f))
+            })?;
             let (db_tp, file_number) = parse_file_name(fname)?;
             if db_tp == DBFileType::LogFile {
                 logs.push(file_number);
@@ -269,7 +264,7 @@ impl Engine {
             }
             self.kernel.mark_file_number_used(log_number);
             let fname = make_log_file(&self.options.db_path, log_number);
-            let reader = self.options.fs.open_sequencial_file(fname)?;
+            let reader = self.options.fs.open_sequential_file(&fname)?;
             let mut log_reader = LogReader::new(reader);
             let mut buf = vec![];
             let mut next_seq = self.kernel.last_sequence();
@@ -323,8 +318,8 @@ impl Engine {
             let mut idx = cf as usize;
             if idx >= mems.len() || cf != mems[idx].get_column_family_id() {
                 idx = mems.len();
-                for i in 0..mems.len() {
-                    if mems[i].get_column_family_id() == cf {
+                for (i, memtables) in mems.iter().enumerate() {
+                    if memtables.get_column_family_id() == cf {
                         idx = i;
                         break;
                     }

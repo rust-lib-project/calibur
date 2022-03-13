@@ -63,7 +63,7 @@ pub enum RecordError {
 
 impl From<u8> for RecordError {
     fn from(x: u8) -> Self {
-        if x < 9 || x > 14 {
+        if !(9..=14).contains(&x) {
             RecordError::Unknown
         } else {
             unsafe { std::mem::transmute(x) }

@@ -67,7 +67,7 @@ pub const VALUE_TYPE_FOR_SEEK: u8 = ValueType::TypeBlobIndex as u8;
 pub const VALUE_TYPE_FOR_SEEK_FOR_PREV: u8 = ValueType::TypeDeletion as u8;
 
 pub fn pack_sequence_and_type(seq: u64, t: u8) -> u64 {
-    return (seq << 8) | t as u64;
+    (seq << 8) | t as u64
 }
 
 pub fn extract_user_key(key: &[u8]) -> &[u8] {

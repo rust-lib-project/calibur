@@ -54,7 +54,7 @@ impl<E: CompactionEngine> FlushJob<E> {
 
     fn new_merging_iterator(&self, mems: &[Arc<Memtable>]) -> Box<dyn InternalIterator> {
         if mems.len() == 1 {
-            return mems[0].new_iterator();
+            mems[0].new_iterator()
         } else {
             let iters = mems.iter().map(|mem| mem.new_iterator()).collect();
             let iter = MergingIterator::new(iters, mems[0].get_comparator());
@@ -64,7 +64,7 @@ impl<E: CompactionEngine> FlushJob<E> {
 
     pub async fn run(&mut self) -> Result<FileMetaData> {
         let fname = make_table_file_name(&self.options.db_path, self.meta.id());
-        let file = self.options.fs.open_writable_file_writer(fname)?;
+        let file = self.options.fs.open_writable_file_writer(&fname)?;
         let mut build_opts = TableBuilderOptions::default();
         build_opts.skip_filter = false;
         build_opts.column_family_id = self.cf_id;
@@ -117,20 +117,20 @@ pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
         }
     }
     let mut edits = vec![];
-    for i in 0..mems.len() {
-        if !mems[i].is_empty() {
+    for (i, memtables) in mems.iter().enumerate() {
+        if !memtables.is_empty() {
             let file_number = kernel.new_file_number();
             let idx = i as u32;
             let cf_opt = cf_options
                 .get(&idx)
                 .cloned()
-                .unwrap_or(Arc::new(ColumnFamilyOptions::default()));
+                .unwrap_or_else(|| Arc::new(ColumnFamilyOptions::default()));
             let comparator = cf_opt.comparator.clone();
             let mut job = FlushJob::new(
                 engine.clone(),
                 options.clone(),
                 cf_opt,
-                mems[i].clone(),
+                memtables.clone(),
                 comparator,
                 i as u32,
                 file_number,
@@ -139,7 +139,7 @@ pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
             let meta = job.run().await?;
             let mut edit = VersionEdit::default();
             edit.prev_log_number = 0;
-            edit.set_log_number(mems[i].last().unwrap().get_next_log_number());
+            edit.set_log_number(memtables.last().unwrap().get_next_log_number());
             sync_point!(
                 "run_flush_memtable_job",
                 edit.get_log_number() * 1000 + i as u64

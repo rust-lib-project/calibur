@@ -137,7 +137,7 @@ impl AsyncIterator for BlockBasedTableIterator {
     }
 
     async fn next(&mut self) {
-        if !self.data_iter.is_some() {
+        if self.data_iter.is_none() {
             return;
         }
         self.data_iter.as_mut().unwrap().next();
@@ -145,7 +145,7 @@ impl AsyncIterator for BlockBasedTableIterator {
     }
 
     async fn prev(&mut self) {
-        if !self.data_iter.is_some() {
+        if self.data_iter.is_none() {
             return;
         }
         self.data_iter.as_mut().unwrap().prev();

@@ -78,7 +78,7 @@ impl VersionStorageInfo {
                 consumer(f);
             }
         } else {
-            if level >= self.levels.len() + 1 {
+            if level > self.levels.len() {
                 return;
             }
             let mut iter = self.levels[level - 1].tables.new_iterator();
@@ -254,10 +254,8 @@ impl VersionStorageInfo {
             }
             let mut level_size = base_level_size;
             for i in self.base_level..self.max_level {
-                if i > self.base_level {
-                    if ((u64::MAX / level_size) as f64) > self.level_multiplier {
-                        level_size = (level_size as f64 * self.level_multiplier).round() as u64;
-                    }
+                if i > self.base_level && ((u64::MAX / level_size) as f64) > self.level_multiplier {
+                    level_size = (level_size as f64 * self.level_multiplier).round() as u64;
                 }
                 self.levels[i - 1].level_max_bytes = std::cmp::max(level_size, base_bytes_max);
             }
