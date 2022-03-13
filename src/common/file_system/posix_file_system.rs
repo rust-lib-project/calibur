@@ -3,7 +3,7 @@
 use std::fs::{read_dir, rename};
 use std::io::{Result as IoResult, Write};
 use std::os::unix::io::RawFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::common::file_system::{SequentialFile, WritableFile};
@@ -318,7 +318,7 @@ impl PosixSequentialFile {
 
 #[async_trait]
 impl SequentialFile for PosixSequentialFile {
-    async fn read_sequencial(&mut self, data: &mut [u8]) -> Result<usize> {
+    async fn read_sequential(&mut self, data: &mut [u8]) -> Result<usize> {
         if self.offset >= self.file_size {
             return Ok(0);
         }
@@ -336,31 +336,29 @@ impl SequentialFile for PosixSequentialFile {
     }
 }
 
-pub struct SyncPoxisFileSystem {}
+pub struct SyncPosixFileSystem {}
 
-impl FileSystem for SyncPoxisFileSystem {
-    fn open_writable_file_writer(&self, path: PathBuf) -> Result<Box<WritableFileWriter>> {
+impl FileSystem for SyncPosixFileSystem {
+    fn open_writable_file_writer(&self, path: &Path) -> Result<Box<WritableFileWriter>> {
         let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
-        let f = PosixWritableFile::create(&path).map_err(|e| Error::Io(Box::new(e)))?;
+        let f = PosixWritableFile::create(path).map_err(|e| Error::Io(Box::new(e)))?;
         let writer = WritableFileWriter::new(Box::new(f), file_name, 0);
         Ok(Box::new(writer))
     }
 
-    fn open_random_access_file(&self, p: PathBuf) -> Result<Box<RandomAccessFileReader>> {
-        let f = PosixReadableFile::open(&p).map_err(|e| Error::Io(Box::new(e)))?;
+    fn open_random_access_file(&self, p: &Path) -> Result<Box<RandomAccessFileReader>> {
+        let f = PosixReadableFile::open(p).map_err(|e| Error::Io(Box::new(e)))?;
         let filename = p
             .file_name()
-            .ok_or(Error::InvalidFile(format!("path has no file name")))?
+            .ok_or_else(|| Error::InvalidFile("path has no file name".to_string()))?
             .to_str()
-            .ok_or(Error::InvalidFile(format!(
-                "filename is not encode by utf8"
-            )))?;
+            .ok_or_else(|| Error::InvalidFile("filename is not encode by utf8".to_string()))?;
         let reader = RandomAccessFileReader::new(Box::new(f), filename.to_string());
         Ok(Box::new(reader))
     }
 
-    fn open_sequencial_file(&self, path: PathBuf) -> Result<Box<SequentialFileReader>> {
-        let f = PosixSequentialFile::open(&path).map_err(|e| Error::Io(Box::new(e)))?;
+    fn open_sequential_file(&self, path: &Path) -> Result<Box<SequentialFileReader>> {
+        let f = PosixSequentialFile::open(path).map_err(|e| Error::Io(Box::new(e)))?;
         let reader = SequentialFileReader::new(
             Box::new(f),
             path.file_name().unwrap().to_str().unwrap().to_string(),
@@ -368,11 +366,11 @@ impl FileSystem for SyncPoxisFileSystem {
         Ok(Box::new(reader))
     }
 
-    fn remove(&self, path: PathBuf) -> Result<()> {
+    fn remove(&self, path: &Path) -> Result<()> {
         std::fs::remove_file(path).map_err(|e| Error::Io(Box::new(e)))
     }
 
-    fn list_files(&self, path: PathBuf) -> Result<Vec<PathBuf>> {
+    fn list_files(&self, path: &Path) -> Result<Vec<PathBuf>> {
         let mut files = vec![];
         for f in read_dir(path).map_err(|e| Error::Io(Box::new(e)))? {
             files.push(f?.path());
@@ -380,11 +378,11 @@ impl FileSystem for SyncPoxisFileSystem {
         Ok(files)
     }
 
-    fn rename(&self, origin: PathBuf, target: PathBuf) -> Result<()> {
+    fn rename(&self, origin: &Path, target: &Path) -> Result<()> {
         rename(origin, target).map_err(|e| Error::Io(Box::new(e)))
     }
 
-    fn file_exist(&self, path: &PathBuf) -> Result<bool> {
+    fn file_exist(&self, path: &Path) -> Result<bool> {
         Ok(path.exists())
     }
 }
@@ -400,9 +398,9 @@ mod tests {
             .prefix("test_write_file")
             .tempdir()
             .unwrap();
-        let fs = SyncPoxisFileSystem {};
+        let fs = SyncPosixFileSystem {};
         let mut f = fs
-            .open_writable_file_writer(dir.path().join("sst"))
+            .open_writable_file_writer(&dir.path().join("sst"))
             .unwrap();
         let r = Runtime::new().unwrap();
         r.block_on(async move {
@@ -412,7 +410,7 @@ mod tests {
             f.sync().await.unwrap();
         });
 
-        let mut f = fs.open_sequencial_file(dir.path().join("sst")).unwrap();
+        let mut f = fs.open_sequential_file(&dir.path().join("sst")).unwrap();
         r.block_on(async move {
             let mut v = vec![0; 7];
             let x = f.read(&mut v).await.unwrap();

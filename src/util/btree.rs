@@ -94,7 +94,7 @@ impl<T: ComparableRecord> PageIterator<T> for LeafNodeIterator<T> {
 
     fn seek_to_last(&mut self) {
         self.cursor = self.page.data.len();
-        if self.page.data.len() > 0 {
+        if !self.page.data.is_empty() {
             self.cursor -= 1;
         }
     }
@@ -574,19 +574,19 @@ where
         let mut cur_records = Vec::with_capacity(records.len());
         let mut processed_count = records.len();
         for r in records {
-            if idx + 1 < self.son.len() && r.smallest().ge(self.son[idx + 1].smallest()) {
-                if !cur_records.is_empty() {
-                    self.record_number -= cur_page.record_number();
-                    cur_page.insert(cur_records);
-                    self.record_number += cur_page.record_number();
-                    cur_records = Vec::with_capacity(processed_count);
-                    self.son[idx] = Arc::new(cur_page);
-                    while idx + 1 < self.son.len() && r.smallest().ge(self.son[idx + 1].smallest())
-                    {
-                        idx += 1;
-                    }
-                    cur_page = self.son[idx].as_ref().clone();
+            if idx + 1 < self.son.len()
+                && r.smallest().ge(self.son[idx + 1].smallest())
+                && !cur_records.is_empty()
+            {
+                self.record_number -= cur_page.record_number();
+                cur_page.insert(cur_records);
+                self.record_number += cur_page.record_number();
+                cur_records = Vec::with_capacity(processed_count);
+                self.son[idx] = Arc::new(cur_page);
+                while idx + 1 < self.son.len() && r.smallest().ge(self.son[idx + 1].smallest()) {
+                    idx += 1;
                 }
+                cur_page = self.son[idx].as_ref().clone();
             }
             cur_records.push(r);
             processed_count -= 1;
@@ -640,19 +640,19 @@ where
         let mut cur_records = Vec::with_capacity(records.len());
         let mut processed_count = records.len();
         for r in records {
-            if idx + 1 < self.son.len() && r.smallest().ge(self.son[idx + 1].smallest()) {
-                if !cur_records.is_empty() {
-                    self.record_number -= cur_page.record_number();
-                    cur_page.delete(cur_records);
-                    self.record_number += cur_page.record_number();
-                    cur_records = Vec::with_capacity(processed_count);
-                    self.son[idx] = Arc::new(cur_page);
-                    while idx + 1 < self.son.len() && r.smallest().ge(self.son[idx + 1].smallest())
-                    {
-                        idx += 1;
-                    }
-                    cur_page = self.son[idx].as_ref().clone();
+            if idx + 1 < self.son.len()
+                && r.smallest().ge(self.son[idx + 1].smallest())
+                && !cur_records.is_empty()
+            {
+                self.record_number -= cur_page.record_number();
+                cur_page.delete(cur_records);
+                self.record_number += cur_page.record_number();
+                cur_records = Vec::with_capacity(processed_count);
+                self.son[idx] = Arc::new(cur_page);
+                while idx + 1 < self.son.len() && r.smallest().ge(self.son[idx + 1].smallest()) {
+                    idx += 1;
                 }
+                cur_page = self.son[idx].as_ref().clone();
             }
             cur_records.push(r);
             processed_count -= 1;

@@ -109,13 +109,11 @@ pub fn seek_to_metablock<I: InternalIterator>(
     block_handle: Option<&mut BlockHandle>,
 ) -> Result<bool> {
     meta_iter.seek(block_name.as_bytes());
-    if meta_iter.valid() {
-        if meta_iter.key().eq(block_name.as_bytes()) {
-            if let Some(handle) = block_handle {
-                handle.decode_from(meta_iter.value())?;
-            }
-            return Ok(true);
+    if meta_iter.valid() && meta_iter.key().eq(block_name.as_bytes()) {
+        if let Some(handle) = block_handle {
+            handle.decode_from(meta_iter.value())?;
         }
+        return Ok(true);
     }
     Ok(false)
 }

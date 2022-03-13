@@ -12,7 +12,7 @@ pub use slice_transform::{InternalKeySliceTransform, SliceTransform};
 pub use error::Error;
 pub use file_system::{
     AsyncFileSystem, FileSystem, IOOption, InMemFileSystem, RandomAccessFile,
-    RandomAccessFileReader, SequentialFile, SequentialFileReader, SyncPoxisFileSystem,
+    RandomAccessFileReader, SequentialFile, SequentialFileReader, SyncPosixFileSystem,
     WritableFile, WritableFileWriter,
 };
 pub type Result<T> = std::result::Result<T, Error>;
@@ -147,7 +147,7 @@ impl KeyComparator for InternalKeyComparator {
     }
 
     fn find_shortest_separator(&self, start: &mut Vec<u8>, limit: &[u8]) {
-        let user_start = extract_user_key(&start);
+        let user_start = extract_user_key(start);
         let user_limit = extract_user_key(limit);
         let mut tmp = user_start.to_vec();
         self.user_comparator
@@ -163,7 +163,7 @@ impl KeyComparator for InternalKeyComparator {
         }
     }
     fn find_short_successor(&self, key: &mut Vec<u8>) {
-        let user_key = extract_user_key(&key);
+        let user_key = extract_user_key(key);
         let mut tmp = user_key.to_vec();
         self.user_comparator.find_short_successor(&mut tmp);
         if tmp.len() <= user_key.len()

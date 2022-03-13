@@ -1,13 +1,13 @@
 use crate::common::InternalKeyComparator;
 use crate::memtable::Memtable;
 use crate::options::ColumnFamilyOptions;
-use crate::version::{MemtableList, SuperVersion, Version};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{atomic::AtomicU64, Arc};
+use crate::version::{SuperVersion, Version};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 pub struct ColumnFamily {
     mem: Arc<Memtable>,
-    imms: MemtableList,
+    imms: Vec<Arc<Memtable>>,
     super_version: Arc<SuperVersion>,
 
     // An ordinal representing the current SuperVersion. Updated by
@@ -17,9 +17,13 @@ pub struct ColumnFamily {
     version: Arc<Version>,
     comparator: InternalKeyComparator,
     id: u32,
-    log_number: u64,
+
     name: String,
     options: Arc<ColumnFamilyOptions>,
+
+    // The minimal log file which keep data of the memtable of this column family.
+    // So the log files whose number is less than this value could be removed safely.
+    log_number: u64,
 }
 
 impl ColumnFamily {
@@ -38,12 +42,12 @@ impl ColumnFamily {
             mem: mem.clone(),
             imms: Default::default(),
             super_version: Arc::new(SuperVersion {
+                id,
                 mem,
                 imms: Default::default(),
                 current: version.clone(),
                 version_number: 0,
                 column_family_options: options.clone(),
-                valid: AtomicBool::new(true),
             }),
             super_version_number: Arc::new(AtomicU64::new(0)),
             version,
@@ -90,48 +94,57 @@ impl ColumnFamily {
         self.super_version.clone()
     }
 
-    pub fn install_version(&mut self, mems: Vec<u64>, new_version: Version) -> Arc<Version> {
-        let imms = self.imms.remove(mems);
-        self.super_version_number.fetch_add(1, Ordering::Release);
-        let super_version_number = self.super_version_number.load(Ordering::Relaxed);
+    pub fn install_version(&mut self, next_log_number: u64, new_version: Version) -> Arc<Version> {
+        self.remove(next_log_number);
+        let super_version_number = self.super_version_number.fetch_add(1, Ordering::SeqCst) + 1;
         let version = Arc::new(new_version);
         let super_version = Arc::new(SuperVersion::new(
+            self.id,
             self.mem.clone(),
-            imms.clone(),
+            self.imms.clone(),
             version.clone(),
             self.options.clone(),
             super_version_number,
         ));
-        self.super_version.valid.store(false, Ordering::Release);
         self.super_version = super_version;
         self.version = version.clone();
-        self.imms = imms;
+        if version.get_log_number() > 0 {
+            self.log_number = version.get_log_number();
+        }
         version
     }
 
     pub fn switch_memtable(&mut self, mem: Arc<Memtable>) {
-        let imms = self.imms.add(self.mem.clone());
-        self.super_version_number.fetch_add(1, Ordering::Release);
-        let super_version_number = self.super_version_number.load(Ordering::Relaxed);
+        self.imms.push(self.mem.clone());
+        let super_version_number = self.super_version_number.fetch_add(1, Ordering::SeqCst) + 1;
         let super_version = Arc::new(SuperVersion::new(
+            self.id,
             mem.clone(),
-            imms.clone(),
+            self.imms.clone(),
             self.version.clone(),
             self.options.clone(),
             super_version_number,
         ));
-        self.super_version.valid.store(false, Ordering::Release);
         self.super_version = super_version;
-        self.imms = imms;
         self.mem = mem;
     }
 
-    pub fn create_memtable(&self, id: u64, earliest_seq: u64) -> Memtable {
+    pub fn create_memtable(&self, cf_id: u32, earliest_seq: u64) -> Memtable {
         Memtable::new(
-            id,
+            cf_id,
             self.options.write_buffer_size,
             self.comparator.clone(),
             earliest_seq,
         )
+    }
+
+    fn remove(&mut self, next_log_number: u64) {
+        let mut imms = vec![];
+        for m in &self.imms {
+            if next_log_number > 0 && m.get_next_log_number() > next_log_number {
+                imms.push(m.clone());
+            }
+        }
+        self.imms = imms;
     }
 }

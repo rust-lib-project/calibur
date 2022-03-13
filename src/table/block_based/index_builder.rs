@@ -90,11 +90,9 @@ impl IndexBuilder for ShortenedIndexBuilder {
             {
                 self.seperator_is_key_plus_seq = true;
             }
-        } else {
-            if self.shortening_mode == IndexShorteningMode::ShortenSeparatorsAndSuccessor {
-                self.comparator
-                    .find_short_successor(last_key_in_current_block);
-            }
+        } else if self.shortening_mode == IndexShorteningMode::ShortenSeparatorsAndSuccessor {
+            self.comparator
+                .find_short_successor(last_key_in_current_block);
         }
         let sep = last_key_in_current_block.as_slice();
         let entry = IndexValueRef::new(block_handle);
@@ -157,7 +155,7 @@ mod tests {
     };
     use crate::table::block_based::index_reader::IndexReader;
     use crate::table::InternalIterator;
-    use std::path::PathBuf;
+    use std::path::Path;
     use std::sync::Arc;
     use tokio::runtime::Runtime;
 
@@ -187,7 +185,7 @@ mod tests {
         let seperate = builder.seperator_is_key_plus_seq();
         let fs = InMemFileSystem::default();
         let mut f = fs
-            .open_writable_file_writer(PathBuf::from("index_block".to_string()))
+            .open_writable_file_writer(Path::new("index_block"))
             .unwrap();
         let r = Runtime::new().unwrap();
         r.block_on(f.append(&data)).unwrap();
@@ -195,7 +193,7 @@ mod tests {
         r.block_on(f.append(&trailer)).unwrap();
         r.block_on(f.sync()).unwrap();
         let readfile = fs
-            .open_random_access_file(PathBuf::from("index_block"))
+            .open_random_access_file(Path::new("index_block"))
             .unwrap();
         let handle = BlockHandle::new(0, data.len() as u64);
 

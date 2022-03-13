@@ -37,7 +37,7 @@ impl BuilderRep {
         let mut trailer: [u8; 5] = [0; 5];
         trailer[0] = CompressionType::NoCompression as u8;
         // todo: Add checksum for every block.
-        trailer[1..].copy_from_slice(&(0 as u32).to_le_bytes());
+        trailer[1..].copy_from_slice(&(0_u32).to_le_bytes());
         self.file.append(&trailer).await?;
         self.offset += block.len() as u64 + trailer.len() as u64;
         if self.options.block_align && is_data_block {
@@ -286,7 +286,7 @@ mod tests {
     use crate::table::{TableReader, TableReaderOptions};
     use crate::util::next_key;
     use crate::ReadOptions;
-    use std::path::PathBuf;
+    use std::path::Path;
     use tokio::runtime::Runtime;
 
     #[test]
@@ -294,7 +294,7 @@ mod tests {
         let mut opts = BlockBasedTableOptions::default();
         opts.block_size = 128;
         let fs = InMemFileSystem::default();
-        let w = fs.open_writable_file_writer(PathBuf::from("sst0")).unwrap();
+        let w = fs.open_writable_file_writer(Path::new("sst0")).unwrap();
         let tbl_opts = TableBuilderOptions::default();
         let mut builder = BlockBasedTableBuilder::new(&tbl_opts, opts.clone(), w);
         let mut key = b"abcdef".to_vec();
@@ -317,7 +317,7 @@ mod tests {
         }
         runtime.block_on(builder.finish()).unwrap();
         assert_eq!(builder.num_entries(), 2000);
-        let r = fs.open_random_access_file(PathBuf::from("sst0")).unwrap();
+        let r = fs.open_random_access_file(Path::new("sst0")).unwrap();
         let mut tbl_opts = TableReaderOptions::default();
         tbl_opts.file_size = r.file_size();
         let reader = runtime

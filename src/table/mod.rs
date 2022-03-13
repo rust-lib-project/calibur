@@ -157,7 +157,7 @@ impl InMemTableIterator {
 #[async_trait]
 impl TableReader for InMemTableReader {
     async fn get(&self, _opts: &ReadOptions, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        let v = self.inner.data.get(key).map(|v| v.clone());
+        let v = self.inner.data.get(key).cloned();
         Ok(v)
     }
 

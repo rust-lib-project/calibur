@@ -27,13 +27,13 @@ pub struct Block {
 impl Block {
     pub fn new(data: Vec<u8>, global_seqno: u64) -> Self {
         if data.len() < std::mem::size_of::<u32>() {
-            return Block {
+            Block {
                 data: vec![],
                 restart_offset: 0,
                 num_restarts: 0,
                 global_seqno,
                 data_block_hash_index: DataBlockHashIndex::default(),
-            };
+            }
         } else {
             let num_restarts = calculate_num_restarts(&data);
             match calculate_index_type(&data) {
@@ -269,7 +269,7 @@ impl DataBlockIter {
     }
     fn seek_to_restart_point(&mut self, index: u32) {
         self.restart_index = index;
-        self.get_restart_point(index) as usize;
+        self.get_restart_point(index);
         self.value.offset = self.get_restart_point(index) as usize;
         self.value.limit = self.value.offset;
     }

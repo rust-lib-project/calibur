@@ -1,5 +1,8 @@
 mod btree;
 pub mod hash;
+mod test_sync_point;
+pub use test_sync_point::*;
+
 pub use btree::{
     ComparableRecord as BtreeComparable, PageIterator, ThreeLevelBTree as BTree,
     ThreeLevelBTreeIterator as BTreeIter,
@@ -46,29 +49,29 @@ pub fn encode_var_uint32(data: &mut [u8], n: u32) -> usize {
     const MASK: u32 = 255;
     if n < (1 << 7) {
         data[0] = n as u8;
-        return 1;
+        1
     } else if n < (1 << 14) {
         data[0] = ((n | B) & MASK) as u8;
         data[1] = (n >> 7) as u8;
-        return 2;
+        2
     } else if n < (1 << 21) {
         data[0] = ((n | B) & MASK) as u8;
         data[1] = ((n >> 7 | B) & MASK) as u8;
         data[2] = (n >> 14) as u8;
-        return 3;
+        3
     } else if n < (1 << 28) {
         data[0] = ((n | B) & MASK) as u8;
         data[1] = ((n >> 7 | B) & MASK) as u8;
         data[2] = ((n >> 14 | B) & MASK) as u8;
         data[3] = (n >> 21) as u8;
-        return 4;
+        4
     } else {
         data[0] = ((n | B) & MASK) as u8;
         data[1] = ((n >> 7 | B) & MASK) as u8;
         data[2] = ((n >> 14 | B) & MASK) as u8;
         data[3] = ((n >> 21 | B) & MASK) as u8;
         data[4] = (n >> 28) as u8;
-        return 5;
+        5
     }
 }
 
@@ -162,7 +165,7 @@ pub fn get_var_uint32(data: &[u8], offset: &mut usize) -> Option<u32> {
             return Some(ret);
         }
     }
-    return None;
+    None
 }
 
 #[inline(always)]
@@ -185,7 +188,7 @@ pub fn get_var_uint64(data: &[u8], next_offset: &mut usize) -> Option<u64> {
         offset += 1;
     }
     *next_offset += offset + 1;
-    return None;
+    None
 }
 
 #[inline(always)]
