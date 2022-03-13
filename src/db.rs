@@ -15,14 +15,14 @@ use crate::compaction::{
 };
 use crate::iterator::DBIterator;
 use crate::log::LogReader;
-use crate::manifest::{Manifest, ManifestScheduler, ManifestWriter};
-use crate::memtable::Memtable;
+use crate::manifest::{start_manifest_job, Manifest, ManifestScheduler};
 use crate::options::{ColumnFamilyDescriptor, DBOptions, ImmutableDBOptions, ReadOptions};
-use crate::version::{KernelNumberContext, VersionSet};
+use crate::version::{KernelNumberContext, SuperVersion, VersionSet};
 use crate::wal::{WALScheduler, WALTask, WALWriter, WriteMemtableTask};
 use crate::write_batch::{ReadOnlyWriteBatch, WriteBatch, WriteBatchItem};
 use crate::ColumnFamilyOptions;
 
+use crate::memtable::Memtable;
 use crate::pipeline::PipelineCommitQueue;
 use crate::version::snapshot::{Snapshot, SnapshotList};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
@@ -103,7 +103,7 @@ impl Engine {
         let sequence = rwb.wb.get_sequence();
         let last_commit_sequence = sequence - 1;
         let commit_sequence = sequence + rwb.wb.count() as u64 - 1;
-        self.write_memtable(&rwb.wb, sequence, &rwb.mems)?;
+        self.write_memtable(&rwb.wb, sequence, &rwb.cfs)?;
         let step3 = time::precise_time_ns();
         self.commit_queue
             .commit(last_commit_sequence, commit_sequence);
@@ -208,7 +208,7 @@ impl Engine {
         let (tx, rx) = unbounded();
         let (flush_tx, flush_rx) = unbounded();
         let (compaction_tx, compaction_rx) = unbounded();
-        let manifest_scheduler = Self::start_manifest_job(&pool, Box::new(manifest))?;
+        let manifest_scheduler = start_manifest_job(&pool, Box::new(manifest))?;
         let wal_scheduler = WALScheduler::new(tx);
         let mut engine = Engine {
             version_set,
@@ -230,12 +230,29 @@ impl Engine {
     }
 
     async fn recover_log(&mut self, logs: Vec<u64>) -> Result<()> {
+        pub fn check_memtable_cf(cfs: &[Arc<SuperVersion>], cf: u32) -> usize {
+            let mut idx = cf as usize;
+            if idx >= cfs.len() || cf != cfs[idx].id {
+                idx = cfs.len();
+                for i in 0..cfs.len() {
+                    if cfs[i].id == cf {
+                        idx = i;
+                        break;
+                    }
+                }
+                if idx == cfs.len() {
+                    panic!("write miss column family, {}, cf size: {}", cf, cfs.len());
+                }
+            }
+            idx
+        }
+
         let mut min_log_number = u64::MAX;
-        let (versions, cf_mems) = {
+        let (versions, column_families) = {
             let version_set = self.version_set.lock().unwrap();
             (
                 version_set.get_column_family_versions(),
-                version_set.get_column_family_memtables(),
+                version_set.get_column_family_superversion(),
             )
         };
         for v in &versions {
@@ -254,8 +271,35 @@ impl Engine {
             while log_reader.read_record(&mut buf).await? {
                 let wb = ReadOnlyWriteBatch::try_from(buf.clone())?;
                 let count = wb.count() as u64;
-                let sequence = wb.get_sequence();
-                self.write_memtable(&wb, sequence, &cf_mems)?;
+                let mut sequence = wb.get_sequence();
+                for item in wb.iter() {
+                    match item {
+                        WriteBatchItem::Put { cf, key, value } => {
+                            let idx = check_memtable_cf(&column_families, cf);
+                            if log_number > 0
+                                && column_families[idx].current.get_log_number() > log_number
+                            {
+                                continue;
+                            }
+                            column_families[idx].mem.add(
+                                key,
+                                value,
+                                sequence,
+                                ValueType::TypeValue,
+                            );
+                        }
+                        WriteBatchItem::Delete { cf, key } => {
+                            let idx = check_memtable_cf(&column_families, cf);
+                            if log_number > 0
+                                && column_families[idx].current.get_log_number() > log_number
+                            {
+                                continue;
+                            }
+                            column_families[idx].mem.delete(key, sequence);
+                        }
+                    }
+                    sequence += 1;
+                }
                 next_seq = sequence + count - 1;
                 // TODO: flush if the memtable is full
             }
@@ -268,14 +312,14 @@ impl Engine {
         &mut self,
         wb: &ReadOnlyWriteBatch,
         mut sequence: u64,
-        cf_mems: &[(u32, Arc<Memtable>)],
+        cf_mems: &[Arc<Memtable>],
     ) -> Result<()> {
-        pub fn check_memtable_cf(mems: &[(u32, Arc<Memtable>)], cf: u32) -> usize {
+        pub fn check_memtable_cf(mems: &[Arc<Memtable>], cf: u32) -> usize {
             let mut idx = cf as usize;
-            if idx >= mems.len() || cf != mems[idx].0 {
+            if idx >= mems.len() || cf != mems[idx].get_column_family_id() {
                 idx = mems.len();
                 for (i, memtables) in mems.iter().enumerate() {
-                    if memtables.0 == cf {
+                    if memtables.get_column_family_id() == cf {
                         idx = i;
                         break;
                     }
@@ -290,13 +334,11 @@ impl Engine {
             match item {
                 WriteBatchItem::Put { cf, key, value } => {
                     let idx = check_memtable_cf(cf_mems, cf);
-                    cf_mems[idx]
-                        .1
-                        .add(key, value, sequence, ValueType::TypeValue);
+                    cf_mems[idx].add(key, value, sequence, ValueType::TypeValue);
                 }
                 WriteBatchItem::Delete { cf, key } => {
                     let idx = check_memtable_cf(cf_mems, cf);
-                    cf_mems[idx].1.delete(key, sequence);
+                    cf_mems[idx].delete(key, sequence);
                 }
             }
             sequence += 1;
@@ -333,35 +375,6 @@ impl Engine {
         Ok(())
     }
 
-    fn start_manifest_job(
-        pool: &ThreadPool<TaskCell>,
-        manifest: Box<Manifest>,
-    ) -> Result<ManifestScheduler> {
-        let (tx, mut rx) = unbounded();
-        let mut writer = ManifestWriter::new(manifest);
-        pool.spawn(async move {
-            while let Some(x) = rx.next().await {
-                writer.batch(x);
-                while let Ok(x) = rx.try_next() {
-                    match x {
-                        Some(msg) => {
-                            if writer.batch(msg) {
-                                break;
-                            }
-                        }
-                        None => {
-                            writer.apply().await;
-                            return;
-                        }
-                    }
-                }
-                writer.apply().await;
-            }
-        });
-        let engine = ManifestScheduler::new(tx);
-        Ok(engine)
-    }
-
     fn run_wal_job(
         &self,
         flush_scheduler: UnboundedSender<FlushRequest>,
@@ -386,15 +399,21 @@ impl Engine {
                         disable_wal,
                     } => {
                         processor.writer.preprocess_write().await?;
-                        processor.batch(wb, cb, disable_wal, sync);
+                        if disable_wal {
+                            processor.write(wb, cb);
+                        } else {
+                            processor.batch(wb, cb, sync);
+                        }
                     }
                     WALTask::Ingest { .. } => {
                         unimplemented!();
                     }
                     WALTask::CreateColumnFamily { name, opts, cb } => {
-                        processor.flush().await?;
                         let ret = processor.writer.create_column_family(name, opts).await;
                         cb.send(ret).unwrap();
+                    }
+                    WALTask::CompactLog { cf } => {
+                        processor.writer.compact_log(cf)?;
                     }
                 }
                 while let Ok(x) = rx.try_next() {
@@ -405,9 +424,14 @@ impl Engine {
                             sync,
                             disable_wal,
                         }) => {
-                            processor.batch(wb, cb, disable_wal, sync);
-                            if processor.should_flush() {
-                                break;
+                            if disable_wal {
+                                processor.flush().await?;
+                                processor.write(wb, cb);
+                            } else {
+                                processor.batch(wb, cb, sync);
+                                if processor.should_flush() {
+                                    break;
+                                }
                             }
                         }
                         Some(WALTask::CreateColumnFamily { name, opts, cb }) => {
@@ -417,6 +441,12 @@ impl Engine {
                         }
                         Some(WALTask::Ingest { .. }) => {
                             unimplemented!();
+                        }
+                        Some(WALTask::CompactLog { cf }) => {
+                            if processor.tasks.len() > 0 {
+                                processor.flush().await?;
+                            }
+                            processor.writer.compact_log(cf)?;
                         }
                         None => {
                             processor.flush().await?;
@@ -454,11 +484,14 @@ impl Engine {
         let snapshot_list = self.snapshot_list.clone();
         let cf_options = version_set.lock().unwrap().get_column_family_options();
         let commit_queue = self.commit_queue.clone();
+        let mut wal_scheduler = self.wal_scheduler.clone();
 
         let f = async move {
             while let Some(req) = rx.next().await {
                 // We must wait other thread finish their write task to the current memtables.
-                commit_queue.wait_pending_writers(req.wait_commit_request);
+                if commit_queue.wait_pending_writers(req.wait_commit_request) {
+                    return Ok(());
+                }
                 let mut snapshots = vec![];
                 {
                     let mut snapshot_guard = snapshot_list.lock().unwrap();
@@ -476,6 +509,7 @@ impl Engine {
                 .await?;
                 for cf in cfs {
                     let _ = compaction_scheduler.send(cf).await;
+                    let _ = wal_scheduler.schedule_compact_log(cf).await;
                 }
             }
             Ok(())
@@ -502,7 +536,7 @@ const MAX_BATCH_SIZE: usize = 1 << 20; // 1MB
 
 pub struct BatchWALProcessor {
     writer: WALWriter,
-    tasks: Vec<(ReadOnlyWriteBatch, Sender<Result<WriteMemtableTask>>, bool)>,
+    tasks: Vec<(ReadOnlyWriteBatch, Sender<Result<WriteMemtableTask>>)>,
     need_sync: bool,
     batch_size: usize,
 }
@@ -521,27 +555,32 @@ impl BatchWALProcessor {
         &mut self,
         wb: ReadOnlyWriteBatch,
         cb: Sender<Result<WriteMemtableTask>>,
-        disable_wal: bool,
         sync: bool,
     ) {
         if sync {
             self.need_sync = true;
         }
-        if !disable_wal {
-            self.batch_size += wb.get_data().len();
-        }
-        self.tasks.push((wb, cb, disable_wal));
+        self.batch_size += wb.get_data().len();
+        self.tasks.push((wb, cb));
     }
 
     pub fn should_flush(&self) -> bool {
         self.batch_size > MAX_BATCH_SIZE
     }
 
+    pub fn write(&mut self, mut wb: ReadOnlyWriteBatch, cb: Sender<Result<WriteMemtableTask>>) {
+        let cfs = self.writer.assign_sequence(&mut wb);
+        let _ = cb.send(Ok(WriteMemtableTask { wb, cfs }));
+    }
+
     pub async fn flush(&mut self) -> Result<()> {
+        if self.tasks.is_empty() {
+            return Ok(());
+        }
         let r = self.writer.write(&mut self.tasks, self.need_sync).await;
         self.need_sync = false;
         self.batch_size = 0;
-        for (wb, cb, _) in self.tasks.drain(..) {
+        for (wb, cb) in self.tasks.drain(..) {
             match &r {
                 Err(e) => {
                     let _ = cb.send(Err(e.clone()));
@@ -549,7 +588,7 @@ impl BatchWALProcessor {
                 Ok(mems) => {
                     let _ = cb.send(Ok(WriteMemtableTask {
                         wb,
-                        mems: mems.clone(),
+                        cfs: mems.clone(),
                     }));
                 }
             }
@@ -562,24 +601,33 @@ impl BatchWALProcessor {
 mod tests {
     use super::*;
     use crate::common::AsyncFileSystem;
+    use crate::util;
+    use std::collections::HashMap;
+    use std::sync::atomic::AtomicU64;
     use std::thread::sleep;
     use std::time::{Duration, Instant};
     use tempfile::TempDir;
     use tokio::runtime::Runtime;
 
     fn build_small_write_buffer_db(dir: &TempDir) -> Engine {
-        let r = Runtime::new().unwrap();
-        let mut db_options = DBOptions::default();
-        db_options.fs = Arc::new(AsyncFileSystem::new(2));
-        db_options.db_path = dir.path().to_str().unwrap().to_string();
         let mut cf_opt = ColumnFamilyOptions::default();
         cf_opt.write_buffer_size = 128 * 1024;
         let cfs = vec![ColumnFamilyDescriptor {
             name: "default".to_string(),
             options: cf_opt,
         }];
+        build_db(dir, cfs)
+    }
+
+    fn build_db(dir: &TempDir, cfs: Vec<ColumnFamilyDescriptor>) -> Engine {
+        let r = Runtime::new().unwrap();
+        let mut db_options = DBOptions::default();
+        db_options.max_manifest_file_size = 128 * 1024;
+        db_options.max_total_wal_size = 128 * 1024;
+        db_options.fs = Arc::new(AsyncFileSystem::new(2));
+        db_options.db_path = dir.path().to_str().unwrap().to_string();
         let engine = r
-            .block_on(Engine::open(db_options.clone(), cfs.clone(), None))
+            .block_on(Engine::open(db_options.clone(), cfs, None))
             .unwrap();
         engine
     }
@@ -665,6 +713,7 @@ mod tests {
         }
         sleep(Duration::from_secs(2));
         {
+            let fs = engine.options.fs.clone();
             let vs = engine.version_set.lock().unwrap();
             let v = vs.get_superversion(0).unwrap();
             assert_eq!(v.current.get_storage_info().get_level0_file_num(), 2);
@@ -678,6 +727,14 @@ mod tests {
                     .size(),
                 1
             );
+            let files = fs.list_files(dir.path()).unwrap();
+            let mut count = 0;
+            for f in files {
+                if f.to_str().unwrap().ends_with("log") {
+                    count += 1;
+                }
+            }
+            assert_eq!(count, 1);
         }
         let opts = ReadOptions::default();
         let expected_value = b"v00000000000001".to_vec();
@@ -722,5 +779,124 @@ mod tests {
             r.block_on(iter.next());
         }
         assert!(!iter.valid());
+    }
+
+    #[test]
+    fn test_switch_memtable_and_wal() {
+        let dir = tempfile::Builder::new()
+            .prefix("test_switch_memtable_and_wal")
+            .tempdir()
+            .unwrap();
+        let r = Runtime::new().unwrap();
+        let mut wb = WriteBatch::new();
+        const TOTAL_CASES: usize = 100;
+        let mut cf_opt = ColumnFamilyOptions::default();
+        cf_opt.write_buffer_size = 128 * 1024;
+        util::enable_processing();
+        let cfs = vec![
+            ColumnFamilyDescriptor {
+                name: "default".to_string(),
+                options: ColumnFamilyOptions::default(),
+            },
+            ColumnFamilyDescriptor {
+                name: "lock".to_string(),
+                options: ColumnFamilyOptions::default(),
+            },
+            ColumnFamilyDescriptor {
+                name: "write".to_string(),
+                options: ColumnFamilyOptions::default(),
+            },
+        ];
+        let mut engine = build_db(&dir, cfs);
+        let first_switch_wal_number = Arc::new(AtomicU64::new(0));
+        let switch_wal_number = first_switch_wal_number.clone();
+        util::set_callback("switch_wal", move |v| {
+            let x = v.unwrap();
+            if switch_wal_number.load(Ordering::Acquire) == 0 {
+                switch_wal_number.store(x.parse::<u64>().unwrap(), Ordering::Release);
+            }
+            None
+        });
+        let switch_wal_number = first_switch_wal_number.clone();
+        let flush_cf = Arc::new(Mutex::new(HashMap::<u32, u64>::new()));
+        let cfs = flush_cf.clone();
+        util::set_callback("switch_memtable", move |v| {
+            let x = v.unwrap().parse::<u64>().unwrap();
+            let cf_id = (x % 1000) as u32;
+            let log_number = x / 1000;
+            if switch_wal_number.load(Ordering::Acquire) != 0 {
+                let mut guard = cfs.lock().unwrap();
+                if guard.get(&cf_id).is_none() {
+                    assert_eq!(log_number, switch_wal_number.load(Ordering::Acquire));
+                    guard.insert(cf_id, log_number);
+                }
+            }
+            None
+        });
+        let cfs = flush_cf.clone();
+        let switch_wal_number = first_switch_wal_number.clone();
+        util::set_callback("switch_empty_memtable", move |v| {
+            let x = v.unwrap().parse::<u64>().unwrap();
+            let cf_id = (x % 1000) as u32;
+            let log_number = x / 1000;
+            if switch_wal_number.load(Ordering::Acquire) == log_number {
+                let mut guard = cfs.lock().unwrap();
+                guard.insert(cf_id, 0);
+            }
+            None
+        });
+        let flush_memtable_count_wal = Arc::new(AtomicU64::new(0));
+        let flush_memtable_count = flush_memtable_count_wal.clone();
+        let total_flush_memtable_count = Arc::new(AtomicU64::new(0));
+        let count1 = total_flush_memtable_count.clone();
+        let switch_wal_number = first_switch_wal_number.clone();
+        let cfs = flush_cf.clone();
+        let (cb, rc) = std::sync::mpsc::channel();
+        let block_point = Arc::new(Mutex::new(Option::Some(rc)));
+        util::set_callback("run_flush_memtable_job", move |v| {
+            let v = v.unwrap().parse::<u64>().unwrap();
+            if switch_wal_number.load(Ordering::Acquire) != 0 {
+                let guard = cfs.lock().unwrap();
+                let cf_id = (v % 1000) as u32;
+                if let Some(flush_log_umber) = guard.get(&cf_id) {
+                    if *flush_log_umber == v / 1000 {
+                        flush_memtable_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
+            if count1.fetch_add(1, Ordering::SeqCst) == 0 {
+                let rc = block_point.lock().unwrap().take().unwrap();
+                rc.recv().unwrap();
+            }
+            None
+        });
+        for i in 0..TOTAL_CASES {
+            for j in 0..100 {
+                let k = (i * 100 + j).to_string();
+                wb.put_cf(0, k.as_bytes(), b"v00000000000001");
+                if j % 3 == 0 {
+                    wb.put_cf(1, k.as_bytes(), b"v00000000000001");
+                }
+            }
+            r.block_on(engine.write_opt(&mut wb, false, false)).unwrap();
+            wb.clear();
+        }
+        {
+            let vs = engine.version_set.lock().unwrap();
+            let v = vs.get_superversion(0).unwrap();
+            assert_eq!(2, v.imms.len());
+        }
+        let _ = cb.send(());
+        while flush_memtable_count_wal.load(Ordering::Relaxed) < 2 {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert_eq!(flush_memtable_count_wal.load(Ordering::Relaxed), 2);
+        let x = { *flush_cf.lock().unwrap().get(&2).unwrap() };
+        assert_eq!(x, 0);
+        {
+            let vs = engine.version_set.lock().unwrap();
+            let v = vs.get_superversion(0).unwrap();
+            assert_eq!(0, v.imms.len());
+        }
     }
 }

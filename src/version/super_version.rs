@@ -1,4 +1,3 @@
-use super::version::MemtableList;
 use crate::common::format::pack_sequence_and_type;
 use crate::common::{Result, VALUE_TYPE_FOR_SEEK};
 use crate::iterator::{AsyncIterator, AsyncMergingIterator};
@@ -6,33 +5,33 @@ use crate::memtable::Memtable;
 use crate::options::ReadOptions;
 use crate::version::Version;
 use crate::ColumnFamilyOptions;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 pub struct SuperVersion {
+    pub id: u32,
     pub mem: Arc<Memtable>,
-    pub imms: MemtableList,
+    pub imms: Vec<Arc<Memtable>>,
     pub current: Arc<Version>,
     pub column_family_options: Arc<ColumnFamilyOptions>,
     pub version_number: u64,
-    pub valid: AtomicBool,
 }
 
 impl SuperVersion {
     pub fn new(
+        id: u32,
         mem: Arc<Memtable>,
-        imms: MemtableList,
+        imms: Vec<Arc<Memtable>>,
         current: Arc<Version>,
         column_family_options: Arc<ColumnFamilyOptions>,
         version_number: u64,
     ) -> SuperVersion {
         SuperVersion {
+            id,
             mem,
             imms,
             current,
             column_family_options,
             version_number,
-            valid: AtomicBool::new(true),
         }
     }
 
@@ -50,9 +49,9 @@ impl SuperVersion {
         if let Some(v) = self.mem.get(&ikey) {
             return Ok(Some(v));
         }
-        let l = self.imms.mems.len();
+        let l = self.imms.len();
         for i in 0..l {
-            if let Some(v) = self.imms.mems[l - i - 1].get(&ikey) {
+            if let Some(v) = self.imms[l - i - 1].get(&ikey) {
                 return Ok(Some(v));
             }
         }
@@ -61,9 +60,9 @@ impl SuperVersion {
 
     pub fn new_iterator(&self, opts: &ReadOptions) -> Result<Box<dyn AsyncIterator>> {
         let mut iters = vec![self.mem.new_async_iterator()];
-        let l = self.imms.mems.len();
+        let l = self.imms.len();
         for i in 0..l {
-            iters.push(self.imms.mems[l - i - 1].new_async_iterator());
+            iters.push(self.imms[l - i - 1].new_async_iterator());
         }
         self.current
             .get_storage_info()

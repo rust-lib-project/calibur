@@ -5,6 +5,7 @@ use crate::compaction::{CompactionEngine, FlushRequest};
 use crate::iterator::{InternalIterator, MergingIterator};
 use crate::memtable::Memtable;
 use crate::options::{ColumnFamilyOptions, ImmutableDBOptions};
+use crate::sync_point;
 use crate::table::TableBuilderOptions;
 use crate::version::{FileMetaData, KernelNumberContext, VersionEdit};
 use std::collections::HashMap;
@@ -35,7 +36,6 @@ impl<E: CompactionEngine> FlushJob<E> {
     ) -> Self {
         let mut version_edit = VersionEdit::default();
         version_edit.column_family = cf_id;
-        version_edit.mems_deleted = mems.iter().map(|m| m.get_id()).collect();
         version_edit.prev_log_number = 0;
         version_edit.set_log_number(mems.last().unwrap().get_next_log_number());
         let meta = FileMetaData::new(file_number, 0, vec![], vec![]);
@@ -120,7 +120,6 @@ pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
     for (i, memtables) in mems.iter().enumerate() {
         if !memtables.is_empty() {
             let file_number = kernel.new_file_number();
-            let memids = memtables.iter().map(|mem| mem.get_id()).collect();
             let idx = i as u32;
             let cf_opt = cf_options
                 .get(&idx)
@@ -141,6 +140,10 @@ pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
             let mut edit = VersionEdit::default();
             edit.prev_log_number = 0;
             edit.set_log_number(memtables.last().unwrap().get_next_log_number());
+            sync_point!(
+                "run_flush_memtable_job",
+                edit.get_log_number() * 1000 + i as u64
+            );
             edit.add_file(
                 0,
                 file_number,
@@ -150,7 +153,6 @@ pub async fn run_flush_memtable_job<Engine: CompactionEngine>(
                 meta.fd.smallest_seqno,
                 meta.fd.largest_seqno,
             );
-            edit.mems_deleted = memids;
             edit.column_family = i as u32;
             edits.push(edit);
         }

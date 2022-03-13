@@ -2,7 +2,7 @@ use crate::common::{
     make_current_file, make_descriptor_file_name, make_table_file_name, make_temp_plain_file_name,
     parse_file_name, DBFileType, Error, FileSystem, Result,
 };
-use futures::channel::mpsc::UnboundedSender;
+use futures::channel::mpsc::{unbounded, UnboundedSender};
 use futures::channel::oneshot::{channel as once_channel, Sender as OnceSender};
 
 use crate::compaction::CompactionEngine;
@@ -14,10 +14,12 @@ use crate::version::{
     FileMetaData, KernelNumberContext, TableFile, Version, VersionEdit, VersionSet,
 };
 use crate::{ColumnFamilyOptions, KeyComparator};
-use futures::SinkExt;
+use futures::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use yatp::task::future::TaskCell;
+use yatp::ThreadPool;
 
 const MAX_BATCH_SIZE: usize = 128;
 
@@ -265,16 +267,15 @@ impl Manifest {
             }
             let opts = self.cf_options.get(&cf).unwrap();
             let version = self.versions.get(&cf).unwrap();
-            let mut mems = vec![];
             let mut to_add = vec![];
             let mut to_delete = vec![];
             // Do not apply version edits with holding a mutex.
             let mut log_number = 0;
-            for mut e in edits {
+            for e in edits {
                 if e.has_log_number {
-                    log_number = std::cmp::max(log_number, e.log_number);
+                    assert!(e.log_number > log_number);
+                    log_number = e.log_number;
                 }
-                mems.append(&mut e.mems_deleted);
                 for m in e.deleted_files {
                     if let Some(f) = self.files_by_id.remove(&m.fd.get_number()) {
                         to_delete.push(f);
@@ -307,7 +308,7 @@ impl Manifest {
                 opts.max_bytes_for_level_multiplier,
             );
             let mut version_set = self.version_set.lock().unwrap();
-            let version = version_set.install_version(cf, mems, new_version)?;
+            let version = version_set.install_version(cf, log_number, new_version)?;
             self.versions.insert(cf, version);
         }
         self.log.as_mut().unwrap().fsync().await?;
@@ -491,4 +492,33 @@ pub async fn get_current_manifest_path(
     }
     manifest_path.push_str(&fname);
     Ok((manifest_path, manifest_file_number))
+}
+
+pub fn start_manifest_job(
+    pool: &ThreadPool<TaskCell>,
+    manifest: Box<Manifest>,
+) -> Result<ManifestScheduler> {
+    let (tx, mut rx) = unbounded();
+    let mut writer = ManifestWriter::new(manifest);
+    pool.spawn(async move {
+        while let Some(x) = rx.next().await {
+            writer.batch(x);
+            while let Ok(x) = rx.try_next() {
+                match x {
+                    Some(msg) => {
+                        if writer.batch(msg) {
+                            break;
+                        }
+                    }
+                    None => {
+                        writer.apply().await;
+                        return;
+                    }
+                }
+            }
+            writer.apply().await;
+        }
+    });
+    let engine = ManifestScheduler::new(tx);
+    Ok(engine)
 }

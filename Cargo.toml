@@ -20,5 +20,8 @@ rand = "0.7"
 yatp = { git = "https://github.com/tikv/yatp.git", branch = "master" }
 time = "0.1"
 
+[dependencies.lazy_static]
+version = "1.2"
+
 [dev-dependencies]
 tempfile = "3.1"
