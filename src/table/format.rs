@@ -65,7 +65,7 @@ impl<'a> IndexValueRef<'a> {
 
     pub fn to_owned(&self) -> IndexValue {
         IndexValue {
-            handle: self.handle.clone(),
+            handle: *self.handle,
         }
     }
 

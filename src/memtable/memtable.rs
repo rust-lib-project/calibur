@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 pub struct Memtable {
     rep: Box<InlineSkipListMemtableRep>,
     mem_next_logfile_number: AtomicU64,
-    id: u64,
+    cf_id: u32,
     comparator: InternalKeyComparator,
     pending_schedule: AtomicBool,
     first_seqno: AtomicU64,
@@ -19,7 +19,7 @@ pub struct Memtable {
 
 impl Memtable {
     pub fn new(
-        id: u64,
+        cf_id: u32,
         max_write_buffer_size: usize,
         comparator: InternalKeyComparator,
         earliest_seq: u64,
@@ -28,7 +28,7 @@ impl Memtable {
             rep: Box::new(InlineSkipListMemtableRep::new(comparator.clone())),
             comparator,
             mem_next_logfile_number: AtomicU64::new(0),
-            id,
+            cf_id,
             pending_schedule: AtomicBool::new(false),
             max_write_buffer_size,
             first_seqno: AtomicU64::new(0),
@@ -59,8 +59,8 @@ impl Memtable {
         self.rep.delete(&mut ctx.splice, key, sequence);
     }
 
-    pub fn get_id(&self) -> u64 {
-        self.id
+    pub fn get_column_family_id(&self) -> u32 {
+        self.cf_id
     }
 
     pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {

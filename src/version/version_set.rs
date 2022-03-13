@@ -91,9 +91,7 @@ impl VersionSet {
         let mut column_family_set = HashMap::default();
         let mut column_family_set_names = HashMap::default();
         for (cf_id, version) in versions {
-            let cf_opt = cf_options
-                .remove(version.get_cf_name())
-                .unwrap_or(ColumnFamilyOptions::default());
+            let cf_opt = cf_options.remove(version.get_cf_name()).unwrap_or_default();
             column_family_set_names.insert(version.get_cf_name().to_string(), cf_id);
             column_family_set.insert(
                 cf_id,
@@ -101,7 +99,35 @@ impl VersionSet {
                     cf_id,
                     version.get_cf_name().to_string(),
                     Memtable::new(
-                        kernel.new_memtable_number(),
+                        cf_id,
+                        cf_opt.write_buffer_size,
+                        cf_opt.comparator.clone(),
+                        MAX_SEQUENCE_NUMBER,
+                    ),
+                    cf_opt.comparator.clone(),
+                    version,
+                    cf_opt,
+                ),
+            );
+        }
+        for (name, cf_opt) in cf_options {
+            let cf_id = kernel.next_column_family_id();
+            let version = Arc::new(Version::new(
+                cf_id,
+                name.clone(),
+                cf_opt.comparator.name().to_string(),
+                vec![],
+                0,
+                cf_opt.max_level,
+            ));
+            column_family_set_names.insert(name, cf_id);
+            column_family_set.insert(
+                cf_id,
+                ColumnFamily::new(
+                    cf_id,
+                    version.get_cf_name().to_string(),
+                    Memtable::new(
+                        cf_id,
                         cf_opt.write_buffer_size,
                         cf_opt.comparator.clone(),
                         MAX_SEQUENCE_NUMBER,
@@ -145,12 +171,12 @@ impl VersionSet {
         versions
     }
 
-    pub fn get_column_family_memtables(&self) -> Vec<(u32, Arc<Memtable>)> {
+    pub fn get_column_family_superversion(&self) -> Vec<Arc<SuperVersion>> {
         let mut mems = vec![];
-        for (id, cf) in self.column_family_set.iter() {
-            mems.push((*id, cf.get_super_version().mem.clone()));
+        for (_, cf) in self.column_family_set.iter() {
+            mems.push(cf.get_super_version());
         }
-        mems.sort_by_key(|m| m.0);
+        mems.sort_by_key(|m| m.id);
         mems
     }
 
@@ -182,22 +208,39 @@ impl VersionSet {
 
     pub fn switch_memtable(&mut self, cf: u32, earliest_seq: u64) -> Arc<Memtable> {
         let cf = self.column_family_set.get_mut(&cf).unwrap();
-        let mem = Arc::new(cf.create_memtable(self.kernel.new_memtable_number(), earliest_seq));
+        let mem = Arc::new(cf.create_memtable(cf.get_id(), earliest_seq));
         cf.switch_memtable(mem.clone());
         mem
+    }
+
+    pub fn set_log_number(&mut self, cf: u32, log_number: u64) {
+        let cf = self.column_family_set.get_mut(&cf).unwrap();
+        cf.set_log_number(log_number);
+    }
+
+    pub fn get_min_log_number_to_leep(&self) -> u64 {
+        let mut min_number = 0;
+        for (_, cf) in self.column_family_set.iter() {
+            let log_number = cf.get_log_number();
+            if log_number > 0 {
+                if min_number == 0 || min_number > log_number {
+                    min_number = log_number;
+                }
+            }
+        }
+        min_number
     }
 
     pub fn schedule_immutable_memtables(&mut self, mems: &mut Vec<(u32, Arc<Memtable>)>) {
         for (id, cf) in self.column_family_set.iter() {
             let version = cf.get_super_version();
-            let l = version.imms.mems.len();
+            let l = version.imms.len();
             for i in 0..l {
-                if version.imms.mems[i].is_pending_schedule() {
-                    assert!(mems.is_empty());
+                if version.imms[i].is_pending_schedule() {
                     continue;
                 }
-                version.imms.mems[i].mark_schedule_flush();
-                mems.push((*id, version.imms.mems[i].clone()));
+                version.imms[i].mark_schedule_flush();
+                mems.push((*id, version.imms[i].clone()));
             }
         }
     }
@@ -207,7 +250,7 @@ impl VersionSet {
         let id = edit.column_family;
         let name = edit.column_family_name.clone();
         let m = Memtable::new(
-            self.kernel.new_memtable_number(),
+            id,
             cf_opt.write_buffer_size,
             cf_opt.comparator.clone(),
             self.kernel.last_sequence(),
@@ -243,15 +286,15 @@ impl VersionSet {
     pub fn install_version(
         &mut self,
         cf_id: u32,
-        mems: Vec<u64>,
+        next_log_number: u64,
         version: Version,
     ) -> Result<Arc<Version>> {
         if let Some(cf) = self.column_family_set.get_mut(&cf_id) {
-            Ok(cf.install_version(mems, version))
+            Ok(cf.install_version(next_log_number, version))
         } else {
-            Err(Error::CompactionError(format!(
-                "column faimly has been dropped"
-            )))
+            Err(Error::CompactionError(
+                "column family has been dropped".to_string(),
+            ))
         }
     }
 

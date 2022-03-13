@@ -828,6 +828,7 @@ dependencies = [
  "futures 0.3.21",
  "futures-executor",
  "futures-timer",
+ "lazy_static",
  "nix",
  "rand 0.7.3",
  "spin",

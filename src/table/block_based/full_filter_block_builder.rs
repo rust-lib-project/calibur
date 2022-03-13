@@ -94,7 +94,6 @@ impl FullFilterBlockBuilder {
         if self.whole_key_filtering {
             let last_prefix = self.last_prefix_str.as_slice();
             if !self.last_prefix_recorded || last_prefix.eq(prefix) {
-                drop(last_prefix);
                 self.add_key(prefix);
                 self.last_prefix_recorded = true;
                 self.last_prefix_str = prefix.to_vec();

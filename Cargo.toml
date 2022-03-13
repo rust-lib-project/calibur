@@ -21,6 +21,9 @@ yatp = { git = "https://github.com/tikv/yatp.git", branch = "master" }
 time = "0.1"
 spin = "0.9.2"
 
+[dependencies.lazy_static]
+version = "1.2"
+
 [dev-dependencies]
 tempfile = "3.1"
 criterion = "0.3"
