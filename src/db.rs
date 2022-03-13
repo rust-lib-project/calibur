@@ -727,7 +727,7 @@ mod tests {
                     .size(),
                 1
             );
-            let files = fs.list_files(dir.path().to_path_buf()).unwrap();
+            let files = fs.list_files(dir.path()).unwrap();
             let mut count = 0;
             for f in files {
                 if f.to_str().unwrap().ends_with("log") {
