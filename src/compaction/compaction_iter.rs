@@ -239,9 +239,9 @@ async fn inner_next(inner: &mut InnerIterator) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::format::pack_sequence_and_type;
+    use crate::common::format::pack_sequence_and_type_to_key;
     use crate::common::InternalKeyComparator;
-    use crate::memtable::Memtable;
+    use crate::memtable::{MemTableContext, Memtable};
     use tokio::runtime::Runtime;
 
     fn test_compaction_with_snapshot(
@@ -251,6 +251,7 @@ mod tests {
         expected_ret: Vec<(Vec<u8>, Vec<u8>)>,
         bottommost_level: bool,
     ) {
+        println!("test snapshots: {:?}", snapshots);
         let iter = memtable.new_iterator();
         let mut compaction_iter = CompactionIter::new(
             iter,
@@ -273,14 +274,15 @@ mod tests {
         let ret = r.block_on(f);
         assert_eq!(ret.len(), expected_ret.len());
         for i in 0..ret.len() {
-            assert_eq!(ret[i], expected_ret[i]);
+            assert_eq!(ret[i], expected_ret[i], "the {}th case failed", i);
         }
     }
 
     #[test]
     fn test_compaction_iterator() {
         let comparator = InternalKeyComparator::default();
-        let memtable = Memtable::new(10, 10, comparator.clone(), MAX_SEQUENCE_NUMBER);
+        let memtable = Memtable::new(10, 10000000, comparator.clone(), MAX_SEQUENCE_NUMBER);
+        let mut ctx = MemTableContext::default();
 
         // no pending snapshot
         let mut expected_ret1 = vec![];
@@ -299,49 +301,42 @@ mod tests {
 
         for i in 0..1000u64 {
             let key = format!("test_compaction-{}", i);
-            let mut k1 = key.into_bytes();
-            let l = k1.len();
+            let k1 = key.into_bytes();
 
-            let v0 = pack_sequence_and_type(10, ValueType::TypeValue as u8);
-            k1.extend_from_slice(&v0.to_le_bytes());
-            memtable.insert(&k1, b"v0");
-            expected_ret4.push((k1.clone(), b"v0".to_vec()));
-            k1.resize(l, 0);
+            memtable.add(&mut ctx, &k1, b"v0", 10);
+            expected_ret4.push((
+                pack_sequence_and_type_to_key(&k1, 10, ValueType::TypeValue),
+                b"v0".to_vec(),
+            ));
 
-            let v1 = pack_sequence_and_type(12, ValueType::TypeValue as u8);
-            k1.extend_from_slice(&v1.to_le_bytes());
-            memtable.insert(&k1, b"v1");
+            memtable.add(&mut ctx, &k1, b"v1", 12);
+            let key = pack_sequence_and_type_to_key(&k1, 12, ValueType::TypeValue);
             if i % 2 != 0 {
-                expected_ret1.push((k1.clone(), b"v1".to_vec()));
-                expected_ret3.push((k1.clone(), b"v1".to_vec()));
-                expected_ret4.push((k1.clone(), b"v1".to_vec()));
-                expected_ret5.push((k1.clone(), b"v1".to_vec()));
+                expected_ret1.push((key.clone(), b"v1".to_vec()));
+                expected_ret3.push((key.clone(), b"v1".to_vec()));
+                expected_ret4.push((key.clone(), b"v1".to_vec()));
+                expected_ret5.push((key.clone(), b"v1".to_vec()));
             }
-            expected_ret2.push((k1.clone(), b"v1".to_vec()));
-
-            k1.resize(l, 0);
+            expected_ret2.push((key.clone(), b"v1".to_vec()));
 
             if i % 2 == 0 {
-                let v2 = pack_sequence_and_type(14, ValueType::TypeDeletion as u8);
-                k1.extend_from_slice(&v2.to_le_bytes());
-                memtable.insert(&k1, b"");
+                memtable.delete(&mut ctx, &k1, 14);
+                let key = pack_sequence_and_type_to_key(&k1, 14, ValueType::TypeDeletion);
                 if i % 4 != 0 {
-                    expected_ret1.push((k1.clone(), vec![]));
-                    expected_ret2.push((k1.clone(), vec![]));
+                    expected_ret1.push((key.clone(), vec![]));
+                    expected_ret2.push((key.clone(), vec![]));
                 }
-                expected_ret3.push((k1.clone(), vec![]));
-                expected_ret4.push((k1.clone(), vec![]));
-                k1.resize(l, 0);
+                expected_ret3.push((key.clone(), vec![]));
+                expected_ret4.push((key.clone(), vec![]));
             }
             if i % 4 == 0 {
-                let v3 = pack_sequence_and_type(16, ValueType::TypeValue as u8);
-                k1.extend_from_slice(&v3.to_le_bytes());
-                memtable.insert(&k1, b"v3");
-                expected_ret1.push((k1.clone(), b"v3".to_vec()));
-                expected_ret2.push((k1.clone(), b"v3".to_vec()));
-                expected_ret3.push((k1.clone(), b"v3".to_vec()));
-                expected_ret4.push((k1.clone(), b"v3".to_vec()));
-                expected_ret5.push((k1, b"v3".to_vec()));
+                memtable.add(&mut ctx, &k1, b"v3", 16);
+                let key = pack_sequence_and_type_to_key(&k1, 16, ValueType::TypeValue);
+                expected_ret1.push((key.clone(), b"v3".to_vec()));
+                expected_ret2.push((key.clone(), b"v3".to_vec()));
+                expected_ret3.push((key.clone(), b"v3".to_vec()));
+                expected_ret4.push((key.clone(), b"v3".to_vec()));
+                expected_ret5.push((key, b"v3".to_vec()));
             }
         }
         expected_ret1.sort_by(|a, b| comparator.compare_key(&a.0, &b.0));

@@ -66,19 +66,30 @@ impl Slice {
 pub const VALUE_TYPE_FOR_SEEK: u8 = ValueType::TypeBlobIndex as u8;
 pub const VALUE_TYPE_FOR_SEEK_FOR_PREV: u8 = ValueType::TypeDeletion as u8;
 
+#[inline(always)]
 pub fn pack_sequence_and_type(seq: u64, t: u8) -> u64 {
     (seq << 8) | t as u64
 }
 
+pub fn pack_sequence_and_type_to_key(key: &[u8], seq: u64, t: ValueType) -> Vec<u8> {
+    let mut ret = Vec::with_capacity(key.len() + 8);
+    ret.extend_from_slice(key);
+    ret.extend_from_slice(&pack_sequence_and_type(seq, t as u8).to_le_bytes());
+    ret
+}
+
+#[inline(always)]
 pub fn extract_user_key(key: &[u8]) -> &[u8] {
     let l = key.len();
     &key[..(l - 8)]
 }
 
+#[inline(always)]
 pub fn extract_internal_key_footer(key: &[u8]) -> u64 {
     unsafe { u64::from_le_bytes(*(key as *const _ as *const [u8; 8])) }
 }
 
+#[inline(always)]
 pub fn extract_value_type(key: &[u8]) -> u8 {
     let l = key.len();
     assert!(l >= 8);
@@ -86,6 +97,7 @@ pub fn extract_value_type(key: &[u8]) -> u8 {
     (num & 0xffu64) as u8
 }
 
+#[inline(always)]
 pub fn is_value_type(t: u8) -> bool {
     t <= ValueType::TypeMerge as u8 || t == ValueType::TypeBlobIndex as u8
 }

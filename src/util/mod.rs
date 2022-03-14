@@ -8,18 +8,22 @@ pub use btree::{
     ThreeLevelBTreeIterator as BTreeIter,
 };
 
+#[inline(always)]
 pub fn decode_fixed_uint32(key: &[u8]) -> u32 {
     unsafe { u32::from_le_bytes(*(key as *const _ as *const [u8; 4])) }
 }
 
+#[inline(always)]
 pub fn decode_fixed_uint16(key: &[u8]) -> u16 {
     unsafe { u16::from_le_bytes(*(key as *const _ as *const [u8; 2])) }
 }
 
+#[inline(always)]
 pub fn decode_fixed_uint64(key: &[u8]) -> u64 {
     unsafe { u64::from_le_bytes(*(key as *const _ as *const [u8; 8])) }
 }
 
+#[inline(always)]
 pub fn difference_offset(origin: &[u8], target: &[u8]) -> usize {
     let mut off = 0;
     let len = std::cmp::min(origin.len(), target.len());
@@ -29,6 +33,17 @@ pub fn difference_offset(origin: &[u8], target: &[u8]) -> usize {
     off
 }
 
+#[inline(always)]
+pub fn varint_length(mut v: usize) -> usize {
+    let mut len = 1;
+    while v >= 128 {
+        v >>= 7;
+        len += 1;
+    }
+    len
+}
+
+#[inline(always)]
 pub fn encode_var_uint32(data: &mut [u8], n: u32) -> usize {
     const B: u32 = 128;
     const MASK: u32 = 255;
@@ -60,12 +75,14 @@ pub fn encode_var_uint32(data: &mut [u8], n: u32) -> usize {
     }
 }
 
+#[inline(always)]
 pub fn put_var_uint32(data: &mut Vec<u8>, n: u32) {
     let mut tmp: [u8; 5] = [0u8; 5];
     let offset = encode_var_uint32(&mut tmp, n);
     data.extend_from_slice(&tmp[..offset]);
 }
 
+#[inline(always)]
 pub fn encode_var_uint64(data: &mut [u8], mut v: u64) -> usize {
     const B: u64 = 128;
     let mut offset = 0;
@@ -78,12 +95,14 @@ pub fn encode_var_uint64(data: &mut [u8], mut v: u64) -> usize {
     offset + 1
 }
 
+#[inline(always)]
 pub fn put_var_uint64(data: &mut Vec<u8>, n: u64) {
     let mut tmp: [u8; 10] = [0u8; 10];
     let offset = encode_var_uint64(&mut tmp, n);
     data.extend_from_slice(&tmp[..offset]);
 }
 
+#[inline(always)]
 pub fn put_varint32varint32(dist: &mut Vec<u8>, v1: u32, v2: u32) {
     let mut tmp: [u8; 10] = [0u8; 10];
     let offset1 = encode_var_uint32(&mut tmp, v1);
@@ -91,6 +110,7 @@ pub fn put_varint32varint32(dist: &mut Vec<u8>, v1: u32, v2: u32) {
     dist.extend_from_slice(&tmp[..offset2]);
 }
 
+#[inline(always)]
 pub fn put_varint32varint64(dist: &mut Vec<u8>, v1: u32, v2: u64) {
     let mut tmp: [u8; 15] = [0u8; 15];
     let offset1 = encode_var_uint32(&mut tmp, v1);
@@ -98,6 +118,7 @@ pub fn put_varint32varint64(dist: &mut Vec<u8>, v1: u32, v2: u64) {
     dist.extend_from_slice(&tmp[..offset2]);
 }
 
+#[inline(always)]
 pub fn put_varint64varint64(dist: &mut Vec<u8>, v1: u64, v2: u64) {
     let mut tmp: [u8; 20] = [0u8; 20];
     let offset1 = encode_var_uint64(&mut tmp, v1);
@@ -105,6 +126,7 @@ pub fn put_varint64varint64(dist: &mut Vec<u8>, v1: u64, v2: u64) {
     dist.extend_from_slice(&tmp[..offset2]);
 }
 
+#[inline(always)]
 pub fn put_varint32varint32varint64(dist: &mut Vec<u8>, v1: u32, v2: u32, v3: u64) {
     let mut tmp: [u8; 20] = [0u8; 20];
     let offset1 = encode_var_uint32(&mut tmp, v1);
@@ -113,11 +135,13 @@ pub fn put_varint32varint32varint64(dist: &mut Vec<u8>, v1: u32, v2: u32, v3: u6
     dist.extend_from_slice(&tmp[..offset3]);
 }
 
+#[inline(always)]
 pub fn put_length_prefixed_slice(buf: &mut Vec<u8>, data: &[u8]) {
     put_var_uint32(buf, data.len() as u32);
     buf.extend_from_slice(data);
 }
 
+#[inline(always)]
 pub fn get_var_uint32(data: &[u8], offset: &mut usize) -> Option<u32> {
     if data.is_empty() {
         return None;
@@ -144,6 +168,7 @@ pub fn get_var_uint32(data: &[u8], offset: &mut usize) -> Option<u32> {
     None
 }
 
+#[inline(always)]
 pub fn get_var_uint64(data: &[u8], next_offset: &mut usize) -> Option<u64> {
     const B: u8 = 128;
     const MASK: u64 = 127;
@@ -166,6 +191,7 @@ pub fn get_var_uint64(data: &[u8], next_offset: &mut usize) -> Option<u64> {
     None
 }
 
+#[inline(always)]
 pub fn get_length_prefixed_slice<'a>(buf: &'a [u8], offset: &mut usize) -> Option<&'a [u8]> {
     let mut l = 0;
     get_var_uint32(buf, &mut l).map(|val| {
@@ -175,6 +201,7 @@ pub fn get_length_prefixed_slice<'a>(buf: &'a [u8], offset: &mut usize) -> Optio
     })
 }
 
+#[inline(always)]
 pub fn next_key(key: &mut Vec<u8>) {
     if *key.last().unwrap() < 255u8 {
         *key.last_mut().unwrap() += 1;
@@ -183,6 +210,7 @@ pub fn next_key(key: &mut Vec<u8>) {
     }
 }
 
+#[inline(always)]
 pub fn get_next_key(key: &[u8]) -> Vec<u8> {
     let mut data = key.to_vec();
     if *data.last().unwrap() < 255u8 {

@@ -413,11 +413,10 @@ impl<T: AsRef<Skiplist>> IterRef<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::DefaultUserComparator;
 
     #[test]
     fn test_find_near() {
-        let comp = InternalKeyComparator::new(Arc::new(DefaultUserComparator::default()));
+        let comp = InternalKeyComparator::default();
         let list = Skiplist::with_capacity(comp, 1 << 20);
         for i in 0..1000 {
             let key = Bytes::from(format!("{:05}{:08}", i * 10 + 5, 0));
@@ -425,34 +424,16 @@ mod tests {
             list.put(key, value);
         }
         let mut cases = vec![
-            ("00001", false, false, Some("00005")),
-            ("00001", false, true, Some("00005")),
-            ("00001", true, false, None),
-            ("00001", true, true, None),
-            ("00005", false, false, Some("00015")),
-            ("00005", false, true, Some("00005")),
-            ("00005", true, false, None),
-            ("00005", true, true, Some("00005")),
-            ("05555", false, false, Some("05565")),
-            ("05555", false, true, Some("05555")),
-            ("05555", true, false, Some("05545")),
-            ("05555", true, true, Some("05555")),
-            ("05558", false, false, Some("05565")),
-            ("05558", false, true, Some("05565")),
-            ("05558", true, false, Some("05555")),
-            ("05558", true, true, Some("05555")),
-            ("09995", false, false, None),
-            ("09995", false, true, Some("09995")),
-            ("09995", true, false, Some("09985")),
-            ("09995", true, true, Some("09995")),
-            ("59995", false, false, None),
-            ("59995", false, true, None),
-            ("59995", true, false, Some("09995")),
-            ("59995", true, true, Some("09995")),
+            ("00001", Some("00005")),
+            ("00005", Some("00015")),
+            ("05555", Some("05565")),
+            ("05558", Some("05565")),
+            ("09995", None),
+            ("59995", None),
         ];
-        for (i, (key, less, allow_equal, exp)) in cases.drain(..).enumerate() {
+        for (i, (key, exp)) in cases.drain(..).enumerate() {
             let seek_key = Bytes::from(format!("{}{:08}", key, 0));
-            let res = unsafe { list.find_near(&seek_key, less, allow_equal) };
+            let res = unsafe { list.find_near(&seek_key, false, false) };
             if exp.is_none() {
                 assert!(res.is_null(), "{}", i);
                 continue;
