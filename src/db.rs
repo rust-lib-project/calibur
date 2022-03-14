@@ -605,7 +605,7 @@ mod tests {
     use tokio::runtime::Runtime;
 
     fn build_small_write_buffer_db(dir: &TempDir) -> Engine {
-        let mut cf_opt = ColumnFamilyOptions {
+        let cf_opt = ColumnFamilyOptions {
             write_buffer_size: 64 * 1024,
             ..Default::default()
         };
@@ -787,10 +787,6 @@ mod tests {
         let r = Runtime::new().unwrap();
         let mut wb = WriteBatch::new();
         const TOTAL_CASES: usize = 100;
-        let cf_opt = ColumnFamilyOptions {
-            write_buffer_size: 128 * 1024,
-            ..Default::default()
-        };
         util::enable_processing();
         let cfs = vec![
             ColumnFamilyDescriptor {

@@ -221,7 +221,7 @@ impl Manifest {
         let new_descripter = if let Some(f) = self.log.as_ref() {
             f.get_file_size() > self.options.max_manifest_file_size
         } else {
-            false
+            true
         };
         if new_descripter {
             // TODO: Switch manifest log writer
