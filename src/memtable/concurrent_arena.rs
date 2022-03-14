@@ -83,7 +83,7 @@ impl ArenaShard {
         let old = std::mem::replace(&mut arena.current, block);
         mem_size.fetch_add(old.data.capacity(), Ordering::Relaxed);
         arena.blocks.push(old);
-        return arena.current.data.as_mut_ptr();
+        arena.current.data.as_mut_ptr()
     }
 }
 

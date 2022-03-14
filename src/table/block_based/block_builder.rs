@@ -131,13 +131,14 @@ mod tests {
     fn test_block_build_without_global_seqno() {
         let mut builder =
             BlockBuilder::new(5, true, DataBlockIndexType::DataBlockBinarySearch, 0.0);
-        let mut kvs = vec![];
-        kvs.push((b"abcdeeeeee".to_vec(), b"v0"));
-        kvs.push((b"abcdefffff".to_vec(), b"v0"));
-        kvs.push((b"abcdeggggg".to_vec(), b"v0"));
-        kvs.push((b"abcdehhhhh".to_vec(), b"v0"));
-        kvs.push((b"abcdeiiiii".to_vec(), b"v0"));
-        kvs.push((b"abcdejjjjj".to_vec(), b"v0"));
+        let mut kvs = vec![
+            (b"abcdeeeeee".to_vec(), b"v0"),
+            (b"abcdefffff".to_vec(), b"v0"),
+            (b"abcdeggggg".to_vec(), b"v0"),
+            (b"abcdehhhhh".to_vec(), b"v0"),
+            (b"abcdeiiiii".to_vec(), b"v0"),
+            (b"abcdejjjjj".to_vec(), b"v0"),
+        ];
 
         for i in 0..100u64 {
             let mut b = b"abcdek".to_vec();
@@ -147,7 +148,7 @@ mod tests {
         let comparator = Arc::new(DefaultUserComparator::default());
         kvs.sort_by(|a, b| comparator.compare_key(a.0.as_slice(), b.0.as_slice()));
         for (k, &v) in kvs.iter() {
-            builder.add(&k, &v);
+            builder.add(k, &v);
         }
         let data = builder.finish().to_vec();
         let block = Arc::new(Block::new(data, DISABLE_GLOBAL_SEQUENCE_NUMBER));
@@ -185,13 +186,15 @@ mod tests {
     fn test_block_build_with_global_seqno() {
         let mut builder =
             BlockBuilder::new(5, true, DataBlockIndexType::DataBlockBinarySearch, 0.0);
-        let mut kvs = vec![];
-        kvs.push((b"abcdeeeeee".to_vec(), b"v0"));
-        kvs.push((b"abcdefffff".to_vec(), b"v0"));
-        kvs.push((b"abcdeggggg".to_vec(), b"v0"));
-        kvs.push((b"abcdehhhhh".to_vec(), b"v0"));
-        kvs.push((b"abcdeiiiii".to_vec(), b"v0"));
-        kvs.push((b"abcdejjjjj".to_vec(), b"v0"));
+        let mut kvs = vec![
+            (b"abcdeeeeee".to_vec(), b"v0"),
+            (b"abcdefffff".to_vec(), b"v0"),
+            (b"abcdeggggg".to_vec(), b"v0"),
+            (b"abcdehhhhh".to_vec(), b"v0"),
+            (b"abcdeiiiii".to_vec(), b"v0"),
+            (b"abcdejjjjj".to_vec(), b"v0"),
+        ];
+
         let mut b = b"abcdek".to_vec();
         for _ in 0..100u64 {
             if *b.last().unwrap() < 255u8 {

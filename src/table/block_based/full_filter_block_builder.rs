@@ -201,8 +201,10 @@ mod tests {
 
     #[test]
     fn test_index_builder() {
-        let mut options = BlockBasedTableOptions::default();
-        options.whole_key_filtering = true;
+        let options = BlockBasedTableOptions {
+            whole_key_filtering: true,
+            ..Default::default()
+        };
         let factory = FullFilterBlockFactory::new(10);
         let mut builder = factory.create_builder(&options);
         builder.add(b"abcdeeeeee");

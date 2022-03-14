@@ -168,13 +168,15 @@ mod tests {
             false,
             IndexShorteningMode::ShortenSeparators,
         );
-        let mut kvs = vec![];
-        kvs.push((b"abcdeeeeee".to_vec(), BlockHandle::new(100, 50)));
-        kvs.push((b"abcdefffff".to_vec(), BlockHandle::new(150, 50)));
-        kvs.push((b"abcdeggggg".to_vec(), BlockHandle::new(200, 50)));
-        kvs.push((b"abcdehhhhh".to_vec(), BlockHandle::new(250, 50)));
-        kvs.push((b"abcdeiiiii".to_vec(), BlockHandle::new(300, 50)));
-        kvs.push((b"abcdejjjjj".to_vec(), BlockHandle::new(350, 50)));
+        let mut kvs = vec![
+            (b"abcdeeeeee".to_vec(), BlockHandle::new(100, 50)),
+            (b"abcdefffff".to_vec(), BlockHandle::new(150, 50)),
+            (b"abcdeggggg".to_vec(), BlockHandle::new(200, 50)),
+            (b"abcdehhhhh".to_vec(), BlockHandle::new(250, 50)),
+            (b"abcdeiiiii".to_vec(), BlockHandle::new(300, 50)),
+            (b"abcdejjjjj".to_vec(), BlockHandle::new(350, 50)),
+        ];
+
         for (k, _) in kvs.iter_mut() {
             k.extend_from_slice(&0u64.to_le_bytes());
         }

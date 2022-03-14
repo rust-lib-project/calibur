@@ -301,9 +301,11 @@ mod tests {
     #[test]
     fn test_compaction_picker_l0() {
         let fs = Arc::new(InMemFileSystem::default());
-        let mut opts = ColumnFamilyOptions::default();
-        opts.max_bytes_for_level_base = 400;
-        opts.level0_file_num_compaction_trigger = 4;
+        let opts = ColumnFamilyOptions {
+            max_bytes_for_level_base: 400,
+            level0_file_num_compaction_trigger: 4,
+            ..Default::default()
+        };
         let opts = Arc::new(opts);
 
         // trigger level0 to base level compaction when base level is empty
@@ -371,9 +373,11 @@ mod tests {
     #[test]
     fn test_compaction_picker_l1() {
         let fs = Arc::new(InMemFileSystem::default());
-        let mut opts = ColumnFamilyOptions::default();
-        opts.max_bytes_for_level_base = 200;
-        opts.level0_file_num_compaction_trigger = 2;
+        let opts = ColumnFamilyOptions {
+            max_bytes_for_level_base: 200,
+            level0_file_num_compaction_trigger: 2,
+            ..Default::default()
+        };
         let opts = Arc::new(opts);
         let immutable_opts = Arc::new(ImmutableDBOptions::from(DBOptions::default()));
         let mut cf_opts = HashMap::default();

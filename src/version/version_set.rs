@@ -222,10 +222,8 @@ impl VersionSet {
         let mut min_number = 0;
         for (_, cf) in self.column_family_set.iter() {
             let log_number = cf.get_log_number();
-            if log_number > 0 {
-                if min_number == 0 || min_number > log_number {
-                    min_number = log_number;
-                }
+            if log_number > 0 && (min_number == 0 || min_number > log_number) {
+                min_number = log_number;
             }
         }
         min_number
