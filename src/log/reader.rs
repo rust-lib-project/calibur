@@ -122,6 +122,7 @@ impl LogReader {
             if l + HEADER_SIZE > self.data.len() {
                 self.data.limit = 0;
                 self.data.offset = 0;
+                self.buffer.clear();
                 if !self.eof {
                     return Err(Error::LogRead("read log header error".to_string()));
                 } else {
@@ -129,6 +130,9 @@ impl LogReader {
                 }
             }
             if tp == RecordType::ZeroType as u8 && l == 0 {
+                self.buffer.clear();
+                self.data.limit = 0;
+                self.data.offset = 0;
                 return Ok((fragment, RecordError::BadRecord as u8));
             }
             // TODO: checksum
