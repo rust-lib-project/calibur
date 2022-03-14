@@ -161,21 +161,8 @@ impl CompactionIter {
                     InnerIterator::Async(iter) => iter.next().await,
                     InnerIterator::Sync(iter) => iter.next(),
                 }
-            }
-            /* else if ikey.tp == ValueType::TypeDeletion && ikey.sequence < self.earliest_snapshot
-             && compaction_->KeyNotExistsBeyondOutputLevel(ikey_.user_key(),
-                                                          &level_ptrs_){
-                TODO: if this key will not appear in bottom level, we can delete it in advance.
-                match &mut self.inner {
-                    InnerIterator::Async(iter) => {
-                        iter.next().await;
-                    },
-                    InnerIterator::Sync(iter) => {
-                        iter.next();
-                    },
-                };
-            } */
-            else if ikey.tp == ValueType::TypeDeletion && self.bottommost_level {
+            } else if ikey.tp == ValueType::TypeDeletion && self.bottommost_level {
+                // TODO: if this key will not appear in bottom level, we can delete it in advance.
                 while inner_next(&mut self.inner).await {
                     let next_key = match &self.inner {
                         InnerIterator::Async(iter) => iter.key(),

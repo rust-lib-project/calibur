@@ -218,10 +218,12 @@ impl Manifest {
         if edits.is_empty() {
             return Ok(());
         }
-        let mut new_descripter = false;
-        if self.log.as_ref().map_or(true, |f| {
+        let new_descripter = if let Some(f) = self.log.as_ref() {
             f.get_file_size() > self.options.max_manifest_file_size
-        }) {
+        } else {
+            false
+        };
+        if new_descripter {
             // TODO: Switch manifest log writer
             let file_number = self.kernel.new_file_number();
             let descrip_file_name = make_descriptor_file_name(&self.options.db_path, file_number);
@@ -236,7 +238,6 @@ impl Manifest {
             if let Some(edit) = edits.first_mut() {
                 edit.set_max_column_family(self.kernel.get_max_column_family());
             }
-            new_descripter = true;
         }
         let mut data = vec![];
         for e in &edits {
@@ -284,12 +285,15 @@ impl Manifest {
                 for m in e.add_files {
                     let fname = make_table_file_name(&self.options.db_path, m.id());
                     let file = self.options.fs.open_random_access_file(&fname)?;
-                    let mut read_opts = TableReaderOptions::default();
-                    read_opts.file_size = m.fd.file_size as usize;
-                    read_opts.level = m.level;
-                    read_opts.largest_seqno = m.fd.largest_seqno;
-                    read_opts.internal_comparator = opts.comparator.clone();
-                    read_opts.prefix_extractor = opts.prefix_extractor.clone();
+                    let read_opts = TableReaderOptions {
+                        file_size: m.fd.file_size as usize,
+                        level: m.level,
+                        largest_seqno: m.fd.largest_seqno,
+                        internal_comparator: opts.comparator.clone(),
+                        prefix_extractor: opts.prefix_extractor.clone(),
+                        ..Default::default()
+                    };
+
                     let table_reader = opts.factory.open_reader(&read_opts, file).await?;
                     let table = Arc::new(TableFile::new(
                         m,
@@ -331,8 +335,10 @@ impl Manifest {
         for version in versions {
             let mut record = Vec::new();
             {
-                let mut edit = VersionEdit::default();
-                edit.column_family = version.get_cf_id() as u32;
+                let mut edit = VersionEdit {
+                    column_family: version.get_cf_id() as u32,
+                    ..Default::default()
+                };
                 edit.add_column_family(version.get_cf_name().to_string());
                 edit.set_comparator_name(version.get_comparator_name());
                 edit.set_log_number(version.get_log_number());
@@ -344,9 +350,11 @@ impl Manifest {
                 writer.add_record(&record).await?;
                 record.clear();
             }
-            let mut edit = VersionEdit::default();
-            edit.column_family = version.get_cf_id() as u32;
-            edit.log_number = version.get_log_number();
+            let mut edit = VersionEdit {
+                column_family: version.get_cf_id() as u32,
+                log_number: version.get_log_number(),
+                ..Default::default()
+            };
             let levels = version.get_level_num();
             for i in 0..=levels {
                 version.scan(

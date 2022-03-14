@@ -605,8 +605,10 @@ mod tests {
     use tokio::runtime::Runtime;
 
     fn build_small_write_buffer_db(dir: &TempDir) -> Engine {
-        let mut cf_opt = ColumnFamilyOptions::default();
-        cf_opt.write_buffer_size = 64 * 1024;
+        let mut cf_opt = ColumnFamilyOptions {
+            write_buffer_size: 64 * 1024,
+            ..Default::default()
+        };
         let cfs = vec![ColumnFamilyDescriptor {
             name: "default".to_string(),
             options: cf_opt,
@@ -616,14 +618,15 @@ mod tests {
 
     fn build_db(dir: &TempDir, cfs: Vec<ColumnFamilyDescriptor>) -> Engine {
         let r = Runtime::new().unwrap();
-        let mut db_options = DBOptions::default();
-        db_options.max_manifest_file_size = 128 * 1024;
-        db_options.max_total_wal_size = 128 * 1024;
-        db_options.fs = Arc::new(AsyncFileSystem::new(2));
-        db_options.db_path = dir.path().to_str().unwrap().to_string();
-        let engine = r
-            .block_on(Engine::open(db_options.clone(), cfs, None))
-            .unwrap();
+        let db_options = DBOptions {
+            max_manifest_file_size: 128 * 1024,
+            max_total_wal_size: 128 * 1024,
+            fs: Arc::new(AsyncFileSystem::new(2)),
+            db_path: dir.path().to_str().unwrap().to_string(),
+            ..Default::default()
+        };
+
+        let engine = r.block_on(Engine::open(db_options, cfs, None)).unwrap();
         engine
     }
 
@@ -634,9 +637,11 @@ mod tests {
             .tempdir()
             .unwrap();
         let r = Runtime::new().unwrap();
-        let mut db_options = DBOptions::default();
-        db_options.fs = Arc::new(AsyncFileSystem::new(2));
-        db_options.db_path = dir.path().to_str().unwrap().to_string();
+        let db_options = DBOptions {
+            fs: Arc::new(AsyncFileSystem::new(2)),
+            db_path: dir.path().to_str().unwrap().to_string(),
+            ..Default::default()
+        };
         let mut engine = r
             .block_on(Engine::open(db_options.clone(), vec![], None))
             .unwrap();
@@ -645,8 +650,10 @@ mod tests {
         drop(vs);
         engine.close().unwrap();
         drop(engine);
-        let mut write_opt = ColumnFamilyOptions::default();
-        write_opt.write_buffer_size = 1000;
+        let write_opt = ColumnFamilyOptions {
+            write_buffer_size: 1000,
+            ..Default::default()
+        };
         let cfs = vec![ColumnFamilyDescriptor {
             name: "write".to_string(),
             options: write_opt,
@@ -690,9 +697,9 @@ mod tests {
             r.block_on(engine.write(&mut wb)).unwrap();
             wb.clear();
         }
-        for i in 0..10000 {
-            if bench_ret[i] > 0 {
-                let f = (bench_ret[i] * 100) as f64 / TOTAL_CASES as f64;
+        for (i, &ret) in bench_ret.iter().enumerate() {
+            if ret > 0 {
+                let f = (ret * 100) as f64 / TOTAL_CASES as f64;
                 println!("{}% latency is between [{},{})", f, i * 100, (i + 1) * 100);
             }
         }
@@ -757,8 +764,10 @@ mod tests {
             let k = (100 + j).to_string();
             wb.put_cf(0, k.as_bytes(), b"v00000000000001");
         }
-        let mut opts = ReadOptions::default();
-        opts.snapshot = Some(snapshot.get_sequence());
+        let opts = ReadOptions {
+            snapshot: Some(snapshot.get_sequence()),
+            ..Default::default()
+        };
         let mut iter = engine.new_iterator(&opts, 0).unwrap();
         r.block_on(iter.seek_to_first());
         for j in 0..100 {
@@ -778,8 +787,10 @@ mod tests {
         let r = Runtime::new().unwrap();
         let mut wb = WriteBatch::new();
         const TOTAL_CASES: usize = 100;
-        let mut cf_opt = ColumnFamilyOptions::default();
-        cf_opt.write_buffer_size = 128 * 1024;
+        let cf_opt = ColumnFamilyOptions {
+            write_buffer_size: 128 * 1024,
+            ..Default::default()
+        };
         util::enable_processing();
         let cfs = vec![
             ColumnFamilyDescriptor {
@@ -837,7 +848,7 @@ mod tests {
         let flush_memtable_count = flush_memtable_count_wal.clone();
         let total_flush_memtable_count = Arc::new(AtomicU64::new(0));
         let count1 = total_flush_memtable_count.clone();
-        let switch_wal_number = first_switch_wal_number.clone();
+        let switch_wal_number = first_switch_wal_number;
         let cfs = flush_cf.clone();
         let (cb, rc) = std::sync::mpsc::channel();
         let block_point = Arc::new(Mutex::new(Option::Some(rc)));

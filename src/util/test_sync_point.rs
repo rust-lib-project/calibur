@@ -2,11 +2,14 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+type Runner = Arc<dyn Fn(Option<String>) -> Option<String> + Send + Sync>;
+type Callback = Box<dyn FnOnce(Option<String>) -> Option<String> + Send>;
+
 #[derive(Default)]
 struct SyncPointRegistry {
     // TODO: remove rwlock or store *mut FailPoint
-    registry: RwLock<HashMap<String, Arc<dyn Fn(Option<String>) -> Option<String> + Send + Sync>>>,
-    once: Arc<Mutex<HashMap<String, Box<dyn FnOnce(Option<String>) -> Option<String> + Send>>>>,
+    registry: RwLock<HashMap<String, Runner>>,
+    once: Arc<Mutex<HashMap<String, Callback>>>,
 }
 
 lazy_static::lazy_static! {

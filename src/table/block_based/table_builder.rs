@@ -291,8 +291,10 @@ mod tests {
 
     #[test]
     fn test_table_builder() {
-        let mut opts = BlockBasedTableOptions::default();
-        opts.block_size = 128;
+        let opts = BlockBasedTableOptions {
+            block_size: 128,
+            ..Default::default()
+        };
         let fs = InMemFileSystem::default();
         let w = fs.open_writable_file_writer(Path::new("sst0")).unwrap();
         let tbl_opts = TableBuilderOptions::default();
@@ -318,8 +320,10 @@ mod tests {
         runtime.block_on(builder.finish()).unwrap();
         assert_eq!(builder.num_entries(), 2000);
         let r = fs.open_random_access_file(Path::new("sst0")).unwrap();
-        let mut tbl_opts = TableReaderOptions::default();
-        tbl_opts.file_size = r.file_size();
+        let tbl_opts = TableReaderOptions {
+            file_size: r.file_size(),
+            ..Default::default()
+        };
         let reader = runtime
             .block_on(BlockBasedTable::open(&tbl_opts, opts, r))
             .unwrap();

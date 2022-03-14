@@ -354,10 +354,12 @@ mod tests {
 
     #[test]
     fn test_manifest_decode_encode() {
-        let mut edit = VersionEdit::default();
-        edit.column_family = 1;
-        edit.log_number = 15;
-        edit.has_log_number = true;
+        let mut edit = VersionEdit {
+            column_family: 1,
+            log_number: 15,
+            has_log_number: true,
+            ..Default::default()
+        };
 
         for i in 0..5u64 {
             let mut smallest = b"abcd".to_vec();

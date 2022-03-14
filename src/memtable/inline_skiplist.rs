@@ -299,13 +299,11 @@ impl<C: Comparator, A: Arena> InlineSkipList<C, A> {
             let next = (*x).get_next(level);
             if next != last_not_after && self.key_is_after_node(key_decoded, next) {
                 x = next;
+            } else if level == 0 {
+                return x;
             } else {
-                if level == 0 {
-                    return x;
-                } else {
-                    last_not_after = next;
-                    level -= 1;
-                }
+                last_not_after = next;
+                level -= 1;
             }
         }
     }
@@ -468,7 +466,7 @@ mod tests {
     #[test]
     fn test_find_near() {
         let comp = InternalKeyComparator::default();
-        let list = InlineSkipList::new(SharedArena::new(), DefaultComparator::new(comp.clone()));
+        let list = InlineSkipList::new(SharedArena::new(), DefaultComparator::new(comp));
         let mut ctx = MemTableContext::default();
         let v = vec![1u8; 100];
         for i in 0..10000 {
@@ -496,15 +494,13 @@ mod tests {
         let mut iter = SkipListIterator::new(&list);
         iter.seek_to_last();
         assert!(iter.valid());
-        let mut count = 0;
-        for k in keys.iter().rev() {
+        for (count, k) in keys.iter().rev().enumerate() {
             let key = iter.key();
             let user_key = extract_user_key(key);
             let a = String::from_utf8(user_key.to_vec()).unwrap();
             let b = String::from_utf8(k.to_vec()).unwrap();
             assert_eq!(user_key, k, "the {}th failed, {} compare {}", count, a, b);
             iter.prev();
-            count += 1;
         }
     }
 }
