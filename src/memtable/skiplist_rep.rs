@@ -6,7 +6,7 @@ use crate::memtable::concurrent_arena::SharedArena;
 use crate::memtable::inline_skiplist::{InlineSkipList, SkipListIterator};
 use crate::memtable::skiplist::{IterRef, Skiplist};
 use crate::memtable::{MemTableContext, MemtableRep};
-use crate::util::{encode_var_uint32, get_var_uint32};
+use crate::util::get_var_uint32;
 use crate::{InternalKeyComparator, KeyComparator};
 use std::cmp::Ordering;
 
@@ -21,6 +21,10 @@ impl DefaultComparator {
 }
 
 impl Comparator for DefaultComparator {
+    fn compare(&self, k1: &[u8], k2: &[u8]) -> std::cmp::Ordering {
+        self.comparator.compare_key(k1, k2)
+    }
+
     unsafe fn compare_raw_key(&self, k1: *const u8, k2: *const u8) -> Ordering {
         let key1 = if *k1 < 128 {
             std::slice::from_raw_parts(k1.add(1), (*k1) as usize)
@@ -57,6 +61,7 @@ impl Comparator for DefaultComparator {
 // TODO: support in memory bloom filter
 pub struct InlineSkipListMemtableRep {
     list: InlineSkipList<DefaultComparator, SharedArena>,
+    comparator: InternalKeyComparator,
 }
 
 pub struct InlineSkipListMemtableIter {
@@ -71,112 +76,54 @@ unsafe impl Sync for InlineSkipListMemtableRep {}
 unsafe impl Send for InlineSkipListMemtableIter {}
 unsafe impl Sync for InlineSkipListMemtableIter {}
 
-pub fn encode_key<'a>(buf: &'a mut Vec<u8>, target: &[u8]) -> &'a [u8] {
-    buf.clear();
-    let mut tmp: [u8; 5] = [0u8; 5];
-    let offset = encode_var_uint32(&mut tmp, target.len() as u32);
-    buf.extend_from_slice(&tmp[..offset]);
-    buf.extend_from_slice(target);
-    buf.as_slice()
-}
-
-impl InlineSkipListMemtableIter {
-    #[inline(always)]
-    unsafe fn init_offset(&mut self) {
-        if self.iter.valid() {
-            self.current_key_size = *(self.iter.key()) as usize;
-            if self.current_key_size < 128 {
-                self.current_offset = 1;
-            } else {
-                self.current_offset = 0;
-                self.current_key_size = get_var_uint32(
-                    std::slice::from_raw_parts(self.iter.key(), 5),
-                    &mut self.current_offset,
-                )
-                .unwrap() as usize;
-            }
-        }
-    }
-}
-
 impl InternalIterator for InlineSkipListMemtableIter {
     fn valid(&self) -> bool {
         self.iter.valid()
     }
 
     fn seek(&mut self, key: &[u8]) {
-        let target = encode_key(&mut self.buf, key);
-        unsafe {
-            self.iter.seek(target.as_ptr());
-            self.init_offset();
-        }
+        self.iter.seek(&mut self.buf, key)
     }
 
     fn seek_to_first(&mut self) {
-        unsafe {
-            self.iter.seek_to_first();
-            self.init_offset();
-        }
+        self.iter.seek_to_first();
     }
 
     fn seek_to_last(&mut self) {
-        unsafe {
-            self.iter.seek_to_last();
-            self.init_offset();
-        }
+        self.iter.seek_to_last();
     }
 
-    fn seek_for_prev(&mut self, _key: &[u8]) {
-        unimplemented!()
+    fn seek_for_prev(&mut self, key: &[u8]) {
+        self.iter.seek_for_prev(&mut self.buf, key)
     }
 
     fn next(&mut self) {
-        unsafe {
-            self.iter.next();
-            self.init_offset();
-        }
+        self.iter.next();
     }
 
     fn prev(&mut self) {
-        todo!()
+        self.iter.prev()
     }
 
     fn key(&self) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts(
-                self.iter.key().add(self.current_offset),
-                self.current_key_size,
-            )
-        }
+        self.iter.key()
     }
 
     fn value(&self) -> &[u8] {
-        unsafe {
-            let mut current_value_offset = 0;
-            let current_value_size = get_var_uint32(
-                std::slice::from_raw_parts(
-                    self.iter
-                        .key()
-                        .add(self.current_offset + self.current_key_size),
-                    5,
-                ),
-                &mut current_value_offset,
-            )
-            .unwrap() as usize;
-            std::slice::from_raw_parts(
-                self.iter
-                    .key()
-                    .add(self.current_offset + self.current_key_size + current_value_offset),
-                current_value_size,
-            )
-        }
+        self.iter.value()
     }
 }
 
 impl InlineSkipListMemtableRep {
     pub fn new(comparator: InternalKeyComparator) -> Self {
         Self {
-            list: InlineSkipList::new(SharedArena::new(), DefaultComparator { comparator }),
+            list: InlineSkipList::new(
+                SharedArena::new(),
+                DefaultComparator {
+                    comparator: comparator.clone(),
+                },
+            ),
+            comparator,
         }
     }
 }
@@ -202,16 +149,26 @@ impl MemtableRep for InlineSkipListMemtableRep {
     fn mem_size(&self) -> usize {
         self.list.mem_size()
     }
+
+    fn name(&self) -> &str {
+        "InlineSkipListMemtable"
+    }
+
+    fn cmp(&self, start: &[u8], end: &[u8]) -> Ordering {
+        self.comparator.compare_key(start, end)
+    }
 }
 
 pub struct SkipListMemtableRep {
     list: Skiplist,
+    comp: InternalKeyComparator,
 }
 
 impl SkipListMemtableRep {
     pub fn new(comparator: InternalKeyComparator, write_buffer_size: usize) -> Self {
         Self {
-            list: Skiplist::with_capacity(comparator, write_buffer_size as u32),
+            list: Skiplist::with_capacity(comparator.clone(), write_buffer_size as u32),
+            comp: comparator,
         }
     }
 }
@@ -273,7 +230,6 @@ impl MemtableRep for SkipListMemtableRep {
         );
         self.list.put(ukey, value.to_vec());
     }
-
     fn delete(&self, _: &mut MemTableContext, key: &[u8], sequence: u64) {
         let mut ukey = Vec::with_capacity(key.len() + 8);
         ukey.extend_from_slice(key);
@@ -285,5 +241,13 @@ impl MemtableRep for SkipListMemtableRep {
 
     fn mem_size(&self) -> usize {
         self.list.mem_size() as usize
+    }
+
+    fn name(&self) -> &str {
+        "SkipListMemtable"
+    }
+
+    fn cmp(&self, start: &[u8], end: &[u8]) -> Ordering {
+        self.comp.compare_key(start, end)
     }
 }

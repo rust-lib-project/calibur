@@ -276,12 +276,9 @@ impl Engine {
                             {
                                 continue;
                             }
-                            column_families[idx].mem.add(
-                                key,
-                                value,
-                                sequence,
-                                ValueType::TypeValue,
-                            );
+                            column_families[idx]
+                                .mem
+                                .add(&mut write_opts.ctx, key, value, sequence);
                         }
                         WriteBatchItem::Delete { cf, key } => {
                             let idx = check_memtable_cf(&column_families, cf);
@@ -290,7 +287,9 @@ impl Engine {
                             {
                                 continue;
                             }
-                            column_families[idx].mem.delete(key, sequence);
+                            column_families[idx]
+                                .mem
+                                .delete(&mut write_opts.ctx, key, sequence);
                         }
                     }
                     sequence += 1;
@@ -864,7 +863,7 @@ mod tests {
                     wb.put_cf(1, k.as_bytes(), b"v00000000000001");
                 }
             }
-            r.block_on(engine.write_opt(&mut wb, false, false)).unwrap();
+            r.block_on(engine.write(&mut wb)).unwrap();
             wb.clear();
         }
         {

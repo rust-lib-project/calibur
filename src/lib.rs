@@ -21,7 +21,7 @@ pub use common::{
     SliceTransform, SyncPosixFileSystem,
 };
 pub use db::*;
-pub use iterator::DBIterator;
+pub use iterator::{DBIterator, InternalIterator};
 pub use options::*;
 pub use table::{
     BlockBasedTableFactory, BlockBasedTableOptions, FilterBlockFactory, FullFilterBlockFactory,

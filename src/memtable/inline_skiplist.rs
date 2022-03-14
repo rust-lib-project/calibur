@@ -73,6 +73,7 @@ impl Clone for Splice {
 }
 
 pub trait Comparator: Sync {
+    fn compare(&self, k1: &[u8], k2: &[u8]) -> std::cmp::Ordering;
     unsafe fn compare_raw_key(&self, k1: *const u8, k2: *const u8) -> std::cmp::Ordering;
     unsafe fn compare_key(&self, k1: *const u8, k2: &[u8]) -> std::cmp::Ordering;
 }
@@ -283,11 +284,47 @@ impl<C: Comparator, A: Arena> InlineSkipList<C, A> {
             }
         }
     }
+
+    fn less_than(&self, left: &[u8], right: &[u8]) -> bool {
+        self.cmp.compare(left, right) == std::cmp::Ordering::Less
+    }
+
+    unsafe fn find_less_than(&self, key: *const u8) -> *mut Node {
+        let max_height = self.max_height.load(Ordering::Acquire);
+        let mut level = max_height - 1;
+        let key_decoded = self.decode_key(key);
+        let mut x = self.head;
+        let mut last_not_after = null_mut();
+        loop {
+            let next = (*x).get_next(level);
+            if next != last_not_after && self.key_is_after_node(key_decoded, next) {
+                x = next;
+            } else {
+                if level == 0 {
+                    return x;
+                } else {
+                    last_not_after = next;
+                    level -= 1;
+                }
+            }
+        }
+    }
 }
 
 pub struct SkipListIterator<C: Comparator, A: Arena> {
     list: *const InlineSkipList<C, A>,
     node: *mut Node,
+    current_offset: usize,
+    current_key_size: usize,
+}
+
+pub fn encode_key<'a>(buf: &'a mut Vec<u8>, target: &[u8]) -> &'a [u8] {
+    buf.clear();
+    let mut tmp: [u8; 5] = [0u8; 5];
+    let offset = encode_var_uint32(&mut tmp, target.len() as u32);
+    buf.extend_from_slice(&tmp[..offset]);
+    buf.extend_from_slice(target);
+    buf.as_slice()
 }
 
 impl<C: Comparator, A: Arena> SkipListIterator<C, A> {
@@ -295,96 +332,179 @@ impl<C: Comparator, A: Arena> SkipListIterator<C, A> {
         Self {
             list,
             node: null_mut(),
+            current_key_size: 0,
+            current_offset: 0,
         }
     }
-    pub unsafe fn key(&self) -> *const u8 {
-        (*self.node).key()
+    pub fn key(&self) -> &[u8] {
+        unsafe {
+            std::slice::from_raw_parts(
+                (*self.node).key().add(self.current_offset),
+                self.current_key_size,
+            )
+        }
     }
 
-    pub unsafe fn seek(&mut self, k: *const u8) {
-        self.node = (*self.list).find_greater_or_equal(k);
+    pub fn seek(&mut self, buf: &mut Vec<u8>, key: &[u8]) {
+        unsafe {
+            let target = encode_key(buf, key);
+            self.node = (*self.list).find_greater_or_equal(target.as_ptr());
+            self.init_offset();
+        }
+    }
+
+    pub fn seek_for_prev(&mut self, buf: &mut Vec<u8>, key: &[u8]) {
+        self.seek(buf, key);
+        if !self.valid() {
+            self.seek_to_last();
+        }
+        unsafe {
+            self.init_offset();
+            while self.valid() && (*self.list).less_than(key, self.key()) {
+                self.prev();
+            }
+        }
     }
 
     pub fn valid(&self) -> bool {
         !std::ptr::eq(self.node, null_mut())
     }
 
-    pub unsafe fn next(&mut self) {
-        self.node = (*self.node).get_next(0);
-    }
-
-    pub unsafe fn prev(&mut self) {
-        unimplemented!()
-    }
-
-    pub unsafe fn seek_to_first(&mut self) {
-        self.node = (*(*self.list).head).get_next(0);
-    }
-
-    pub unsafe fn seek_to_last(&mut self) {
-        let mut x = (*self.list).head;
-        let mut level = (*self.list).max_height.load(Ordering::Acquire) - 1;
-        loop {
-            let nxt = (*x).get_next(level);
-            if nxt.is_null() {
-                if level == 0 {
-                    break;
-                } else {
-                    level -= 1;
-                }
-            } else {
-                x = nxt;
-            }
+    pub fn next(&mut self) {
+        unsafe {
+            self.node = (*self.node).get_next(0);
+            self.init_offset();
         }
-        if !std::ptr::eq(x, (*self.list).head) {
-            self.node = x;
-        } else {
-            self.node = null_mut();
+    }
+
+    pub fn prev(&mut self) {
+        unsafe {
+            self.node = (*self.list).find_less_than((*self.node).key());
+            if self.node == (*self.list).head {
+                self.node = null_mut();
+            }
+            self.init_offset();
+        }
+    }
+
+    pub fn seek_to_first(&mut self) {
+        unsafe {
+            self.node = (*(*self.list).head).get_next(0);
+            self.init_offset();
+        }
+    }
+
+    pub fn seek_to_last(&mut self) {
+        unsafe {
+            let mut x = (*self.list).head;
+            let mut level = (*self.list).max_height.load(Ordering::Acquire) - 1;
+            loop {
+                let nxt = (*x).get_next(level);
+                if nxt.is_null() {
+                    if level == 0 {
+                        break;
+                    } else {
+                        level -= 1;
+                    }
+                } else {
+                    x = nxt;
+                }
+            }
+            if !std::ptr::eq(x, (*self.list).head) {
+                self.node = x;
+            } else {
+                self.node = null_mut();
+            }
+            self.init_offset();
+        }
+    }
+
+    pub fn value(&self) -> &[u8] {
+        unsafe {
+            let mut current_value_offset = 0;
+            let current_value_size = get_var_uint32(
+                std::slice::from_raw_parts(
+                    (*self.node)
+                        .key()
+                        .add(self.current_offset + self.current_key_size),
+                    5,
+                ),
+                &mut current_value_offset,
+            )
+            .unwrap() as usize;
+            std::slice::from_raw_parts(
+                (*self.node)
+                    .key()
+                    .add(self.current_offset + self.current_key_size + current_value_offset),
+                current_value_size,
+            )
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn init_offset(&mut self) {
+        if self.valid() {
+            self.current_key_size = *((*self.node).key()) as usize;
+            if self.current_key_size < 128 {
+                self.current_offset = 1;
+            } else {
+                self.current_offset = 0;
+                self.current_key_size = get_var_uint32(
+                    std::slice::from_raw_parts((*self.node).key(), 5),
+                    &mut self.current_offset,
+                )
+                .unwrap() as usize;
+            }
         }
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{InternalKeyComparator, VALUE_TYPE_FOR_SEEK};
+    use crate::common::{extract_user_key, InternalKeyComparator, VALUE_TYPE_FOR_SEEK};
     use crate::memtable::concurrent_arena::SharedArena;
     use crate::memtable::skiplist_rep::DefaultComparator;
 
     #[test]
     fn test_find_near() {
         let comp = InternalKeyComparator::default();
-        let list = InlineSkipList::new(SharedArena::new(), DefaultComparator::new(comp));
+        let list = InlineSkipList::new(SharedArena::new(), DefaultComparator::new(comp.clone()));
         let mut ctx = MemTableContext::default();
         let v = vec![1u8; 100];
         for i in 0..10000 {
             let k = i.to_string().into_bytes();
             list.add(&mut ctx, &k, &v, i);
         }
-        let mut tmp: [u8; 5] = [0u8; 5];
         let mut buf = vec![];
+        let mut tmp = Vec::with_capacity(20);
+        let mut keys = vec![];
         for i in 0..10000 {
             let k = i.to_string().into_bytes();
-            let offset = encode_var_uint32(&mut tmp, k.len() as u32 + 8);
             buf.clear();
-            buf.extend_from_slice(&tmp[..offset]);
             buf.extend_from_slice(&k);
             buf.extend_from_slice(
                 &pack_sequence_and_type(10000, VALUE_TYPE_FOR_SEEK).to_le_bytes(),
             );
-            unsafe {
-                let mut iter = SkipListIterator::new(&list);
-                iter.seek(buf.as_ptr());
-                assert!(iter.valid());
-                let mut current_offset = 0;
-                let current_key_size = get_var_uint32(
-                    std::slice::from_raw_parts(iter.key(), 5),
-                    &mut current_offset,
-                )
-                .unwrap() as usize;
-                let key =
-                    std::slice::from_raw_parts(iter.key().add(current_offset), current_key_size);
-                assert_eq!(key[..(key.len() - 8)].to_vec(), k);
-            }
+            let mut iter = SkipListIterator::new(&list);
+            iter.seek(&mut tmp, &buf);
+            assert!(iter.valid());
+            let key = iter.key();
+            assert_eq!(key[..(key.len() - 8)].to_vec(), k);
+            keys.push(k);
+        }
+        keys.sort();
+        let mut iter = SkipListIterator::new(&list);
+        iter.seek_to_last();
+        assert!(iter.valid());
+        let mut count = 0;
+        for k in keys.iter().rev() {
+            let key = iter.key();
+            let user_key = extract_user_key(key);
+            let a = String::from_utf8(user_key.to_vec()).unwrap();
+            let b = String::from_utf8(k.to_vec()).unwrap();
+            assert_eq!(user_key, k, "the {}th failed, {} compare {}", count, a, b);
+            iter.prev();
+            count += 1;
         }
     }
 }

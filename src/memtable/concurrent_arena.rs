@@ -2,7 +2,7 @@ use spin::Mutex;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
-const BLOCK_DATA_SIZE: usize = 2 * 1024 * 1024;
+const BLOCK_DATA_SIZE: usize = 4 * 1024 * 1024;
 const PAGE_DATA_SIZE: usize = 8 * 1024;
 
 struct Block {

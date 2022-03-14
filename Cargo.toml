@@ -28,6 +28,11 @@ version = "1.2"
 tempfile = "3.1"
 criterion = "0.3"
 
+[dev-dependencies.crossbeam-skiplist]
+git = "https://github.com/tikv/crossbeam.git"
+branch = "tikv-5.0"
+package = "crossbeam-skiplist"
+
 [[bench]]
 name = "benches"
 path = "tests/benches/mod.rs"
