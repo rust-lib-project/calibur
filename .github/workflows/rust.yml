@@ -25,7 +25,7 @@ jobs:
           profile: minimal
           toolchain: nightly-2022-01-17
           override: true
-          components: rustfmt, clippy, rust-src
+          components: rustfmt, rust-src
       - uses: Swatinem/rust-cache@v1
         with:
           sharedKey: ${{ matrix.os }}
@@ -34,8 +34,6 @@ jobs:
         run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo install grcov; fi
       - name: Format
         run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --all --all-targets -- -D clippy::all
       - name: Run tests
         run: |
           cargo test --all --verbose -- --nocapture
