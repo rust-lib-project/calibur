@@ -6,11 +6,11 @@ rust version of rocksdb
 ### Clean and simple architecture
 
 RocksDB is a common data engine for multiple kinds of database,
-and one of the most important application among them is MyRocks, which is the kernel
+and one of the most important applications among them is MyRocks, which is the kernel
 engine to replace InnoDB in MySQL. Obviously, most users in RocksDB community do not need
-a transaction engine for MySQL, we just want a simple but well-perform KV engine.
+a transaction engine for MySQL, we just want a simple but well-performed KV engine.
 The RocksDB has merged so many features which we may never enable them and they made this project
-hard to maintain. I want to build a simple database which is easy to maintain for simple KV application. 
+hard to maintain. I want to build a simple engine which is easy to maintain for simple KV application. 
 
 ### Better support for asynchronous IO
 
@@ -24,7 +24,7 @@ be worse because the latency of cloud disk is much higher than local NVMe SSD.
 
 Our engine has five main modules, which are `WAL`, `MANIFEST`, `Version`, `Compaction`, `Table`.
 
-* `WAL` module will assign sequence for every writes and then write them into a write-ahead-log file. It will run as an
+* `WAL` module will assign sequence for every write and then write them into a write-ahead-log file. It will run as an
 independent future task, and some other jobs may also be processed in this module, such as ingest. 
 You can think of him as a combination of `write_thread` and `WriteToWAL` in RocksDB.
 The format of file is compatible with RocksDB, so that we can start this engine at the RocksDB directory. 
@@ -34,19 +34,20 @@ I store it in `KernelNumberContext`, otherwise it must acquire a lock guard for 
 own a `SuperVersion`, which include the collection of `Memtable` and the collection of `SSTable`. `SuperVersion` consists of `MemtableList` and `Version`, 
 every time we switch memtable for one `ColumnFamily`, we will create a new `SuperVersion` with the new `Memtable` and the old `Version`. Every time we finish a compaction job or a flush job,
 we will create a new `SuperVersion` with the old `Memtable` and the new `Version`.
-* `Compaction` module consists all code for `Compaction` and `Flush`.
-* `Table` module consists the SSTable format and the read operation or write operation.
+* `Compaction` module consists of all codes for `Compaction` and `Flush`.
+* `Table` module consists of the SSTable format and the read/write operations above it.
 
 ## TODO List
 
 ### Compaction
 
-* refactor compaction pickup strategy and calculate the effect of delete keys.
+* refactor compaction pickup strategy and calculate the effect of deleted keys.
 
 ### Table
+
 * Support LZ4 and ZSTD compression algorithm.
 * Support hash-index for small data block.
 * Support block-cache.
 
 ### IO
-* Support AIO for asynchronous IO. (I used user threads as independent io thread, but I'm not sure if it's a better solution than AIO.)
+* Support AIO for asynchronous IO. (I use user threads as independent io threads, but I'm not sure if it's a better solution than AIO.)
