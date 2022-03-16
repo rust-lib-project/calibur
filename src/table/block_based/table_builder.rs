@@ -373,8 +373,10 @@ mod tests {
         let r = fs
             .open_random_access_file(dir.path().join("sst0").as_path())
             .unwrap();
-        let mut tbl_opts = TableReaderOptions::default();
-        tbl_opts.file_size = r.file_size();
+        let tbl_opts = TableReaderOptions {
+            file_size: r.file_size(),
+            ..Default::default()
+        };
         let reader = runtime
             .block_on(BlockBasedTable::open(&tbl_opts, opts, r))
             .unwrap();

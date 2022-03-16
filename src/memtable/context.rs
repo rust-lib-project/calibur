@@ -2,10 +2,12 @@ use crate::memtable::Splice;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-const GLOBAL_CACHE_ID: AtomicUsize = AtomicUsize::new(1);
-
 thread_local! {
     pub static CACHE_ID: RefCell<usize> = RefCell::new(0);
+}
+
+lazy_static::lazy_static! {
+    static ref GLOBAL_CACHE_ID: AtomicUsize = AtomicUsize::new(1);
 }
 
 #[derive(Default, Clone)]

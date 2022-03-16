@@ -192,7 +192,7 @@ impl WALWriter {
                     );
                     *mem = vs.switch_memtable(cf, self.kernel.last_sequence());
                 } else if let Some(v) = vs.get_superversion(cf) {
-                    if v.imms.len() == 0 {
+                    if v.imms.is_empty() {
                         vs.set_log_number(v.id, self.writer.get_log_number());
                         sync_point!(
                             "switch_empty_memtable",
@@ -261,7 +261,7 @@ impl WALWriter {
 
     pub fn assign_sequence(&mut self, wb: &mut ReadOnlyWriteBatch) -> Vec<Arc<Memtable>> {
         let sequence = self.ctx.last_sequence + 1;
-        self.ctx.last_sequence = self.ctx.last_sequence + wb.count() as u64;
+        self.ctx.last_sequence += wb.count() as u64;
         wb.set_sequence(sequence);
         self.cf_memtables.clone()
     }
