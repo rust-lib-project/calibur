@@ -13,6 +13,8 @@ pub enum Error {
     EmptyKey,
     #[error("Too long: {0}")]
     TooLong(String),
+    #[error("Unsupported feature: {0}")]
+    Unsupported(String),
     #[error("Invalid checksum")]
     InvalidChecksum(String),
     #[error("Invalid filename")]
@@ -59,6 +61,7 @@ impl Clone for Error {
             Error::InvalidColumnFamily(e) => Error::InvalidColumnFamily(*e),
             Error::Other(e) => Error::Other(e.clone()),
             Error::CompactionError(e) => Error::CompactionError(e.clone()),
+            Error::Unsupported(e) => Error::Unsupported(e.clone()),
         }
     }
 }

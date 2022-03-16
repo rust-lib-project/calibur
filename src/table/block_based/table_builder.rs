@@ -3,8 +3,10 @@ use crate::common::CompressionType;
 use crate::common::InternalKeyComparator;
 use crate::common::{Result, WritableFileWriter};
 use crate::table::block_based::block_builder::BlockBuilder;
+use crate::table::block_based::compression::{CompressionAlgorithm, CompressionInfo};
 use crate::table::block_based::filter_block_builder::FilterBlockBuilder;
 use crate::table::block_based::index_builder::{create_index_builder, IndexBuilder};
+use crate::table::block_based::lz4::LZ4CompressionAlgorithm;
 use crate::table::block_based::meta_block::{MetaIndexBuilder, PropertyBlockBuilder};
 use crate::table::block_based::options::BlockBasedTableOptions;
 use crate::table::block_based::options::DataBlockIndexType;
@@ -14,6 +16,7 @@ use crate::table::table_properties::{TableProperties, PROPERTIES_BLOCK};
 use crate::table::{TableBuilder, TableBuilderOptions};
 
 // const PartitionedFilterBlockPrefix: &str = "partitionedfilter.";
+const COMPRESSION_SIZE_LIMIT: usize = i32::MAX as usize;
 
 pub struct BuilderRep {
     offset: u64,
@@ -25,17 +28,37 @@ pub struct BuilderRep {
     options: BlockBasedTableOptions,
     column_family_name: String,
     column_family_id: u32,
+    compression_type: CompressionType,
 }
 
 impl BuilderRep {
-    async fn write_raw_block(&mut self, block: &[u8], is_data_block: bool) -> Result<BlockHandle> {
+    async fn write_block(&mut self, block: &[u8], is_data_block: bool) -> Result<BlockHandle> {
+        if block.len() < COMPRESSION_SIZE_LIMIT
+            && self.compression_type != CompressionType::NoCompression
+            && self.check_compression_algorithm(self.compression_type)
+        {
+            let compressed_output = self.compress_block(block, self.compression_type)?;
+            self.write_raw_block(&compressed_output, self.compression_type, is_data_block)
+                .await
+        } else {
+            self.write_raw_block(block, CompressionType::NoCompression, is_data_block)
+                .await
+        }
+    }
+
+    async fn write_raw_block(
+        &mut self,
+        block: &[u8],
+        compression_type: CompressionType,
+        is_data_block: bool,
+    ) -> Result<BlockHandle> {
         let handle = BlockHandle {
             offset: self.offset,
             size: block.len() as u64,
         };
         self.file.append(block).await?;
         let mut trailer: [u8; 5] = [0; 5];
-        trailer[0] = CompressionType::NoCompression as u8;
+        trailer[0] = compression_type as u8;
         // todo: Add checksum for every block.
         trailer[1..].copy_from_slice(&(0_u32).to_le_bytes());
         self.file.append(&trailer).await?;
@@ -47,6 +70,23 @@ impl BuilderRep {
             self.offset += pad_bytes as u64;
         }
         Ok(handle)
+    }
+
+    fn compress_block(&self, block: &[u8], compression_type: CompressionType) -> Result<Vec<u8>> {
+        let info = CompressionInfo::default();
+        match compression_type {
+            CompressionType::LZ4Compression => {
+                let lz4 = LZ4CompressionAlgorithm {};
+                lz4.compress(&info, self.options.format_version, block)
+            }
+            _ => {
+                unreachable!()
+            }
+        }
+    }
+
+    fn check_compression_algorithm(&self, compression_type: CompressionType) -> bool {
+        compression_type == CompressionType::LZ4Compression
     }
 }
 
@@ -87,6 +127,7 @@ impl BlockBasedTableBuilder {
             options: table_options,
             column_family_name: options.column_family_name.clone(),
             column_family_id: options.column_family_id,
+            compression_type: options.compression_type,
         };
         let filter_builder = if options.skip_filter {
             None
@@ -105,7 +146,7 @@ impl BlockBasedTableBuilder {
 
     async fn flush_data_block(&mut self) -> Result<BlockHandle> {
         let buf = self.data_block_builder.finish();
-        let handle = self.rep.write_raw_block(buf, true).await?;
+        let handle = self.rep.write_block(buf, true).await?;
         if let Some(builder) = self.filter_builder.as_mut() {
             builder.start_block(self.rep.offset);
         }
@@ -118,7 +159,7 @@ impl BlockBasedTableBuilder {
     async fn write_index_block(&mut self) -> Result<BlockHandle> {
         let index_blocks = self.index_builder.finish()?;
         // TODO: build index block for hash index table.
-        self.rep.write_raw_block(index_blocks, false).await
+        self.rep.write_block(index_blocks, false).await
     }
 
     async fn write_filter_block(
@@ -131,7 +172,7 @@ impl BlockBasedTableBuilder {
             }
             let content = builder.finish()?;
             self.rep.props.filter_size += content.len() as u64;
-            let handle = self.rep.write_raw_block(content, false).await?;
+            let handle = self.rep.write_block(content, false).await?;
             let mut key = if builder.is_block_based() {
                 FILTER_BLOCK_PREFIX.to_string()
             } else {
@@ -159,7 +200,10 @@ impl BlockBasedTableBuilder {
         // TODO: add the whole properties
         property_block_builder.add_table_properties(&self.rep.props);
         let data = property_block_builder.finish();
-        let properties_block_handle = self.rep.write_raw_block(data, false).await?;
+        let properties_block_handle = self
+            .rep
+            .write_raw_block(data, CompressionType::NoCompression, false)
+            .await?;
         meta_index_builder.add(PROPERTIES_BLOCK.as_bytes(), &properties_block_handle);
         Ok(())
     }
@@ -252,7 +296,11 @@ impl TableBuilder for BlockBasedTableBuilder {
         self.write_properties_block(&mut meta_index_builder).await?;
         let metaindex_block_handle = self
             .rep
-            .write_raw_block(meta_index_builder.finish(), false)
+            .write_raw_block(
+                meta_index_builder.finish(),
+                CompressionType::NoCompression,
+                false,
+            )
             .await?;
         self.write_footer(metaindex_block_handle, index_block_handle)
             .await?;
@@ -281,22 +329,27 @@ impl TableBuilder for BlockBasedTableBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::CompressionType::LZ4Compression;
     use crate::common::{FileSystem, InMemFileSystem};
     use crate::table::block_based::table_reader::BlockBasedTable;
     use crate::table::{TableReader, TableReaderOptions};
     use crate::util::next_key;
     use crate::ReadOptions;
-    use std::path::Path;
     use tokio::runtime::Runtime;
 
-    #[test]
-    fn test_table_builder() {
+    fn inner_test_table_builder(tbl_opts: &TableBuilderOptions) {
+        let dir = tempfile::Builder::new()
+            .prefix("inner_test_table_builder")
+            .tempdir()
+            .unwrap();
+
         let mut opts = BlockBasedTableOptions::default();
         opts.block_size = 128;
         let fs = InMemFileSystem::default();
-        let w = fs.open_writable_file_writer(Path::new("sst0")).unwrap();
-        let tbl_opts = TableBuilderOptions::default();
-        let mut builder = BlockBasedTableBuilder::new(&tbl_opts, opts.clone(), w);
+        let w = fs
+            .open_writable_file_writer(dir.path().join("sst0").as_path())
+            .unwrap();
+        let mut builder = BlockBasedTableBuilder::new(tbl_opts, opts.clone(), w);
         let mut key = b"abcdef".to_vec();
         let mut kvs = vec![];
         let runtime = Runtime::new().unwrap();
@@ -317,7 +370,9 @@ mod tests {
         }
         runtime.block_on(builder.finish()).unwrap();
         assert_eq!(builder.num_entries(), 2000);
-        let r = fs.open_random_access_file(Path::new("sst0")).unwrap();
+        let r = fs
+            .open_random_access_file(dir.path().join("sst0").as_path())
+            .unwrap();
         let mut tbl_opts = TableReaderOptions::default();
         tbl_opts.file_size = r.file_size();
         let reader = runtime
@@ -339,5 +394,13 @@ mod tests {
             assert_eq!(ret[i], kvs[i]);
         }
         assert_eq!(ret, kvs);
+    }
+
+    #[test]
+    fn test_table_builder() {
+        let mut tbl_opts = TableBuilderOptions::default();
+        // inner_test_table_builder(&tbl_opts);
+        tbl_opts.compression_type = LZ4Compression;
+        inner_test_table_builder(&tbl_opts);
     }
 }

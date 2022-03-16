@@ -1,11 +1,13 @@
 mod block;
 mod block_builder;
+mod compression;
 mod data_block_hash_index_builder;
 mod filter_block_builder;
 mod filter_reader;
 mod full_filter_block_builder;
 mod index_builder;
 mod index_reader;
+mod lz4;
 mod meta_block;
 mod options;
 mod table_builder;

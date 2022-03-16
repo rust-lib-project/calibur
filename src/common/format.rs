@@ -1,7 +1,8 @@
 use crate::common::DISABLE_GLOBAL_SEQUENCE_NUMBER;
 use crate::util::decode_fixed_uint64;
 
-#[derive(Eq, PartialEq, Clone)]
+#[repr(u8)]
+#[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub enum CompressionType {
     NoCompression = 0x0,
     SnappyCompression = 0x1,
@@ -21,6 +22,12 @@ pub enum CompressionType {
 
     // DisableCompressionOption is used to disable some compression options.
     DisableCompressionOption = 0xff,
+}
+
+impl From<u8> for CompressionType {
+    fn from(x: u8) -> Self {
+        unsafe { std::mem::transmute(x) }
+    }
 }
 
 #[repr(u8)]
