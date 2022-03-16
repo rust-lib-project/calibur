@@ -343,8 +343,10 @@ mod tests {
             .tempdir()
             .unwrap();
 
-        let mut opts = BlockBasedTableOptions::default();
-        opts.block_size = 128;
+        let opts = BlockBasedTableOptions {
+            block_size: 512,
+            ..Default::default()
+        };
         let fs = InMemFileSystem::default();
         let w = fs
             .open_writable_file_writer(dir.path().join("sst0").as_path())
@@ -401,7 +403,7 @@ mod tests {
     #[test]
     fn test_table_builder() {
         let mut tbl_opts = TableBuilderOptions::default();
-        // inner_test_table_builder(&tbl_opts);
+        inner_test_table_builder(&tbl_opts);
         tbl_opts.compression_type = LZ4Compression;
         inner_test_table_builder(&tbl_opts);
     }

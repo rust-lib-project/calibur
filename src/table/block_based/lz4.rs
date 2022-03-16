@@ -64,7 +64,6 @@ impl CompressionAlgorithm for LZ4CompressionAlgorithm {
         let l = get_var_uint32(origin_data, &mut offset)
             .ok_or(Error::VarDecode("uncompress failed"))?;
         let compressed_size = origin_data.len() - offset as usize;
-        println!("offset {}, length: {}, l {}", offset, compressed_size, l);
         let mut output = vec![0u8; l as usize];
         unsafe {
             let stream = LZ4_createStreamDecode();
