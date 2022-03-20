@@ -9,8 +9,7 @@ use std::{ptr::null, slice};
 use super::{Error, Result};
 use crate::common::file_system::posix_file_system::RawFile;
 use crate::common::{
-    RandomAccessFile, RandomAccessFileReader, SequentialFile, SequentialFileReader, WritableFile,
-    WritableFileWriter,
+    RandomAccessFile, SequentialFile, SequentialFileReader, WritableFile, WritableFileWriter,
 };
 
 use crate::common::file_system::IOOption;
@@ -454,15 +453,9 @@ impl FileSystem for AsyncFileSystem {
         Ok(Box::new(f))
     }
 
-    fn open_random_access_file(&self, p: &Path) -> Result<Box<RandomAccessFileReader>> {
+    fn open_random_access_file(&self, p: &Path) -> Result<Box<dyn RandomAccessFile>> {
         let f = AsyncRandomAccessFile::open(&p, self.ctx.clone())?;
-        let filename = p
-            .file_name()
-            .ok_or_else(|| Error::InvalidFile("path has no file name".to_string()))?
-            .to_str()
-            .ok_or_else(|| Error::InvalidFile("filename is not encode by utf8".to_string()))?;
-        let reader = RandomAccessFileReader::new(Box::new(f), filename.to_string());
-        Ok(Box::new(reader))
+        Ok(Box::new(f))
     }
 
     fn open_sequential_file(&self, path: &Path) -> Result<Box<SequentialFileReader>> {

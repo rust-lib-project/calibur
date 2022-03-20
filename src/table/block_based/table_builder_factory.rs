@@ -1,4 +1,4 @@
-use crate::common::{RandomAccessFileReader, WritableFileWriter};
+use crate::common::{RandomAccessFile, WritableFileWriter};
 use crate::table::block_based::options::BlockBasedTableOptions;
 use crate::table::block_based::table_builder::BlockBasedTableBuilder;
 use crate::table::block_based::table_reader::BlockBasedTable;
@@ -27,9 +27,9 @@ impl TableFactory for BlockBasedTableFactory {
     async fn open_reader(
         &self,
         opts: &TableReaderOptions,
-        reader: Box<RandomAccessFileReader>,
+        file: Box<dyn RandomAccessFile>,
     ) -> crate::common::Result<Box<dyn TableReader>> {
-        let reader = BlockBasedTable::open(opts, self.opts.clone(), reader).await?;
+        let reader = BlockBasedTable::open(opts, self.opts.clone(), file).await?;
         Ok(Box::new(reader))
     }
 

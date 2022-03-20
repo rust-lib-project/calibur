@@ -16,9 +16,7 @@ use nix::unistd::{close, ftruncate, lseek, Whence};
 use nix::NixPath;
 
 use crate::common::file_system::reader::SequentialFileReader;
-use crate::common::{
-    Error, FileSystem, RandomAccessFile, RandomAccessFileReader, Result, WritableFileWriter,
-};
+use crate::common::{Error, FileSystem, RandomAccessFile, Result, WritableFileWriter};
 
 const FILE_ALLOCATE_SIZE: usize = 2 * 1024 * 1024;
 const MIN_ALLOCATE_SIZE: usize = 4 * 1024;
@@ -346,15 +344,9 @@ impl FileSystem for SyncPosixFileSystem {
         Ok(Box::new(writer))
     }
 
-    fn open_random_access_file(&self, p: &Path) -> Result<Box<RandomAccessFileReader>> {
+    fn open_random_access_file(&self, p: &Path) -> Result<Box<dyn RandomAccessFile>> {
         let f = PosixReadableFile::open(p).map_err(|e| Error::Io(Box::new(e)))?;
-        let filename = p
-            .file_name()
-            .ok_or_else(|| Error::InvalidFile("path has no file name".to_string()))?
-            .to_str()
-            .ok_or_else(|| Error::InvalidFile("filename is not encode by utf8".to_string()))?;
-        let reader = RandomAccessFileReader::new(Box::new(f), filename.to_string());
-        Ok(Box::new(reader))
+        Ok(Box::new(f))
     }
 
     fn open_sequential_file(&self, path: &Path) -> Result<Box<SequentialFileReader>> {

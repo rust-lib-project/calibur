@@ -1,11 +1,11 @@
 use crate::common::format::extract_user_key;
 use crate::common::{
-    DefaultUserComparator, InternalKeyComparator, RandomAccessFileReader, Result,
-    DISABLE_GLOBAL_SEQUENCE_NUMBER,
+    BufferedFileReader, DefaultUserComparator, InternalKeyComparator, RandomAccessFile,
+    RandomAccessFileReader, Result, DISABLE_GLOBAL_SEQUENCE_NUMBER,
 };
 use crate::options::ReadOptions;
 use crate::table::block_based::block::{
-    read_block_content_from_file, read_block_from_file, DataBlockIter,
+    read_block_from_buffered_file, read_block_from_file, Block, DataBlockIter,
 };
 use crate::table::block_based::filter_reader::FilterBlockReader;
 use crate::table::block_based::index_reader::IndexReader;
@@ -23,10 +23,11 @@ use crate::table::{AsyncIterator, InternalIterator, TableReader, TableReaderOpti
 use async_trait::async_trait;
 use std::cmp::Ordering;
 use std::sync::Arc;
+const PREFETCH_TAIL_SIZE: usize = 512 * 1024; // Because we will always keep bloom filter in table reader, so prefetch a large data in file tail.
 
 pub struct BlockBasedTableRep {
     footer: Footer,
-    file: Box<RandomAccessFileReader>,
+    file_reader: Box<RandomAccessFileReader>,
     index_reader: IndexReader,
     properties: Option<Box<TableProperties>>,
     internal_comparator: Arc<InternalKeyComparator>,
@@ -38,7 +39,8 @@ pub struct BlockBasedTableRep {
 impl BlockBasedTableRep {
     pub async fn new_data_block_iterator(&self, handle: &BlockHandle) -> Result<DataBlockIter> {
         // TODO: support block cache.
-        let block = read_block_from_file(self.file.as_ref(), handle, self.global_seqno).await?;
+        let block =
+            read_block_from_file(self.file_reader.as_ref(), handle, self.global_seqno).await?;
         let iter = block.new_data_iterator(self.internal_comparator.clone());
         Ok(iter)
     }
@@ -52,7 +54,7 @@ impl BlockBasedTable {
     pub async fn open(
         opts: &TableReaderOptions,
         table_opts: BlockBasedTableOptions,
-        file: Box<RandomAccessFileReader>,
+        file: Box<dyn RandomAccessFile>,
     ) -> Result<Self> {
         // Read in the following order:
         //    1. Footer
@@ -64,19 +66,22 @@ impl BlockBasedTable {
         //    7. [meta block: filter]
 
         // TODO: prefetch file for meta block and index block.
-        let footer = read_footer_from_file(file.as_ref(), opts.file_size).await?;
-        let meta_block = read_block_from_file(
-            file.as_ref(),
-            &footer.metaindex_handle,
-            DISABLE_GLOBAL_SEQUENCE_NUMBER,
-        )
-        .await?;
+        let mut reader = BufferedFileReader::new(file);
+        let (fetch_offset, fetch_size) = if opts.file_size > PREFETCH_TAIL_SIZE {
+            (opts.file_size - PREFETCH_TAIL_SIZE, PREFETCH_TAIL_SIZE)
+        } else {
+            (0, opts.file_size)
+        };
+        reader.prefetch(fetch_offset, fetch_size).await?;
+        let footer = read_footer_from_file(&reader, opts.file_size).await?;
+        let meta_data = read_block_from_buffered_file(&reader, &footer.metaindex_handle).await?;
+        let meta_block = Arc::new(Block::new(meta_data, DISABLE_GLOBAL_SEQUENCE_NUMBER));
         let mut meta_iter =
             meta_block.new_data_iterator(Arc::new(DefaultUserComparator::default()));
         let mut global_seqno = DISABLE_GLOBAL_SEQUENCE_NUMBER;
         let mut index_key_includes_seq = true;
         let properties = if seek_to_properties_block(&mut meta_iter)? {
-            let (properties, _handle) = read_properties(meta_iter.value(), file.as_ref()).await?;
+            let (properties, _handle) = read_properties(meta_iter.value(), &reader).await?;
             // TODO: checksum
             global_seqno = get_global_seqno(properties.as_ref(), opts.largest_seqno)?;
             index_key_includes_seq = properties.index_key_is_user_key == 0;
@@ -84,13 +89,9 @@ impl BlockBasedTable {
         } else {
             None
         };
-        let index_reader = IndexReader::open(
-            file.as_ref(),
-            &footer.index_handle,
-            global_seqno,
-            index_key_includes_seq,
-        )
-        .await?;
+        let index_data = read_block_from_buffered_file(&reader, &footer.index_handle).await?;
+        let index_block = Arc::new(Block::new(index_data, global_seqno));
+        let index_reader = IndexReader::open(index_block, index_key_includes_seq).await?;
         let mut key = if table_opts.filter_factory.is_block_based() {
             FILTER_BLOCK_PREFIX.to_string()
         } else {
@@ -99,16 +100,17 @@ impl BlockBasedTable {
         key.push_str(table_opts.filter_factory.name());
         let mut handle = BlockHandle::default();
         let filter_reader = if seek_to_metablock(&mut meta_iter, &key, Some(&mut handle))? {
-            let block = read_block_content_from_file(file.as_ref(), &handle).await?;
+            let block = read_block_from_buffered_file(&reader, &handle).await?;
             let filter_raeder = table_opts.filter_factory.create_filter_reader(block);
             Some(filter_raeder)
         } else {
             None
         };
+        let file = reader.release();
         let table = BlockBasedTable {
             rep: Arc::new(BlockBasedTableRep {
                 footer,
-                file,
+                file_reader: Box::new(RandomAccessFileReader::new(file)),
                 properties,
                 index_reader,
                 global_seqno,
@@ -133,7 +135,7 @@ impl BlockBasedTable {
     }
 }
 
-async fn read_footer_from_file(file: &RandomAccessFileReader, file_size: usize) -> Result<Footer> {
+async fn read_footer_from_file(reader: &BufferedFileReader, file_size: usize) -> Result<Footer> {
     let mut data: [u8; NEW_VERSIONS_ENCODED_LENGTH] = [0u8; NEW_VERSIONS_ENCODED_LENGTH];
     // TODO: prefetch some data to avoid once IO.
     let read_offset = if file_size > NEW_VERSIONS_ENCODED_LENGTH {
@@ -141,9 +143,7 @@ async fn read_footer_from_file(file: &RandomAccessFileReader, file_size: usize) 
     } else {
         0
     };
-    let sz = file
-        .read_exact(read_offset, NEW_VERSIONS_ENCODED_LENGTH, &mut data)
-        .await?;
+    let sz = reader.read(read_offset, &mut data).await?;
     let mut footer = Footer::default();
     footer.decode_from(&data[..sz])?;
     assert_eq!(footer.table_magic_number, BLOCK_BASED_TABLE_MAGIC_NUMBER);

@@ -1,6 +1,5 @@
-use crate::common::{InternalKeyComparator, RandomAccessFileReader, Result};
-use crate::table::block_based::block::{read_block_from_file, Block, IndexBlockIter};
-use crate::table::format::BlockHandle;
+use crate::common::{InternalKeyComparator, Result};
+use crate::table::block_based::block::{Block, IndexBlockIter};
 use std::sync::Arc;
 
 pub struct IndexReader {
@@ -10,12 +9,9 @@ pub struct IndexReader {
 
 impl IndexReader {
     pub async fn open(
-        file: &RandomAccessFileReader,
-        handle: &BlockHandle,
-        global_seqno: u64,
+        index_block: Arc<Block>,
         index_key_includes_seq: bool,
     ) -> Result<IndexReader> {
-        let index_block = read_block_from_file(file, handle, global_seqno).await?;
         let reader = IndexReader {
             index_block,
             index_key_includes_seq,

@@ -1,7 +1,5 @@
-use crate::common::Result;
-use crate::common::{
-    DefaultUserComparator, RandomAccessFileReader, DISABLE_GLOBAL_SEQUENCE_NUMBER,
-};
+use crate::common::{BufferedFileReader, Result};
+use crate::common::{DefaultUserComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER};
 use crate::table::block_based::block::Block;
 use crate::table::block_based::block_builder::BlockBuilder;
 use crate::table::block_based::options::DataBlockIndexType;
@@ -177,13 +175,13 @@ impl PropertyBlockBuilder {
 
 pub async fn read_properties(
     data: &[u8],
-    file: &RandomAccessFileReader,
+    file: &BufferedFileReader,
 ) -> Result<(Box<TableProperties>, BlockHandle)> {
     let mut handle = BlockHandle::default();
     handle.decode_from(data)?;
     let read_len = handle.size as usize + BLOCK_TRAILER_SIZE;
     let mut data = vec![0u8; read_len];
-    file.read_exact(handle.offset as usize, read_len, data.as_mut_slice())
+    file.read(handle.offset as usize, data.as_mut_slice())
         .await?;
     // TODO: uncompress block
     let block = Arc::new(Block::new(data, DISABLE_GLOBAL_SEQUENCE_NUMBER));

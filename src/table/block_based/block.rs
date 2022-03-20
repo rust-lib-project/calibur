@@ -1,5 +1,7 @@
 use crate::common::format::{extract_user_key, GlobalSeqnoAppliedKey, Slice};
-use crate::common::{CompressionType, Error, KeyComparator, RandomAccessFileReader, Result};
+use crate::common::{
+    BufferedFileReader, CompressionType, Error, KeyComparator, RandomAccessFileReader, Result,
+};
 use crate::table::block_based::compression::{CompressionAlgorithm, UncompressionInfo};
 use crate::table::block_based::data_block_hash_index_builder::DataBlockHashIndex;
 use crate::table::block_based::lz4::LZ4CompressionAlgorithm;
@@ -430,13 +432,13 @@ pub async fn read_block_from_file(
     }
 }
 
-pub async fn read_block_content_from_file(
-    file: &RandomAccessFileReader,
+pub async fn read_block_from_buffered_file(
+    file: &BufferedFileReader,
     handle: &BlockHandle,
 ) -> Result<Vec<u8>> {
     let read_len = handle.size as usize + BLOCK_TRAILER_SIZE;
     let mut data = vec![0u8; read_len];
-    file.read_exact(handle.offset as usize, read_len, data.as_mut_slice())
+    file.read(handle.offset as usize, data.as_mut_slice())
         .await?;
     let compression_type: CompressionType = data[handle.size as usize].into();
     match compression_type {

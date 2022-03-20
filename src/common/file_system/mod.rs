@@ -12,8 +12,7 @@ use crate::common::Error;
 pub use async_file_system::AsyncFileSystem;
 use async_trait::async_trait;
 pub use posix_file_system::SyncPosixFileSystem;
-pub use reader::RandomAccessFileReader;
-pub use reader::SequentialFileReader;
+pub use reader::{BufferedFileReader, RandomAccessFileReader, SequentialFileReader};
 pub use writer::WritableFileWriter;
 
 #[async_trait]
@@ -76,7 +75,7 @@ pub trait FileSystem: Send + Sync {
         self.open_writable_file_writer(file_name)
     }
 
-    fn open_random_access_file(&self, p: &Path) -> Result<Box<RandomAccessFileReader>>;
+    fn open_random_access_file(&self, p: &Path) -> Result<Box<dyn RandomAccessFile>>;
 
     fn open_sequential_file(&self, path: &Path) -> Result<Box<SequentialFileReader>>;
 
@@ -213,7 +212,7 @@ impl FileSystem for InMemFileSystem {
         )))
     }
 
-    fn open_random_access_file(&self, filename: &Path) -> Result<Box<RandomAccessFileReader>> {
+    fn open_random_access_file(&self, filename: &Path) -> Result<Box<dyn RandomAccessFile>> {
         let filename = filename.to_str().unwrap().to_string();
         let fs = self.inner.lock().unwrap();
         match fs.files.get(&filename) {
@@ -225,7 +224,8 @@ impl FileSystem for InMemFileSystem {
                     filename: filename.clone(),
                     offset: 0,
                 };
-                Ok(Box::new(RandomAccessFileReader::new(Box::new(f), filename)))
+
+                Ok(Box::new(f))
             }
         }
     }

@@ -6,10 +6,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use crate::common::format::ValueType;
-use crate::common::CompressionType;
+use crate::common::{CompressionType, RandomAccessFile};
 use crate::common::{
-    InternalKeyComparator, InternalKeySliceTransform, RandomAccessFileReader, Result,
-    SliceTransform, WritableFileWriter,
+    InternalKeyComparator, InternalKeySliceTransform, Result, SliceTransform, WritableFileWriter,
 };
 use crate::iterator::{AsyncIterator, InternalIterator};
 use crate::options::ReadOptions;
@@ -34,7 +33,7 @@ pub trait TableFactory: Send + Sync {
     async fn open_reader(
         &self,
         options: &TableReaderOptions,
-        file: Box<RandomAccessFileReader>,
+        file: Box<dyn RandomAccessFile>,
     ) -> Result<Box<dyn TableReader>>;
 
     fn new_builder(

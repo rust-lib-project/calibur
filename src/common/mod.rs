@@ -3,7 +3,6 @@ mod file;
 mod file_system;
 pub mod format;
 mod slice_transform;
-mod snapshot;
 pub use file::*;
 
 use crate::util::decode_fixed_uint64;
@@ -11,7 +10,7 @@ pub use slice_transform::{InternalKeySliceTransform, SliceTransform};
 
 pub use error::Error;
 pub use file_system::{
-    AsyncFileSystem, FileSystem, IOOption, InMemFileSystem, RandomAccessFile,
+    AsyncFileSystem, BufferedFileReader, FileSystem, IOOption, InMemFileSystem, RandomAccessFile,
     RandomAccessFileReader, SequentialFile, SequentialFileReader, SyncPosixFileSystem,
     WritableFile, WritableFileWriter,
 };
