@@ -1,6 +1,8 @@
 use crate::common::format::{extract_user_key, GlobalSeqnoAppliedKey, Slice};
-use crate::common::{KeyComparator, RandomAccessFileReader, Result};
+use crate::common::{CompressionType, Error, KeyComparator, RandomAccessFileReader, Result};
+use crate::table::block_based::compression::{CompressionAlgorithm, UncompressionInfo};
 use crate::table::block_based::data_block_hash_index_builder::DataBlockHashIndex;
+use crate::table::block_based::lz4::LZ4CompressionAlgorithm;
 use crate::table::block_based::options::DataBlockIndexType;
 use crate::table::block_based::BLOCK_TRAILER_SIZE;
 use crate::table::format::{BlockHandle, IndexValue, MAX_BLOCK_SIZE_SUPPORTED_BY_HASH_INDEX};
@@ -409,9 +411,23 @@ pub async fn read_block_from_file(
     let mut data = vec![0u8; read_len];
     file.read_exact(handle.offset as usize, read_len, data.as_mut_slice())
         .await?;
-    data.resize(handle.size as usize, 0);
-    // TODO: uncompress block
-    Ok(Arc::new(Block::new(data, global_seqno)))
+    let compression_type: CompressionType = data[handle.size as usize].into();
+    match compression_type {
+        CompressionType::LZ4Compression => {
+            let lz4 = LZ4CompressionAlgorithm {};
+            let info = UncompressionInfo {};
+            let data = lz4.uncompress(&info, 2, &data[..handle.size as usize])?;
+            Ok(Arc::new(Block::new(data, global_seqno)))
+        }
+        CompressionType::NoCompression => {
+            data.resize(handle.size as usize, 0);
+            Ok(Arc::new(Block::new(data, global_seqno)))
+        }
+        _ => Err(Error::Unsupported(format!(
+            "compression type: {:?}",
+            compression_type
+        ))),
+    }
 }
 
 pub async fn read_block_content_from_file(
@@ -422,7 +438,20 @@ pub async fn read_block_content_from_file(
     let mut data = vec![0u8; read_len];
     file.read_exact(handle.offset as usize, read_len, data.as_mut_slice())
         .await?;
-    data.resize(handle.size as usize, 0);
-    // TODO: uncompress block
-    Ok(data)
+    let compression_type: CompressionType = data[handle.size as usize].into();
+    match compression_type {
+        CompressionType::LZ4Compression => {
+            let lz4 = LZ4CompressionAlgorithm {};
+            let info = UncompressionInfo {};
+            lz4.uncompress(&info, 2, &data[..handle.size as usize])
+        }
+        CompressionType::NoCompression => {
+            data.resize(handle.size as usize, 0);
+            Ok(data)
+        }
+        _ => Err(Error::Unsupported(format!(
+            "compression type: {:?}",
+            compression_type
+        ))),
+    }
 }

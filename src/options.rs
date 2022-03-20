@@ -120,3 +120,22 @@ pub struct WriteOptions {
     pub disable_wal: bool,
     pub sync: bool,
 }
+
+const DEFAULT_COMPRESSION_LEVEL: i32 = 32767;
+
+#[derive(Clone)]
+pub struct CompressionOptions {
+    pub window_bits: i32,
+    pub level: i32,
+    pub strategy: i32,
+}
+
+impl Default for CompressionOptions {
+    fn default() -> Self {
+        CompressionOptions {
+            window_bits: -14,
+            level: DEFAULT_COMPRESSION_LEVEL,
+            strategy: 0,
+        }
+    }
+}
