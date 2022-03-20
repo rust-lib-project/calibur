@@ -91,7 +91,7 @@ impl BlockBasedTable {
         };
         let index_data = read_block_from_buffered_file(&reader, &footer.index_handle).await?;
         let index_block = Arc::new(Block::new(index_data, global_seqno));
-        let index_reader = IndexReader::open(index_block, index_key_includes_seq).await?;
+        let index_reader = IndexReader::open(index_block, index_key_includes_seq)?;
         let mut key = if table_opts.filter_factory.is_block_based() {
             FILTER_BLOCK_PREFIX.to_string()
         } else {

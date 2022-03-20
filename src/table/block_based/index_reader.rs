@@ -8,10 +8,7 @@ pub struct IndexReader {
 }
 
 impl IndexReader {
-    pub async fn open(
-        index_block: Arc<Block>,
-        index_key_includes_seq: bool,
-    ) -> Result<IndexReader> {
+    pub fn open(index_block: Arc<Block>, index_key_includes_seq: bool) -> Result<IndexReader> {
         let reader = IndexReader {
             index_block,
             index_key_includes_seq,

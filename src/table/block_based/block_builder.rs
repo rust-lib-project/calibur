@@ -157,7 +157,7 @@ mod tests {
         for (k, v) in kvs {
             assert!(iter.valid());
             assert_eq!(iter.key(), k.as_slice());
-            assert_eq!(iter.value(), v.as_slice());
+            assert_eq!(iter.value(), v.to_vec().as_slice());
             iter.next();
         }
         iter.seek(b"abcde");
@@ -223,7 +223,7 @@ mod tests {
                 &pack_sequence_and_type(GLOBAL_SEQNO, ValueType::TypeValue as u8).to_le_bytes(),
             );
             assert_eq!(iter.key(), key.as_slice());
-            assert_eq!(iter.value(), v.as_slice());
+            assert_eq!(iter.value(), v.to_vec().as_slice());
             iter.next();
         }
     }

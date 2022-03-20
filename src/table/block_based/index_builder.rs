@@ -151,8 +151,10 @@ pub fn create_index_builder(
 mod tests {
     use super::*;
     use crate::common::{
-        FileSystem, InMemFileSystem, InternalKeyComparator, DISABLE_GLOBAL_SEQUENCE_NUMBER,
+        BufferedFileReader, FileSystem, InMemFileSystem, InternalKeyComparator,
+        DISABLE_GLOBAL_SEQUENCE_NUMBER,
     };
+    use crate::table::block_based::block::{read_block_from_buffered_file, Block};
     use crate::table::block_based::index_reader::IndexReader;
     use crate::table::InternalIterator;
     use std::path::Path;
@@ -198,14 +200,12 @@ mod tests {
             .open_random_access_file(Path::new("index_block"))
             .unwrap();
         let handle = BlockHandle::new(0, data.len() as u64);
-
-        let f = IndexReader::open(
-            readfile.as_ref(),
-            &handle,
-            DISABLE_GLOBAL_SEQUENCE_NUMBER,
-            seperate,
-        );
-        let reader = r.block_on(f).unwrap();
+        let reader = BufferedFileReader::new(readfile);
+        let data = r
+            .block_on(read_block_from_buffered_file(&reader, &handle))
+            .unwrap();
+        let index_block = Arc::new(Block::new(data, DISABLE_GLOBAL_SEQUENCE_NUMBER));
+        let reader = IndexReader::open(index_block, seperate).unwrap();
         let mut iter = reader.new_iterator(Arc::new(InternalKeyComparator::default()));
         iter.seek_to_first();
         for (k, v) in kvs {
