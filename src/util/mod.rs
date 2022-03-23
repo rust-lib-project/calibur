@@ -1,6 +1,9 @@
 mod btree;
+mod cache;
+pub use cache::{CachableEntry, LRUCache};
 pub mod hash;
 mod test_sync_point;
+
 pub use test_sync_point::*;
 
 pub use btree::{

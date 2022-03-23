@@ -69,15 +69,12 @@ impl Block {
         }
     }
 
-    pub fn new_data_iterator(
-        self: &Arc<Self>,
-        comparator: Arc<dyn KeyComparator>,
-    ) -> DataBlockIter {
+    pub fn new_data_iterator(self: Arc<Self>, comparator: Arc<dyn KeyComparator>) -> DataBlockIter {
         DataBlockIter::new(
-            self.clone(),
             self.restart_offset,
             self.num_restarts,
             self.global_seqno,
+            self,
             false,
             comparator,
         )
@@ -89,7 +86,7 @@ impl Block {
         comparator: Arc<dyn KeyComparator>,
         key_includes_seq: bool,
     ) -> IndexBlockIter {
-        let inner = self.new_data_iterator(comparator);
+        let inner = self.clone().new_data_iterator(comparator);
         IndexBlockIter {
             inner,
             decoded_value: Default::default(),
@@ -221,10 +218,10 @@ impl InternalIterator for DataBlockIter {
 
 impl DataBlockIter {
     pub fn new(
-        block: Arc<Block>,
         restart_offset: usize,
         num_restarts: u32,
         global_seqno: u64,
+        block: Arc<Block>,
         is_user_key: bool,
         comparator: Arc<dyn KeyComparator>,
     ) -> Self {

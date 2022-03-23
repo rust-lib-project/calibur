@@ -1,5 +1,6 @@
 mod block_based;
 mod format;
+mod table_cache;
 mod table_properties;
 
 use std::collections::{BTreeMap, HashMap};

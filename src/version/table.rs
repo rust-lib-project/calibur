@@ -1,7 +1,6 @@
 use crate::common::format::extract_user_key;
 use crate::common::FileSystem;
 use crate::common::MAX_SEQUENCE_NUMBER;
-use crate::table::TableReader;
 use crate::util::BtreeComparable;
 use bytes::Bytes;
 use std::path::{Path, PathBuf};
@@ -79,7 +78,6 @@ impl FileMetaData {
 pub struct TableFile {
     pub meta: FileMetaData,
     deleted: AtomicBool,
-    pub reader: Box<dyn TableReader>,
     fs: Arc<dyn FileSystem>,
     smallest: Vec<u8>,
     largest: Vec<u8>,
@@ -90,7 +88,6 @@ pub struct TableFile {
 impl TableFile {
     pub fn new(
         meta: FileMetaData,
-        table: Box<dyn TableReader>,
         fs: Arc<dyn FileSystem>,
         path: &Path,
     ) -> Self {
@@ -99,7 +96,6 @@ impl TableFile {
         TableFile {
             path: path.to_path_buf(),
             fs,
-            reader: table,
             meta,
             smallest,
             largest,
