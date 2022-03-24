@@ -144,7 +144,7 @@ impl Engine {
         snapshot_list.release_snapshot(snapshot)
     }
 
-    pub fn new_iterator(&self, opts: &ReadOptions, cf: u32) -> Result<DBIterator> {
+    pub async fn new_iterator(&self, opts: &ReadOptions, cf: u32) -> Result<DBIterator> {
         let version = {
             let vs = self.version_set.lock().unwrap();
             match vs.get_superversion(cf) {
@@ -152,7 +152,7 @@ impl Engine {
                 None => return Err(Error::InvalidColumnFamily(cf)),
             }
         };
-        let iter = version.new_iterator(opts)?;
+        let iter = version.new_iterator(opts).await?;
         let sequence = opts.snapshot.unwrap_or_else(|| self.kernel.last_sequence());
         Ok(DBIterator::new(
             iter,
@@ -353,16 +353,18 @@ impl Engine {
         let kernel = self.kernel.clone();
         self.pool.spawn(async move {
             while let Some(cf) = rx.next().await {
-                let version = {
+                let super_version = {
                     let vs = version_set.lock().unwrap();
-                    let super_version = vs.get_superversion(cf).unwrap();
-                    super_version.current.clone()
+                    vs.get_superversion(cf).unwrap()
                 };
+                let version = super_version.current.clone();
+                let cache = super_version.cache.clone();
+                drop(super_version);
                 if let Some(request) = picker.pick_compaction(cf, version) {
                     let engine = manifest_scheduler.clone();
                     let kernel = kernel.clone();
                     remote.spawn(async move {
-                        let _ = run_compaction_job(engine, request, kernel).await;
+                        let _ = run_compaction_job(engine, request, kernel, cache).await;
                     });
                 }
             }

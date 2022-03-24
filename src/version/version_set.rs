@@ -1,8 +1,11 @@
-use crate::common::{Error, FileSystem, KeyComparator, Result, MAX_SEQUENCE_NUMBER};
+use crate::common::{Error, KeyComparator, Result, MAX_SEQUENCE_NUMBER};
 use crate::memtable::Memtable;
 use crate::options::{ColumnFamilyDescriptor, ColumnFamilyOptions};
+use crate::table::TableReader;
+use crate::util::LRUCache;
 use crate::version::column_family::ColumnFamily;
 use crate::version::{SuperVersion, Version, VersionEdit};
+use crate::ImmutableDBOptions;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::{atomic, Arc};
@@ -74,20 +77,22 @@ pub struct VersionSet {
     kernel: Arc<KernelNumberContext>,
     column_family_set: HashMap<u32, ColumnFamily>,
     column_family_set_names: HashMap<String, u32>,
-    fs: Arc<dyn FileSystem>,
+    db_options: Arc<ImmutableDBOptions>,
+    cache: Arc<LRUCache<Box<dyn TableReader>>>,
 }
 
 impl VersionSet {
     pub fn new(
         cf_descriptor: &[ColumnFamilyDescriptor],
         kernel: Arc<KernelNumberContext>,
-        fs: Arc<dyn FileSystem>,
         versions: HashMap<u32, Arc<Version>>,
+        db_options: Arc<ImmutableDBOptions>,
     ) -> Self {
         let mut cf_options: HashMap<String, ColumnFamilyOptions> = HashMap::default();
         for cf in cf_descriptor.iter() {
             cf_options.insert(cf.name.clone(), cf.options.clone());
         }
+        let cache = Arc::new(LRUCache::new(12, 1000, 1000));
         let mut column_family_set = HashMap::default();
         let mut column_family_set_names = HashMap::default();
         for (cf_id, version) in versions {
@@ -107,6 +112,8 @@ impl VersionSet {
                     cf_opt.comparator.clone(),
                     version,
                     cf_opt,
+                    db_options.clone(),
+                    cache.clone(),
                 ),
             );
         }
@@ -135,14 +142,17 @@ impl VersionSet {
                     cf_opt.comparator.clone(),
                     version,
                     cf_opt,
+                    db_options.clone(),
+                    cache.clone(),
                 ),
             );
         }
         VersionSet {
             kernel,
             column_family_set,
-            fs,
             column_family_set_names,
+            db_options,
+            cache,
         }
     }
 
@@ -275,6 +285,8 @@ impl VersionSet {
             cf_opt.comparator.clone(),
             version.clone(),
             cf_opt,
+            self.db_options.clone(),
+            self.cache.clone(),
         );
         cf.set_log_number(log_number);
         self.column_family_set.insert(id, cf);

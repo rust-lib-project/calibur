@@ -7,7 +7,7 @@ use crate::common::{make_table_file_name, Result};
 use crate::compaction::compaction_iter::CompactionIter;
 use crate::compaction::{CompactionEngine, CompactionRequest};
 use crate::iterator::{AsyncIterator, AsyncMergingIterator, TwoLevelIterator, VecTableAccessor};
-use crate::table::TableBuilderOptions;
+use crate::table::{TableBuilderOptions, TableCache};
 use crate::util::BtreeComparable;
 use crate::version::{FileMetaData, KernelNumberContext, TableFile, VersionEdit};
 
@@ -15,6 +15,7 @@ pub async fn run_compaction_job<Engine: CompactionEngine>(
     mut engine: Engine,
     request: CompactionRequest,
     kernel: Arc<KernelNumberContext>,
+    table_cache: Arc<TableCache>,
 ) -> Result<()> {
     let mut iters: Vec<Box<dyn AsyncIterator>> = vec![];
     let mut level_tables: HashMap<u32, Vec<Arc<TableFile>>> = HashMap::default();
@@ -26,17 +27,20 @@ pub async fn run_compaction_job<Engine: CompactionEngine>(
                 level_tables.insert(*level, vec![f.clone()]);
             }
         } else {
-            iters.push(f.reader.new_iterator());
+            let reader = table_cache.get_table_reader(&f.meta).await?;
+            // do not handle the reader because iterator will handle a table-rep.
+            iters.push(reader.value().new_iterator());
         }
     }
     for (_level, mut tables) in level_tables {
         if tables.len() > 1 {
             let accessor = VecTableAccessor::new(tables);
-            let two_level_iter = TwoLevelIterator::new(accessor);
+            let two_level_iter = TwoLevelIterator::new(accessor, table_cache.clone());
             iters.push(Box::new(two_level_iter));
         } else {
             let table = tables.pop().unwrap();
-            iters.push(table.reader.new_iterator());
+            let reader = table_cache.get_table_reader(&table.meta).await?;
+            iters.push(reader.value().new_iterator());
         }
     }
     let iter = AsyncMergingIterator::new(iters, request.cf_options.comparator.clone());

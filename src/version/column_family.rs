@@ -1,7 +1,10 @@
 use crate::common::InternalKeyComparator;
 use crate::memtable::Memtable;
 use crate::options::ColumnFamilyOptions;
+use crate::table::{TableCache, TableReader};
+use crate::util::LRUCache;
 use crate::version::{SuperVersion, Version};
+use crate::ImmutableDBOptions;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -15,6 +18,7 @@ pub struct ColumnFamily {
     // changes.
     super_version_number: Arc<AtomicU64>,
     version: Arc<Version>,
+    cache: Arc<TableCache>,
     comparator: InternalKeyComparator,
     id: u32,
 
@@ -34,9 +38,12 @@ impl ColumnFamily {
         comparator: InternalKeyComparator,
         version: Arc<Version>,
         options: ColumnFamilyOptions,
+        db_options: Arc<ImmutableDBOptions>,
+        cache: Arc<LRUCache<Box<dyn TableReader>>>,
     ) -> Self {
         let mem = Arc::new(m);
         let options = Arc::new(options);
+        let cache = Arc::new(TableCache::new(cache, db_options, options.clone()));
         Self {
             log_number: version.get_log_number(),
             mem: mem.clone(),
@@ -48,6 +55,7 @@ impl ColumnFamily {
                 current: version.clone(),
                 version_number: 0,
                 column_family_options: options.clone(),
+                cache: cache.clone(),
             }),
             super_version_number: Arc::new(AtomicU64::new(0)),
             version,
@@ -55,6 +63,7 @@ impl ColumnFamily {
             comparator,
             name,
             options,
+            cache,
         }
     }
 
@@ -98,12 +107,14 @@ impl ColumnFamily {
         self.remove(next_log_number);
         let super_version_number = self.super_version_number.fetch_add(1, Ordering::SeqCst) + 1;
         let version = Arc::new(new_version);
+        let cache = self.cache.clone();
         let super_version = Arc::new(SuperVersion::new(
             self.id,
             self.mem.clone(),
             self.imms.clone(),
             version.clone(),
             self.options.clone(),
+            cache,
             super_version_number,
         ));
         self.super_version = super_version;
@@ -117,12 +128,14 @@ impl ColumnFamily {
     pub fn switch_memtable(&mut self, mem: Arc<Memtable>) {
         self.imms.push(self.mem.clone());
         let super_version_number = self.super_version_number.fetch_add(1, Ordering::SeqCst) + 1;
+        let cache = self.cache.clone();
         let super_version = Arc::new(SuperVersion::new(
             self.id,
             mem.clone(),
             self.imms.clone(),
             self.version.clone(),
             self.options.clone(),
+            cache,
             super_version_number,
         ));
         self.super_version = super_version;

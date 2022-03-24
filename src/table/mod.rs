@@ -18,6 +18,7 @@ use async_trait::async_trait;
 pub use block_based::{
     BlockBasedTableFactory, BlockBasedTableOptions, FilterBlockFactory, FullFilterBlockFactory,
 };
+pub use table_cache::{TableCache, TableReaderWrapper};
 
 #[async_trait]
 pub trait TableReader: 'static + Sync + Send {

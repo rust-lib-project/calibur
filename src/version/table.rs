@@ -86,11 +86,7 @@ pub struct TableFile {
 }
 
 impl TableFile {
-    pub fn new(
-        meta: FileMetaData,
-        fs: Arc<dyn FileSystem>,
-        path: &Path,
-    ) -> Self {
+    pub fn new(meta: FileMetaData, fs: Arc<dyn FileSystem>, path: &Path) -> Self {
         let smallest = extract_user_key(meta.smallest.as_ref()).to_vec();
         let largest = extract_user_key(meta.largest.as_ref()).to_vec();
         TableFile {

@@ -2,7 +2,7 @@ use crate::util::{BTreeIter, BtreeComparable, PageIterator};
 use crate::version::TableFile;
 use std::sync::Arc;
 
-pub trait TableAccessor: Send {
+pub trait TableAccessor: Send + Sync {
     fn seek(&mut self, key: &[u8]);
     fn seek_for_previous(&mut self, key: &[u8]);
     fn seek_to_first(&mut self);

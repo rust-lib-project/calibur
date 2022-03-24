@@ -2,7 +2,7 @@ use crate::common::{make_table_file_name, Result};
 use crate::table::{TableReader, TableReaderOptions};
 use crate::util::{CachableEntry, LRUCache};
 use crate::version::FileMetaData;
-use crate::{ColumnFamilyOptions, ImmutableDBOptions};
+use crate::{ColumnFamilyOptions, FileSystem, ImmutableDBOptions};
 use std::sync::Arc;
 
 pub struct TableReaderWrapper {
@@ -17,11 +17,25 @@ impl TableReaderWrapper {
 
 pub struct TableCache {
     cache: Arc<LRUCache<Box<dyn TableReader>>>,
-    options: Arc<ImmutableDBOptions>,
     cf_options: Arc<ColumnFamilyOptions>,
+    db_path: String,
+    fs: Arc<dyn FileSystem>,
 }
 
 impl TableCache {
+    pub fn new(
+        cache: Arc<LRUCache<Box<dyn TableReader>>>,
+        options: Arc<ImmutableDBOptions>,
+        cf_options: Arc<ColumnFamilyOptions>,
+    ) -> Self {
+        Self {
+            cache,
+            cf_options,
+            fs: options.fs.clone(),
+            db_path: options.db_path.clone(),
+        }
+    }
+
     pub async fn get_table_reader(
         &self,
         m: &FileMetaData,
@@ -29,8 +43,8 @@ impl TableCache {
         if let Some(entry) = self.cache.lookup(m.id()) {
             return Ok(entry);
         }
-        let fname = make_table_file_name(&self.options.db_path, m.id());
-        let file = self.options.fs.open_random_access_file(&fname)?;
+        let fname = make_table_file_name(&self.db_path, m.id());
+        let file = self.fs.open_random_access_file(&fname)?;
         let read_opts = TableReaderOptions {
             file_size: m.fd.file_size as usize,
             level: m.level,

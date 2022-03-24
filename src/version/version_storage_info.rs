@@ -1,6 +1,7 @@
-use crate::common::{extract_user_key, Result};
+use crate::common::Result;
 use crate::iterator::{AsyncIterator, BTreeTableAccessor, TwoLevelIterator};
 use crate::options::ReadOptions;
+use crate::table::TableCache;
 use crate::util::{BTree, BtreeComparable, PageIterator};
 use crate::version::TableFile;
 use std::sync::Arc;
@@ -172,23 +173,28 @@ impl VersionStorageInfo {
         }
     }
 
-    fn get_table(&self, key: &[u8], level: usize) -> Option<Arc<TableFile>> {
-        self.levels[level].tables.get(key)
-    }
-
-    pub fn append_iterator_to(&self, opts: &ReadOptions, iters: &mut Vec<Box<dyn AsyncIterator>>) {
+    pub async fn append_iterator_to(
+        &self,
+        opts: &ReadOptions,
+        cache: Arc<TableCache>,
+        iters: &mut Vec<Box<dyn AsyncIterator>>,
+    ) -> Result<()> {
         let l = self.level0.tables.len();
         for i in 0..l {
-            iters.push(self.level0.tables[l - i - 1].reader.new_iterator_opts(opts));
+            let table = cache
+                .get_table_reader(&self.level0.tables[l - i - 1].meta)
+                .await?;
+            iters.push(table.value().new_iterator_opts(opts));
         }
         for info in self.levels.iter() {
             if info.tables.size() > 0 {
                 let iter = info.tables.new_iterator();
                 let accessor = BTreeTableAccessor::new(iter);
-                let iter = TwoLevelIterator::new(accessor);
+                let iter = TwoLevelIterator::new(accessor, cache.clone());
                 iters.push(Box::new(iter));
             }
         }
+        Ok(())
     }
 
     pub fn get_level0_file_num(&self) -> usize {
@@ -262,25 +268,8 @@ impl VersionStorageInfo {
         }
     }
 
-    pub async fn get(&self, opts: &ReadOptions, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        let l = self.level0.tables.len();
-        for i in 0..l {
-            if let Some(v) = self.level0.tables[l - i - 1].reader.get(opts, key).await? {
-                return Ok(Some(v));
-            }
-        }
-        let l = self.levels.len();
-        for i in 0..l {
-            if self.levels[i].tables.size() == 0 {
-                continue;
-            }
-            if let Some(table) = self.levels[i].tables.get(extract_user_key(key)) {
-                if let Some(v) = table.reader.get(opts, key).await? {
-                    return Ok(Some(v));
-                }
-            }
-        }
-        Ok(None)
+    pub fn get_level0_tables(&self) -> &[Arc<TableFile>] {
+        &self.level0.tables
     }
 
     pub fn get_overlap_with_compaction(

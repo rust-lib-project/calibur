@@ -3,6 +3,7 @@ use crate::common::{Result, VALUE_TYPE_FOR_SEEK};
 use crate::iterator::{AsyncIterator, AsyncMergingIterator};
 use crate::memtable::Memtable;
 use crate::options::ReadOptions;
+use crate::table::TableCache;
 use crate::version::Version;
 use crate::ColumnFamilyOptions;
 use std::sync::Arc;
@@ -14,6 +15,7 @@ pub struct SuperVersion {
     pub current: Arc<Version>,
     pub column_family_options: Arc<ColumnFamilyOptions>,
     pub version_number: u64,
+    pub cache: Arc<TableCache>,
 }
 
 impl SuperVersion {
@@ -23,6 +25,7 @@ impl SuperVersion {
         imms: Vec<Arc<Memtable>>,
         current: Arc<Version>,
         column_family_options: Arc<ColumnFamilyOptions>,
+        cache: Arc<TableCache>,
         version_number: u64,
     ) -> SuperVersion {
         SuperVersion {
@@ -32,6 +35,7 @@ impl SuperVersion {
             current,
             column_family_options,
             version_number,
+            cache,
         }
     }
 
@@ -55,10 +59,30 @@ impl SuperVersion {
                 return Ok(Some(v));
             }
         }
-        self.current.get_storage_info().get(opts, &ikey).await
+        let ssts = self.current.get_storage_info();
+        let l0 = ssts.get_level0_tables();
+        for table in l0.iter().rev() {
+            let reader = self.cache.get_table_reader(&table.meta).await?;
+            if let Some(v) = reader.value().get(opts, &ikey).await? {
+                return Ok(Some(v));
+            }
+        }
+        let base_level = ssts.get_base_level_info();
+        for level in base_level {
+            if level.tables.size() == 0 {
+                continue;
+            }
+            if let Some(table) = level.tables.get(key) {
+                let reader = self.cache.get_table_reader(&table.meta).await?;
+                if let Some(v) = reader.value().get(opts, &ikey).await? {
+                    return Ok(Some(v));
+                }
+            }
+        }
+        Ok(None)
     }
 
-    pub fn new_iterator(&self, opts: &ReadOptions) -> Result<Box<dyn AsyncIterator>> {
+    pub async fn new_iterator(&self, opts: &ReadOptions) -> Result<Box<dyn AsyncIterator>> {
         let mut iters = vec![self.mem.new_async_iterator()];
         let l = self.imms.len();
         for i in 0..l {
@@ -66,7 +90,8 @@ impl SuperVersion {
         }
         self.current
             .get_storage_info()
-            .append_iterator_to(opts, &mut iters);
+            .append_iterator_to(opts, self.cache.clone(), &mut iters)
+            .await?;
         Ok(Box::new(AsyncMergingIterator::new(
             iters,
             self.column_family_options.comparator.clone(),

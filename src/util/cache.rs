@@ -171,6 +171,8 @@ pub struct LRUCacheShard<T> {
     usage: usize,
     capacity: usize,
 }
+unsafe impl<T> Send for LRUCacheShard<T> {}
+unsafe impl<T> Sync for LRUCacheShard<T> {}
 
 impl<T> LRUCacheShard<T> {
     fn new(capacity: usize, object_capacity: usize) -> Self {
@@ -379,6 +381,9 @@ pub struct CachableEntry<T> {
     cache: Arc<LRUCache<T>>,
     handle: *mut LRUHandle<T>,
 }
+
+unsafe impl<T> Send for CachableEntry<T> {}
+unsafe impl<T> Sync for CachableEntry<T> {}
 
 impl<T> CachableEntry<T> {
     pub fn value(&self) -> &T {

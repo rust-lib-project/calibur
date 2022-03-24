@@ -8,7 +8,6 @@ use futures::channel::oneshot::{channel as once_channel, Sender as OnceSender};
 use crate::compaction::CompactionEngine;
 use crate::log::{LogReader, LogWriter};
 use crate::options::{ColumnFamilyDescriptor, ImmutableDBOptions};
-use crate::table::TableReaderOptions;
 use crate::util::BtreeComparable;
 use crate::version::{
     FileMetaData, KernelNumberContext, TableFile, Version, VersionEdit, VersionSet,
@@ -94,7 +93,7 @@ impl Manifest {
     pub async fn recover_version(
         cf_descriptor: &[ColumnFamilyDescriptor],
         mut reader: Box<LogReader>,
-        options: &ImmutableDBOptions,
+        options: &Arc<ImmutableDBOptions>,
     ) -> Result<(HashMap<u64, Arc<TableFile>>, VersionSet)> {
         // let cf_options = cfs.iter().map(|d|d.options.clone()).collect();
         let mut record = vec![];
@@ -167,15 +166,7 @@ impl Manifest {
             let mut tables = vec![];
             for (_, m) in files_by_id {
                 let fname = make_table_file_name(&options.db_path, m.id());
-                let file = options.fs.open_random_access_file(&fname)?;
-                let mut read_opts = TableReaderOptions::default();
-                read_opts.file_size = m.fd.file_size as usize;
-                read_opts.level = m.level;
-                read_opts.largest_seqno = m.fd.largest_seqno;
-                read_opts.internal_comparator = cf_opts.comparator.clone();
-                read_opts.prefix_extractor = cf_opts.prefix_extractor.clone();
-                let table_reader = cf_opts.factory.open_reader(&read_opts, file).await?;
-                let table = Arc::new(TableFile::new(m, table_reader, options.fs.clone(), &fname));
+                let table = Arc::new(TableFile::new(m, options.fs.clone(), &fname));
                 files.insert(table.meta.id(), table.clone());
                 tables.push(table);
             }
@@ -206,7 +197,7 @@ impl Manifest {
         if has_max_column_family {
             kernel.set_max_column_family(max_column_family);
         }
-        let vs = VersionSet::new(cf_descriptor, kernel, options.fs.clone(), versions);
+        let vs = VersionSet::new(cf_descriptor, kernel, versions, options.clone());
         Ok((files, vs))
     }
 
@@ -284,23 +275,7 @@ impl Manifest {
                 }
                 for m in e.add_files {
                     let fname = make_table_file_name(&self.options.db_path, m.id());
-                    let file = self.options.fs.open_random_access_file(&fname)?;
-                    let read_opts = TableReaderOptions {
-                        file_size: m.fd.file_size as usize,
-                        level: m.level,
-                        largest_seqno: m.fd.largest_seqno,
-                        internal_comparator: opts.comparator.clone(),
-                        prefix_extractor: opts.prefix_extractor.clone(),
-                        ..Default::default()
-                    };
-
-                    let table_reader = opts.factory.open_reader(&read_opts, file).await?;
-                    let table = Arc::new(TableFile::new(
-                        m,
-                        table_reader,
-                        self.options.fs.clone(),
-                        &fname,
-                    ));
+                    let table = Arc::new(TableFile::new(m, self.options.fs.clone(), &fname));
                     self.files_by_id.insert(table.id(), table.clone());
                     to_add.push(table);
                 }
