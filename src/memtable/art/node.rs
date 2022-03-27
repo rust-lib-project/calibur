@@ -169,12 +169,12 @@ impl Node16 {
                 return self.children[i as usize].load(Ordering::Acquire);
             }
         }
-        if idx > 4 {
+        if idx > 8 {
             let key = self.keys[1].load(Ordering::Acquire);
-            let key1_len = idx - 4;
+            let key1_len = idx - 8;
             for i in 0..key1_len {
                 if ((key >> (i * 8)) & 255) == c as u64 {
-                    return self.children[(4 + i) as usize].load(Ordering::Acquire);
+                    return self.children[(8 + i) as usize].load(Ordering::Acquire);
                 }
             }
         }
@@ -190,12 +190,12 @@ impl Node16 {
                 return Some(&self.children[i as usize]);
             }
         }
-        if idx > 4 {
+        if idx > 8 {
             let key = self.keys[1].load(Ordering::Acquire);
-            let key1_len = idx - 4;
+            let key1_len = idx - 8;
             for i in 0..key1_len {
                 if ((key >> (i * 8)) & 255) == c as u64 {
-                    return Some(&self.children[(4 + i) as usize]);
+                    return Some(&self.children[(8 + i) as usize]);
                 }
             }
         }
@@ -204,6 +204,7 @@ impl Node16 {
 
     pub unsafe fn set_child(&self, c: u8, child: *mut Node) {
         let idx = self.children_len.load(Ordering::Relaxed);
+        self.children[idx as usize].store(child, Ordering::Release);
         if c > 0 {
             if idx < 8 {
                 let idx_value = (c as u64) << (idx * 8);
@@ -215,7 +216,6 @@ impl Node16 {
                 self.keys[1].store(key | idx_value, Ordering::Release);
             }
         }
-        self.children[idx as usize].store(child, Ordering::Release);
         self.children_len.store(idx + 1, Ordering::Release);
     }
 

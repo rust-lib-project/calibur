@@ -61,6 +61,8 @@ impl AdaptiveRadixTree {
                         let value = std::slice::from_raw_parts(leaf.value, 4);
                         let l = decode_fixed_uint32(value) as usize;
                         return Some(std::slice::from_raw_parts(leaf.value.add(4), l).to_vec());
+                    } else {
+                        return None;
                     }
                 }
                 let prefix_len = get_prefix_len(&*cur);
@@ -249,6 +251,8 @@ impl AdaptiveRadixTree {
                             new_node.prefix = n.prefix;
                             new_node.prefix_len = n.prefix_len;
                             new_node.children_len.store(0, Ordering::Relaxed);
+                            new_node.keys[0].store(0, Ordering::Relaxed);
+                            new_node.keys[1].store(0, Ordering::Relaxed);
                             n.iter_child(|c, child| {
                                 new_node.set_child(c, child);
                             });
@@ -267,6 +271,9 @@ impl AdaptiveRadixTree {
                             new_node.prefix = n.prefix;
                             new_node.prefix_len = n.prefix_len;
                             new_node.children_len.store(0, Ordering::Relaxed);
+                            for i in 0..32 {
+                                new_node.keys[i].store(0, Ordering::Relaxed);
+                            }
                             n.iter_child(|c, child| {
                                 new_node.set_child(c, child);
                             });
@@ -345,19 +352,46 @@ impl ArenaContext {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use rand::{Rng, RngCore, thread_rng};
     use super::*;
 
     #[test]
     fn test_tree_get_insert() {
+        let mut rng = thread_rng();
         let tree = AdaptiveRadixTree::new();
         let mut ctx = ArenaContext::new();
-        let keys = [b"abcdef".to_vec(), b"abccc".to_vec(), b"bcd".to_vec()];
-        for k in &keys {
-            tree.set(&mut ctx, k, b"a");
+        let mut kvs: HashMap<Vec<u8>, Vec<u8>> = HashMap::default();
+        for c in 0..100000 {
+            let k_len = (rng.next_u32() % 20) as usize + 8;
+            let mut k = vec![0u8; k_len];
+            rng.fill(k.as_mut_slice());
+            let mut encoded_key = vec![];
+            let zero_padding_groups = k.len() / 8;
+            for i in 0..zero_padding_groups {
+                let start = i * 8;
+                let end = (i + 1) * 8;
+                encoded_key.extend_from_slice(&k[start..end]);
+                encoded_key.push(!0u8);
+            }
+            encoded_key.extend_from_slice(&[0u8; 8]);
+            encoded_key.push(!8u8);
+            let v = rng.next_u64().to_le_bytes().to_vec();
+            if kvs.get(&encoded_key).is_some() {
+                continue;
+            }
+            tree.set(&mut ctx, &encoded_key, &v);
+            let ret = tree.get(&encoded_key);
+            assert!(ret.is_some(), "failed count: {}th, {:?}", c, encoded_key);
+            assert_eq!(ret.unwrap(), v.clone(), "failed count: {}th", c);
+            kvs.insert(encoded_key, v);
         }
-        for (i, k) in keys.iter().enumerate() {
-            let v = tree.get(k).unwrap();
-            assert_eq!(v, vec![b'a'], "the {}th key failed", i);
+        let mut c = 0;
+        for (k, v) in kvs {
+            let ret = tree.get(&k);
+            assert!(ret.is_some(), "failed count: {}th, {:?}", c, k);
+            assert_eq!(ret.unwrap(), v.clone(), "failed count: {}th", c);
+            c += 1;
         }
     }
 }
