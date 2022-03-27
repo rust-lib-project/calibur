@@ -1,4 +1,5 @@
 mod arena;
+mod art;
 mod concurrent_arena;
 mod context;
 mod inline_skiplist;

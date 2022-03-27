@@ -10,9 +10,35 @@ struct Block {
     offset: AtomicUsize,
 }
 
+impl Block {
+    pub fn new(data_size: usize) -> Box<Self> {
+        let mut block_size = BLOCK_DATA_SIZE;
+        while block_size < data_size {
+            if block_size + PAGE_DATA_SIZE < data_size {
+                block_size += (data_size - block_size) / PAGE_DATA_SIZE * PAGE_DATA_SIZE;
+            } else {
+                block_size += PAGE_DATA_SIZE;
+            }
+        }
+        Box::new(Block {
+            data: Vec::with_capacity(block_size),
+            offset: AtomicUsize::new(data_size),
+        })
+    }
+}
+
 pub struct ArenaContent {
     blocks: Vec<Box<Block>>,
     current: Box<Block>,
+}
+
+impl ArenaContent {
+    pub fn create_block(&mut self, data_size: usize) -> *mut u8 {
+        let block = Block::new(data_size);
+        let old = std::mem::replace(&mut self.current, block);
+        self.blocks.push(old);
+        self.current.data.as_mut_ptr()
+    }
 }
 
 impl ArenaContent {
@@ -66,24 +92,43 @@ impl ArenaShard {
         if offset + data_size < BLOCK_DATA_SIZE {
             return arena.current.data.as_mut_ptr().add(offset) as _;
         }
+        mem_size.fetch_add(arena.current.data.capacity(), Ordering::Relaxed);
+        let addr = arena.create_block(data_size);
+        self.current
+            .store(arena.current.as_mut(), Ordering::Release);
+        addr
+    }
+}
+pub struct SingleArena {
+    content: ArenaContent,
+    mem_size: AtomicUsize,
+}
 
-        let mut block_size = BLOCK_DATA_SIZE;
-        while block_size < data_size {
-            if block_size + PAGE_DATA_SIZE < data_size {
-                block_size += (data_size - block_size) / PAGE_DATA_SIZE * PAGE_DATA_SIZE;
-            } else {
-                block_size += PAGE_DATA_SIZE;
-            }
+impl SingleArena {
+    pub fn new() -> Self {
+        SingleArena {
+            content: ArenaContent::new(),
+            mem_size: AtomicUsize::new(0),
         }
-        let mut block = Box::new(Block {
-            data: Vec::with_capacity(block_size),
-            offset: AtomicUsize::new(data_size),
-        });
-        self.current.store(block.as_mut(), Ordering::Release);
-        let old = std::mem::replace(&mut arena.current, block);
-        mem_size.fetch_add(old.data.capacity(), Ordering::Relaxed);
-        arena.blocks.push(old);
-        arena.current.data.as_mut_ptr()
+    }
+
+    pub unsafe fn allocate(&mut self, alloc_size: usize) -> *mut u8 {
+        let data_size = ((alloc_size - 1) | (std::mem::size_of::<*mut u8>() - 1)) + 1;
+        let offset = self
+            .content
+            .current
+            .offset
+            .fetch_add(data_size, Ordering::SeqCst);
+        if offset + data_size < BLOCK_DATA_SIZE {
+            return self.content.current.data.as_mut_ptr().add(offset) as _;
+        }
+        self.mem_size
+            .fetch_add(self.content.current.data.capacity(), Ordering::Relaxed);
+        self.content.create_block(data_size)
+    }
+
+    fn mem_size(&self) -> usize {
+        self.content.current.offset.load(Ordering::Relaxed) + self.mem_size.load(Ordering::Relaxed)
     }
 }
 
