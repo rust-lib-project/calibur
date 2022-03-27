@@ -43,9 +43,7 @@ fn check_slice_prefix(a: &[u8], b: &[u8]) -> usize {
 
 pub unsafe fn check_prefix(node: &Node, key: &[u8]) -> usize {
     match node {
-        Node::LeafNode(n) => {
-            check_slice_prefix(std::slice::from_raw_parts(n.prefix, n.prefix_len), key)
-        }
+        Node::LeafNode(n) => check_slice_prefix(std::slice::from_raw_parts(n.key, n.key_len), key),
         Node::Node4(n) => {
             check_slice_prefix(std::slice::from_raw_parts(n.prefix, n.prefix_len), key)
         }
@@ -63,7 +61,7 @@ pub unsafe fn check_prefix(node: &Node, key: &[u8]) -> usize {
 
 pub fn get_prefix_len(node: &Node) -> usize {
     match node {
-        Node::LeafNode(n) => n.prefix_len,
+        Node::LeafNode(n) => n.key_len,
         Node::Node4(n) => n.prefix_len,
         Node::Node16(n) => n.prefix_len,
         Node::Node48(n) => n.prefix_len,
@@ -73,7 +71,7 @@ pub fn get_prefix_len(node: &Node) -> usize {
 
 pub unsafe fn get_prefix(node: &Node) -> *mut u8 {
     match node {
-        Node::LeafNode(n) => n.prefix,
+        Node::LeafNode(n) => n.key,
         Node::Node4(n) => n.prefix,
         Node::Node16(n) => n.prefix,
         Node::Node48(n) => n.prefix,
@@ -83,8 +81,8 @@ pub unsafe fn get_prefix(node: &Node) -> *mut u8 {
 
 #[repr(C)]
 pub struct LeafNode {
-    pub prefix_len: usize,
-    pub prefix: *mut u8,
+    pub key_len: usize,
+    pub key: *mut u8,
     pub value: *mut u8,
 }
 
